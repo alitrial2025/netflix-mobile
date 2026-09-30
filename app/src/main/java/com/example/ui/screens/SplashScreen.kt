@@ -44,6 +44,7 @@ fun SplashScreen(
     onSplashComplete: () -> Unit
 ) {
     val currentIsWarmupFinished by androidx.compose.runtime.rememberUpdatedState(isWarmupFinished)
+    val reusableWipePath = remember { Path() }
     var logoSize by remember { mutableStateOf(IntSize.Zero) }
 
     // Mathematically calculated proportions of "N" within the NETFLIX logo
@@ -132,8 +133,8 @@ fun SplashScreen(
         // Container for sliding
         Box(
             modifier = Modifier
-                .offset { IntOffset(slideOffset.value.roundToInt(), 0) }
                 .graphicsLayer {
+                    translationX = slideOffset.value
                     scaleX = tadumScale.value
                     scaleY = tadumScale.value
                     transformOrigin = TransformOrigin(nCenterPercent, 0.5f)
@@ -164,7 +165,8 @@ fun SplashScreen(
                                 32f * ratio.coerceIn(0f, 1f)
                             }
 
-                            val visiblePath = Path().apply {
+                            val visiblePath = reusableWipePath.apply {
+                                rewind()
                                 moveTo(0f, 0f)
                                 val steps = 12
                                 val stepHeight = size.height / steps

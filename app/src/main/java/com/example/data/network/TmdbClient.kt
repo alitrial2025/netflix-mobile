@@ -22,7 +22,7 @@ object TmdbClient {
         .build()
 
     private val logging = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = HttpLoggingInterceptor.Level.NONE
     }
 
     private val client = OkHttpClient.Builder()

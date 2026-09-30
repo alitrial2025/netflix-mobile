@@ -90,6 +90,7 @@ data class PlayerState(
     val showAudioSubtitleDialog: Boolean = false,
     val showEpisodeDrawer: Boolean = false,
     val showSkipIntro: Boolean = false,
+    val introWindow: IntroWindow? = null,
     val isResolving: Boolean = false,
     val resolvedUrl: String? = null,
     val resolveHeaders: Map<String, String> = emptyMap(),
@@ -122,6 +123,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private fun startNetMirrorWarmup() {
         viewModelScope.launch {
+            if (!hasCatalogNetwork()) { _isWarmupFinished.value = true; return@launch }
             android.util.Log.d("NetMirror", "🚀 starting NetMirror background session warmup...")
             val restored = netMirrorResolver.restoreSessionFromStorage()
             if (restored && netMirrorResolver.isSessionWarm()) {
@@ -140,15 +142,40 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private val catalogCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "catalog-cache.json"))
+
     private fun setupOfflineFallbacks() {
-        CatalogData.allMedia = emptyList()
-        _catalogMedia.value = emptyList()
+        // A failed refresh must not erase metadata needed by offline downloads and history.
+        CatalogData.allMedia = _catalogMedia.value
+    }
+
+    private var catalogRefreshJob: Job? = null
+
+    fun refreshCatalog() = fetchTmdbCatalog()
+
+    private fun hasCatalogNetwork(): Boolean {
+        val connectivity = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val network = connectivity?.activeNetwork ?: return false
+        val caps = connectivity.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun fetchTmdbCatalog() {
-        viewModelScope.launch {
+        if (catalogRefreshJob?.isActive == true) return
+        catalogRefreshJob = viewModelScope.launch {
             _isLoadingCatalog.value = true
             try {
+                val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+                if (_catalogMedia.value.isEmpty() && cached.isNotEmpty()) {
+                    _catalogMedia.value = cached
+                    CatalogData.allMedia = cached
+                }
+                if (!hasCatalogNetwork()) { setupOfflineFallbacks(); return@launch }
+                val requestSlots = kotlinx.coroutines.sync.Semaphore(4)
+                fun request(block: suspend () -> com.example.data.network.TmdbResponse) = async {
+                    requestSlots.acquire()
+                    try { requestCatalogSection(block) } finally { requestSlots.release() }
+                }
                 val apiKey = TmdbClient.apiKey
                 if (apiKey.isEmpty() || apiKey == "PLACEHOLDER") {
                     setupOfflineFallbacks()
@@ -156,27 +183,27 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val trendingMoviesDeferred = async { TmdbClient.service.getTrendingMovies(apiKey) }
-                val trendingTvDeferred = async { TmdbClient.service.getTrendingTv(apiKey) }
-                val topRatedMoviesDeferred = async { TmdbClient.service.getTopRatedMovies(apiKey) }
-                val topRatedTvDeferred = async { TmdbClient.service.getTopRatedTv(apiKey) }
-                val upcomingMoviesDeferred = async { TmdbClient.service.getUpcomingMovies(apiKey) }
-                val popularMoviesDeferred = async { TmdbClient.service.getPopularMovies(apiKey) }
-                val popularTvDeferred = async { TmdbClient.service.getPopularTv(apiKey) }
+                val trendingMoviesDeferred = request { TmdbClient.service.getTrendingMovies(apiKey) }
+                val trendingTvDeferred = request { TmdbClient.service.getTrendingTv(apiKey) }
+                val topRatedMoviesDeferred = request { TmdbClient.service.getTopRatedMovies(apiKey) }
+                val topRatedTvDeferred = request { TmdbClient.service.getTopRatedTv(apiKey) }
+                val upcomingMoviesDeferred = request { TmdbClient.service.getUpcomingMovies(apiKey) }
+                val popularMoviesDeferred = request { TmdbClient.service.getPopularMovies(apiKey) }
+                val popularTvDeferred = request { TmdbClient.service.getPopularTv(apiKey) }
 
                 // Category & Genre Discovery (Crime, Action, Sci-Fi, Thriller, Animation, Comedy, Drama, Horror, Romance, Documentary)
-                val crimeMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") } catch (_: Exception) { null } }
-                val crimeTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") } catch (_: Exception) { null } }
-                val actionMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") } catch (_: Exception) { null } }
-                val sciFiMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") } catch (_: Exception) { null } }
-                val animationMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") } catch (_: Exception) { null } }
-                val comedyMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") } catch (_: Exception) { null } }
-                val dramaMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") } catch (_: Exception) { null } }
-                val horrorMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") } catch (_: Exception) { null } }
-                val romanceMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") } catch (_: Exception) { null } }
-                val docMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") } catch (_: Exception) { null } }
-                val actionTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") } catch (_: Exception) { null } }
-                val sciFiTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") } catch (_: Exception) { null } }
+                val crimeMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") }
+                val crimeTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") }
+                val actionMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") }
+                val sciFiMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") }
+                val animationMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") }
+                val comedyMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") }
+                val dramaMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") }
+                val horrorMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") }
+                val romanceMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") }
+                val docMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") }
+                val actionTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") }
+                val sciFiTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") }
 
                 val trendingMoviesTask = trendingMoviesDeferred.await()
                 val trendingTvTask = trendingTvDeferred.await()
@@ -201,31 +228,31 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
                 val mappedItems = mutableListOf<MediaItem>()
 
-                trendingMoviesTask.results.forEach { result ->
+                trendingMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isTrending = true))
                 }
 
-                trendingTvTask.results.forEach { result ->
+                trendingTvTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, isTrending = true))
                 }
 
-                topRatedMoviesTask.results.take(10).forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isTrending = true, topRank = index + 1))
+                topRatedMoviesTask?.results?.take(10)?.forEachIndexed { index, result ->
+                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, topRank = index + 1))
                 }
 
-                topRatedTvTask.results.take(10).forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, isTrending = true, topRank = index + 1))
+                topRatedTvTask?.results?.take(10)?.forEachIndexed { index, result ->
+                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, topRank = index + 1))
                 }
 
-                upcomingMoviesTask.results.forEach { result ->
+                upcomingMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isComingSoon = true))
                 }
 
-                popularMoviesTask.results.forEach { result ->
+                popularMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE))
                 }
 
-                popularTvTask.results.forEach { result ->
+                popularTvTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW))
                 }
 
@@ -245,83 +272,18 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
                 // Pure TMDB real catalog
                 val deduplicated = mappedItems.distinctBy { it.id }
+                if (deduplicated.isEmpty()) throw java.io.IOException("Catalog is unavailable")
+                withContext(Dispatchers.IO) { catalogCache.write(deduplicated) }
                 CatalogData.allMedia = deduplicated
                 _catalogMedia.value = deduplicated
 
                 // Fetch real TMDB logo titles in background for hero and trending items
                 fetchLogosForItems(apiKey, deduplicated)
 
-                // Wire real TMDB items into Continue Watching, Watchlist, Downloads, Likes & Notifications per profile
-                val tvShows = deduplicated.filter { it.type == MediaType.TV_SHOW }
-                val movies = deduplicated.filter { it.type == MediaType.MOVIE }
-                val kidMedia = deduplicated.filter { it.isKidSafe(12) }
+                // History and notifications come from actual user actions, not catalog fixtures.
 
-                val tv1 = tvShows.getOrNull(0)
-                val tv2 = tvShows.getOrNull(1)
-                val tv3 = tvShows.getOrNull(2)
-                val tv4 = tvShows.getOrNull(3)
-                val m1 = movies.getOrNull(0)
-                val m2 = movies.getOrNull(1)
-                val m3 = movies.getOrNull(2)
-
-                val kid1 = kidMedia.getOrNull(0) ?: tv1
-                val kid2 = kidMedia.getOrNull(1) ?: m1
-                val kid3 = kidMedia.getOrNull(2) ?: tv2
-
-                // Seed Watched Trailers with real TMDB items
-                val realTrailers = mutableListOf<TrailerItem>()
-                if (tv1 != null) realTrailers.add(TrailerItem("tr_1", tv1, "${tv1.title} — Official Trailer", "2:15", "Watched 2h ago"))
-                if (m1 != null) realTrailers.add(TrailerItem("tr_2", m1, "${m1.title} — Main Trailer", "1:52", "Watched yesterday"))
-                if (tv2 != null) realTrailers.add(TrailerItem("tr_3", tv2, "${tv2.title} — Teaser", "1:30", "Watched 3 days ago"))
-                if (realTrailers.isNotEmpty()) {
-                    _watchedTrailers.value = realTrailers
-                }
-
-                // Seed Notifications with real TMDB items
-                val realNotifs = mutableListOf<NotificationItem>()
-                if (tv1 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_1",
-                            title = "New Episode Streaming",
-                            message = "${tv1.title} is now available in 4K HDR.",
-                            timestamp = "2 hours ago",
-                            mediaId = tv1.id,
-                            isRead = false,
-                            iconType = NotificationIconType.NEW_SEASON
-                        )
-                    )
-                }
-                if (m1 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_2",
-                            title = "Trending #1 Today",
-                            message = "${m1.title} is the #1 movie today.",
-                            timestamp = "Yesterday",
-                            mediaId = m1.id,
-                            isRead = false,
-                            iconType = NotificationIconType.BELL
-                        )
-                    )
-                }
-                if (tv2 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_3",
-                            title = "Download Ready",
-                            message = "${tv2.title} S1:E1 is downloaded for offline viewing.",
-                            timestamp = "2 days ago",
-                            mediaId = tv2.id,
-                            isRead = true,
-                            iconType = NotificationIconType.DOWNLOAD
-                        )
-                    )
-                }
-                if (realNotifs.isNotEmpty()) {
-                    _notifications.value = realNotifs
-                }
-
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 // If TMDB loading fails for network reasons, do offline fallbacks gracefully
                 setupOfflineFallbacks()
@@ -1545,6 +1507,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 if (anyUpdated) {
                     CatalogData.allMedia = updatedItems
                     _catalogMedia.value = updatedItems
+                    withContext(Dispatchers.IO) { catalogCache.write(updatedItems) }
                 }
             } catch (_: Exception) {}
         }
@@ -1627,8 +1590,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     // Playback Controls
     private var resolveJob: Job? = null
     private var playbackRequestGeneration = 0L
+    private val progressTracker = PlaybackProgressTracker()
 
     fun playMedia(media: MediaItem, episode: Episode? = null) {
+        persistPlayerProgress(_playerState.value)
+        progressTracker.reset()
         val requestGeneration = ++playbackRequestGeneration
         if (isMovieLocked(media)) {
             if (_userSubscription.value.isGuest) {
@@ -1684,7 +1650,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
             if (requestGeneration != playbackRequestGeneration) return@launch
             if (progressEntity != null) {
-                if (targetEpisode == null || targetEpisode.id == progressEntity.episodeId) {
+                if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
+                    episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
                     if (progressEntity.positionSeconds > 10 && progressEntity.positionSeconds < totalSec - 60) {
                         _playerState.update { it.copy(currentPositionSec = progressEntity.positionSeconds) }
                     }
@@ -1777,17 +1744,20 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updatePlayerProgress(currentSec: Int, totalDurationSec: Int) {
-        val showSkip = currentSec in 5..30
+        val currentState = _playerState.value
+        val showSkip = currentState.sourceId != "Trailer" && currentState.media?.type == MediaType.TV_SHOW &&
+            currentState.introWindow?.let { currentSec in it.startSec until it.endSec } == true
         val dur = if (totalDurationSec > 0) totalDurationSec else _playerState.value.durationSec
         _playerState.update { it.copy(currentPositionSec = currentSec, durationSec = dur, showSkipIntro = showSkip) }
 
         val media = _playerState.value.media ?: return
         val ep = _playerState.value.episode
+        val coordinates = episodeCoordinates(ep?.id)
         val isTrailer = _playerState.value.sourceId == "Trailer"
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
 
-        if (!isTrailer && syncManager.isAuthenticated() && currentSec > 0 && currentSec % 10 == 0) {
+        if (!isTrailer && syncManager.isAuthenticated() && progressTracker.shouldSave(currentSec)) {
             viewModelScope.launch {
                 if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
                 repository.saveProgress(
@@ -1796,7 +1766,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     currentSec,
                     dur,
                     ep?.id,
-                    ep?.title
+                    ep?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -1805,6 +1777,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     totalSeconds = dur,
                     episodeId = ep?.id ?: "",
                     episodeTitle = ep?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second,
                     lastWatchedTimestamp = System.currentTimeMillis()
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
@@ -1813,8 +1787,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
 
         // Smart Downloads Auto-Watch Trigger
-        if (!isTrailer && currentSec > 0 && dur > 60 && (currentSec >= dur - 15 || currentSec >= (dur * 0.9f).toInt())) {
-            if (ep != null && _isSmartDownloadsEnabled.value) {
+        if (!isTrailer && currentSec > 0 && dur > 60 && currentSec >= dur - 15) {
+            if (ep != null && _isSmartDownloadsEnabled.value && progressTracker.claimSmartDownload()) {
                 downloadManager.handleEpisodeWatched(
                     profileId = _activeProfile.value.id,
                     media = media,
@@ -1837,7 +1811,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun seekTo(seconds: Int) {
         val state = _playerState.value
         val clamped = seconds.coerceIn(0, state.durationSec)
-        val showSkip = clamped in 5..30
+        val showSkip = state.sourceId != "Trailer" && state.media?.type == MediaType.TV_SHOW &&
+            state.introWindow?.let { clamped in it.startSec until it.endSec } == true
         _playerState.update { it.copy(currentPositionSec = clamped, showSkipIntro = showSkip) }
     }
 
@@ -1852,9 +1827,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun skipIntro() {
-        seekTo(85)
+        val intro = _playerState.value.introWindow ?: return
+        seekTo(intro.endSec)
         _playerState.update { it.copy(showSkipIntro = false) }
         showToast("Skipped Intro")
+    }
+
+    fun updateIntroWindow(window: IntroWindow?) {
+        _playerState.update { it.copy(introWindow = window) }
     }
 
     fun setPlaybackSpeed(speed: Float) {
@@ -1895,8 +1875,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val media = state.media ?: return
         val currentEp = state.episode ?: return
         val episodes = media.episodes
-        val nextIdx = episodes.indexOfFirst { it.id == currentEp.id } + 1
-        if (nextIdx in episodes.indices) {
+        val nextIdx = nextEpisodeIndex(currentEp.id, episodes.map { it.id })
+        if (nextIdx != null) {
             playMedia(media, episodes[nextIdx])
             showToast("Playing Next Episode: ${episodes[nextIdx].title}")
         } else {
@@ -1908,6 +1888,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         playbackRequestGeneration++
         resolveJob?.cancel()
         val current = _playerState.value
+        persistPlayerProgress(current)
+        val devId = "phone_${syncManager.getUserId()}"
+        syncManager.stopActiveStreamHeartbeat(devId)
+        _playerState.value = PlayerState(media = null)
+    }
+
+    private fun persistPlayerProgress(current: PlayerState) {
+        val coordinates = episodeCoordinates(current.episode?.id)
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
         if (current.media != null && current.sourceId != "Trailer" && current.currentPositionSec > 0 && syncManager.isAuthenticated()) {
@@ -1919,7 +1907,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     current.currentPositionSec,
                     current.durationSec,
                     current.episode?.id,
-                    current.episode?.title
+                    current.episode?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -1928,15 +1918,23 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     totalSeconds = current.durationSec,
                     episodeId = current.episode?.id ?: "",
                     episodeTitle = current.episode?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second,
                     lastWatchedTimestamp = System.currentTimeMillis()
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
                 syncManager.syncWatchProgressToCloud(progressEntity, current.media)
             }
         }
-        val devId = "phone_${syncManager.getUserId()}"
-        syncManager.stopActiveStreamHeartbeat(devId)
-        _playerState.value = PlayerState(media = null)
+    }
+
+    fun savePlayerProgress() = persistPlayerProgress(_playerState.value)
+
+    override fun onCleared() {
+        resolveJob?.cancel()
+        downloadManager.close()
+        syncManager.cleanup()
+        super.onCleared()
     }
 
     // Search Actions

@@ -153,6 +153,9 @@ interface NetflixDao {
     @Query("SELECT * FROM downloads WHERE profileId = :profileId ORDER BY downloadedAt DESC")
     suspend fun getAllDownloadsOnce(profileId: String): List<DownloadEntity>
 
+    @Query("SELECT COUNT(*) FROM downloads WHERE downloadKey = :downloadKey")
+    suspend fun downloadReferenceCount(downloadKey: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveDownload(download: DownloadEntity)
 
@@ -194,4 +197,3 @@ interface NetflixDao {
     @Query("DELETE FROM reminders")
     suspend fun clearReminders()
 }
-

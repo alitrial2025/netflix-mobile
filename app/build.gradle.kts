@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -10,7 +11,7 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
-val releaseSigningProperties = java.util.Properties().apply {
+val releaseSigningProperties = Properties().apply {
   val signingFile = file("release-signing.properties")
   if (signingFile.exists()) signingFile.inputStream().use { load(it) }
 }
@@ -81,6 +82,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+    // Newer detector reads Kotlin metadata from current Room/coroutines dependencies.
+    lintChecks("androidx.compose.runtime:runtime-lint:1.9.4")
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   implementation(libs.accompanist.permissions)

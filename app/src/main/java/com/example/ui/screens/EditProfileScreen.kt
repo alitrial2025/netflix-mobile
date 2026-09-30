@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,9 +75,9 @@ fun EditProfileScreen(
     onOpenAvatarPicker: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var profileName by remember(profile.id, profile.name) { mutableStateOf(profile.name) }
-    var isKids by remember(profile.id, profile.isKids) { mutableStateOf(profile.isKids) }
-    var maxAge by remember(profile.id, profile.maxAge) { mutableStateOf(profile.maxAge) }
+    var profileName by rememberSaveable(profile.id) { mutableStateOf(profile.name) }
+    var isKids by rememberSaveable(profile.id) { mutableStateOf(profile.isKids) }
+    var maxAge by rememberSaveable(profile.id) { mutableStateOf(profile.maxAge) }
     var maturityRating by remember(profile.id) {
         mutableStateOf(
             when {
@@ -140,7 +143,7 @@ fun EditProfileScreen(
                 TextButton(
                     onClick = {
                         val updated = profile.copy(
-                            name = profileName.ifBlank { profile.name },
+                            name = profileName.trim().filterNot { it.isISOControl() }.take(25).ifBlank { profile.name },
                             isKids = isKids,
                             maxAge = if (isKids) maxAge.coerceAtMost(12) else maxAge,
                             pin = if (isProfileLocked) profilePin?.takeIf { it.isNotBlank() } else null,
@@ -151,7 +154,7 @@ fun EditProfileScreen(
                         )
                         onSaveProfile(updated)
                     },
-                    enabled = profileName.isNotBlank(),
+                    enabled = profileName.trim().isNotBlank(),
                     modifier = Modifier.testTag("edit_profile_save_button")
                 ) {
                     Text(
@@ -167,6 +170,8 @@ fun EditProfileScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .navigationBarsPadding()
+                    .imePadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
@@ -224,7 +229,7 @@ fun EditProfileScreen(
 
                 OutlinedTextField(
                     value = profileName,
-                    onValueChange = { profileName = it },
+                    onValueChange = { profileName = it.filterNot { char -> char.isISOControl() }.take(25) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("edit_profile_name_input"),

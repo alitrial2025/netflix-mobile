@@ -127,6 +127,7 @@ fun MyNetflixScreen(
     onNavigateToSearch: () -> Unit,
     onShowToast: (String) -> Unit,
     onOpenTvPair: () -> Unit = {},
+    onOpenClips: () -> Unit = {},
     userSubscription: com.example.data.model.UserSubscription = com.example.data.model.UserSubscription(),
     onOpenAuth: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -136,7 +137,7 @@ fun MyNetflixScreen(
     var selectedListFilter by remember { mutableStateOf(MyListFilter.ALL) }
     var showAllMyList by remember { mutableStateOf(false) }
 
-    val unreadNotificationsCount = notifications.count { !it.isRead }.coerceAtLeast(1)
+    val unreadNotificationsCount = notifications.count { !it.isRead }
 
     val filteredWatchlist = remember(watchlist, selectedListFilter) {
         when (selectedListFilter) {
@@ -278,7 +279,7 @@ fun MyNetflixScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (unreadNotificationsCount > 0) "$unreadNotificationsCount" else "5",
+                            text = "$unreadNotificationsCount",
                             color = Color.White,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
@@ -403,6 +404,15 @@ fun MyNetflixScreen(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        TextButton(
+            onClick = onOpenClips,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("my_netflix_clips")
+        ) {
+            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
+            Spacer(Modifier.width(8.dp))
+            Text("Explore Clips", color = Color.White)
+        }
 
         // TV Sign In Card
         Box(

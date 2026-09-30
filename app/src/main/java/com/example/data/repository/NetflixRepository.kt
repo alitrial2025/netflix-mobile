@@ -147,6 +147,8 @@ class NetflixRepository(private val dao: NetflixDao) {
         dao.deleteDownload(profileId, downloadKey)
     }
 
+    suspend fun isDownloadReferenced(downloadKey: String): Boolean = dao.downloadReferenceCount(downloadKey) > 0
+
     suspend fun clearDownloads(profileId: String) {
         dao.clearAllDownloads(profileId)
     }
@@ -192,4 +194,3 @@ class NetflixRepository(private val dao: NetflixDao) {
         dao.clearProfiles()
     }
 }
-

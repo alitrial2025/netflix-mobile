@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.local.ReminderEntity
 import com.example.data.local.WatchProgressEntity
 import com.example.data.model.MediaItem
@@ -62,6 +65,8 @@ fun HomeScreen(
     reminders: List<ReminderEntity> = emptyList(),
     onToggleReminder: ((MediaItem) -> Unit)? = null,
     isLoadingCatalog: Boolean = false,
+    onRetryCatalog: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
     onContinueWatchingOptionsClick: (MediaItem, WatchProgressEntity) -> Unit = { _, _ -> },
     onAmbientColorChange: (Color) -> Unit = {},
     listState: LazyListState = rememberLazyListState()
@@ -98,7 +103,7 @@ fun HomeScreen(
                     } else catalogMedia.firstOrNull()
                 }
                 CategoryFilter.ALL, CategoryFilter.GAMES -> {
-                    catalogMedia.firstOrNull { it.isTrending && it.backdropUrl?.isNotBlank() == true }
+                    com.example.ui.components.featuredTrendingMedia(catalogMedia)
                         ?: catalogMedia.firstOrNull { it.backdropUrl?.isNotBlank() == true }
                         ?: catalogMedia.firstOrNull()
                 }
@@ -113,9 +118,17 @@ fun HomeScreen(
                 .background(NetflixBlack),
             contentAlignment = Alignment.Center
         ) {
-            NetflixSpinner(
-                size = 50.dp
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                if (isLoadingCatalog) NetflixSpinner(size = 50.dp)
+                else {
+                    androidx.compose.material3.Text("You’re offline", color = Color.White, fontSize = 22.sp)
+                    Spacer(Modifier.height(12.dp))
+                    androidx.compose.material3.Text("Your downloads are still available. Reconnect to browse more titles.", color = Color.White.copy(alpha = .7f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(Modifier.height(20.dp))
+                    androidx.compose.material3.Button(onClick = onOpenDownloads) { androidx.compose.material3.Text("Open downloads") }
+                    androidx.compose.material3.TextButton(onClick = onRetryCatalog) { androidx.compose.material3.Text("Try again") }
+                }
+            }
         }
         return
     }
@@ -138,8 +151,8 @@ fun HomeScreen(
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     // Dynamically scale hero card with comfortable height across all screen devices
-    val heroCardHeight = remember(configuration.screenHeightDp) {
-        (configuration.screenHeightDp * 0.70f).dp.coerceIn(550.dp, 680.dp)
+    val heroCardHeight = remember(configuration.screenWidthDp) {
+        ((configuration.screenWidthDp - 52) * 1.50f).dp.coerceIn(420.dp, 650.dp)
     }
 
     val gradientEndPx = remember(heroCardHeight, density) {
@@ -339,14 +352,13 @@ fun HomeScreen(
     }
 
     val maxScrollOffsetPx = remember(density) { with(density) { 134.dp.toPx() } }
-    val scrollState = rememberScrollState()
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
             .drawBehind {
-                val scrollY = scrollState.value.toFloat()
+                val scrollY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else gradientEndPx
                 val currentStartY = -scrollY
                 val currentEndY = gradientEndPx - scrollY
 
@@ -368,15 +380,11 @@ fun HomeScreen(
                 drawRect(brush = gradient)
             }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(bottom = 110.dp)
-        ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
+            item(key = "hero") {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
-            Spacer(modifier = Modifier.height(134.dp))
+            Spacer(modifier = Modifier.height(116.dp))
 
             // Hero Banner with poster color extraction and adaptive phone height
             val onHeroPlay = remember(heroMedia, onPlayClick) { { onPlayClick(heroMedia) } }
@@ -386,7 +394,7 @@ fun HomeScreen(
             
             val parallaxOffset = remember {
                 derivedStateOf {
-                    (scrollState.value.toFloat() * 0.35f).coerceAtMost(maxScrollOffsetPx * 0.35f)
+                    (listState.firstVisibleItemScrollOffset.toFloat() * 0.35f).coerceAtMost(maxScrollOffsetPx * 0.35f)
                 }
             }
 
@@ -413,8 +421,10 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            }
             // Continue Watching Row (only if present)
             if (continueWatchingList.isNotEmpty()) {
+                item(key = "continue_watching") {
                 ContinueWatchingSectionRow(
                     title = "Continue Watching for ${activeProfile.name}",
                     items = continueWatchingList,
@@ -423,10 +433,11 @@ fun HomeScreen(
                     onOptionsClick = onContinueWatchingOptionsClick
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                }
             }
 
             // Catalog Section Rows based on selected category filter
-            uiSections.forEach { section ->
+            items(uiSections, key = { it.id }) { section ->
                 val rowState = rememberLazyListState()
                 MediaSectionRow(
                     section = section,

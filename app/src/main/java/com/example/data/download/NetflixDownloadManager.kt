@@ -15,18 +15,23 @@ import com.example.MainActivity
 import com.example.R
 import com.example.data.CatalogData
 import com.example.data.NetMirrorResolver
+import com.example.data.AppCookieJar
 import com.example.data.local.DownloadEntity
 import com.example.data.model.Episode
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.repository.NetflixRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +43,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -79,15 +86,19 @@ class NetflixDownloadManager(
     private val netMirrorResolver: NetMirrorResolver
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val transferSlots = kotlinx.coroutines.sync.Semaphore(2)
+    private val cookieJar = AppCookieJar()
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .cookieJar(cookieJar)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
-        .followSslRedirects(true)
+        .followSslRedirects(false)
         .build()
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
+    private val downloadOwners = ConcurrentHashMap<String, String>()
     
     private val _downloadTasks = MutableStateFlow<Map<String, DownloadTaskInfo>>(emptyMap())
     val downloadTasks: StateFlow<Map<String, DownloadTaskInfo>> = _downloadTasks.asStateFlow()
@@ -117,10 +128,11 @@ class NetflixDownloadManager(
             val caps = cm.getNetworkCapabilities(network) ?: return false
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
         } catch (_: Exception) {
-            true
+            false
         }
     }
 
+    @Synchronized
     fun startOrResumeDownload(
         profileId: String,
         media: MediaItem,
@@ -140,6 +152,7 @@ class NetflixDownloadManager(
             emitToast("Download already in progress for ${media.title}")
             return
         }
+        val previousJob = activeJobs[key]
 
         // Unpause if paused
         _pausedDownloadKeys.update { it - key }
@@ -160,13 +173,21 @@ class NetflixDownloadManager(
         updateTask(initialTask)
         _downloadingProgress.update { it + (key to initialTask.progress.coerceAtLeast(0.02f)) }
 
-        val job = scope.launch {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                executeDownloadPipeline(profileId, media, episode, key, episodeTitle, isHighQuality)
+                // A canceled transfer must close its file before the next transfer opens it.
+                previousJob?.join()
+                transferSlots.acquire()
+                try {
+                    executeDownloadPipeline(profileId, media, episode, key, episodeTitle, isHighQuality)
+                } finally {
+                    transferSlots.release()
+                }
             } catch (ce: CancellationException) {
                 // Job cancelled / paused
                 Log.d("DownloadManager", "Download job cancelled for $key")
             } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
                 Log.e("DownloadManager", "Fatal download error for $key: ${e.message}", e)
                 val failedTask = _downloadTasks.value[key]?.copy(
                     status = DownloadTaskStatus.ERROR,
@@ -175,11 +196,15 @@ class NetflixDownloadManager(
                 if (failedTask != null) updateTask(failedTask)
                 emitToast("Download failed for ${media.title}: ${e.message}")
             } finally {
-                activeJobs.remove(key)
+                currentCoroutineContext()[Job]?.let {
+                    if (activeJobs.remove(key, it) && key !in _pausedDownloadKeys.value) downloadOwners.remove(key, profileId)
+                }
             }
         }
 
         activeJobs[key] = job
+        downloadOwners[key] = profileId
+        job.start()
     }
 
     private suspend fun executeDownloadPipeline(
@@ -207,21 +232,23 @@ class NetflixDownloadManager(
         } else 0
         val epNum = episode?.episodeNumber ?: 0
 
-        val resolvedStream = try {
-            netMirrorResolver.resolveNet52(tmdbId, type, season, epNum)
-        } catch (e: Exception) {
-            Log.w("DownloadManager", "NetMirror stream resolution fallback: ${e.message}")
-            null
+        val resolvedStream = netMirrorResolver.resolveNet52(tmdbId, type, season, epNum)
+        currentCoroutineContext().ensureActive()
+        val targetUrl = resolvedStream.url
+        val targetHeaders = resolvedStream.headers
+        val extension = if (DownloadTransferPolicy.isHls(targetUrl) || targetUrl.substringBefore('?').endsWith(".ts")) "ts" else "mp4"
+        val destinationFile = File(downloadsDir, "$key.$extension")
+        val partFile = File(downloadsDir, "$key.mp4.part")
+        val sourceFile = File(downloadsDir, "$key.source")
+        val sourceFingerprint = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(targetUrl.toByteArray()).joinToString("") { "%02x".format(it) }
+        if (!sourceFile.isFile || sourceFile.readText() != sourceFingerprint) {
+            if (partFile.exists()) require(partFile.delete()) { "Could not replace partial download" }
+            sourceFile.writeText(sourceFingerprint)
         }
 
-        val destinationFile = File(downloadsDir, "$key.mp4")
-        val partFile = File(downloadsDir, "$key.mp4.part")
-
-        val targetUrl = resolvedStream?.url ?: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-        val targetHeaders = resolvedStream?.headers ?: emptyMap()
-
         // 2. Perform stream transfer to .part file
-        var downloadSuccess = performStreamDownload(
+        val downloadSuccess = performStreamDownload(
             streamUrl = targetUrl,
             headers = targetHeaders,
             partFile = partFile,
@@ -231,23 +258,6 @@ class NetflixDownloadManager(
             isHighQuality = isHighQuality
         )
 
-        // 3. Fallback check if primary failed or resulted in 0 bytes
-        if (!downloadSuccess || partFile.length() == 0L) {
-            if (currentCoroutineContext().isActive && !_pausedDownloadKeys.value.contains(key)) {
-                Log.w("DownloadManager", "Primary stream failed for $key, falling back to reliable CDN...")
-                val fallbackUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-                downloadSuccess = performStreamDownload(
-                    streamUrl = fallbackUrl,
-                    headers = emptyMap(),
-                    partFile = partFile,
-                    key = key,
-                    media = media,
-                    episodeTitle = episodeTitle,
-                    isHighQuality = isHighQuality
-                )
-            }
-        }
-
         // If paused or cancelled, retain .part file for instant resumption
         if (!currentCoroutineContext().isActive || _pausedDownloadKeys.value.contains(key)) {
             return@withContext
@@ -255,13 +265,12 @@ class NetflixDownloadManager(
 
         if (downloadSuccess && partFile.exists() && partFile.length() > 0) {
             // Atomic rename from .part to final .mp4
-            if (destinationFile.exists()) destinationFile.delete()
-            val renamed = partFile.renameTo(destinationFile)
-            val finalFile = if (renamed) destinationFile else partFile
-
-            val expectedSizeMb = episode?.downloadSizeMb ?: 420
-            val actualSizeMb = (finalFile.length() / (1024 * 1024)).toInt().coerceAtLeast(expectedSizeMb)
-            val captionsJson = resolvedStream?.let { serializeCaptions(it.captions) }
+            if (destinationFile.exists()) require(destinationFile.delete()) { "Could not replace completed download" }
+            require(partFile.renameTo(destinationFile)) { "Could not finalize download" }
+            val finalFile = destinationFile
+            sourceFile.delete()
+            val actualSizeMb = ((finalFile.length() + 1024 * 1024 - 1) / (1024 * 1024)).toInt()
+            val captionsJson = serializeCaptions(resolvedStream.captions)
 
             // 4. Save to Room database
             repository.addDownload(
@@ -306,13 +315,41 @@ class NetflixDownloadManager(
         episodeTitle: String?,
         isHighQuality: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        val isHls = streamUrl.contains(".m3u8") || streamUrl.contains("playlist") || streamUrl.contains("hls")
+        val isHls = DownloadTransferPolicy.isHls(streamUrl)
 
         if (isHls) {
             downloadHlsStream(streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality)
         } else {
             downloadDirectStream(streamUrl, headers, partFile, key, media, episodeTitle)
         }
+    }
+
+    private fun downloadRequest(url: String, headers: Map<String, String>, sourceUrl: String): Request {
+        val origin = (headers.entries.firstOrNull { it.key.equals("Origin", true) }?.value ?: sourceUrl).toHttpUrlOrNull()
+        val cookieHeader = headers.entries.firstOrNull { it.key.equals("Cookie", true) }?.value.orEmpty()
+        if (origin != null && cookieHeader.isNotBlank()) {
+            cookieJar.saveFromResponse(origin, cookieHeader.split(';').mapNotNull {
+                Cookie.parse(origin, "${it.trim()}; Path=/; Secure")
+            })
+        }
+        return Request.Builder().url(url).apply {
+            headers.forEach { (name, value) ->
+                if (!name.equals("Cookie", true) &&
+                    (!name.equals("Authorization", true) || url.toHttpUrlOrNull()?.host == sourceUrl.toHttpUrlOrNull()?.host)) {
+                    header(name, value)
+                }
+            }
+            header("Accept-Encoding", "identity")
+        }.build()
+    }
+
+    private suspend fun <T> withResponse(request: Request, block: suspend (okhttp3.Response) -> T): T = coroutineScope {
+        val call = httpClient.newCall(request)
+        // Cancel the socket too: coroutine cancellation alone does not interrupt execute()/read().
+        val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { call.cancel() }
+        }
+        try { call.execute().use { block(it) } } finally { cancellation.cancel() }
     }
 
     private suspend fun downloadDirectStream(
@@ -323,106 +360,53 @@ class NetflixDownloadManager(
         media: MediaItem,
         episodeTitle: String?
     ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val existingBytes = if (partFile.exists()) partFile.length() else 0L
-            val reqBuilder = Request.Builder().url(streamUrl)
-            headers.forEach { (k, v) -> reqBuilder.header(k, v) }
-
-            // Enable HTTP Range for chunk resumption if partial bytes exist
-            var isResume = false
-            if (existingBytes > 0L) {
-                reqBuilder.header("Range", "bytes=$existingBytes-")
-                isResume = true
-            }
-
-            val response = httpClient.newCall(reqBuilder.build()).execute()
-            val body = response.body
-            if (!response.isSuccessful || body == null) {
-                response.close()
-                return@withContext false
-            }
-
-            val isPartialContent = response.code == 206
-            val isFullContent = response.code == 200
-
-            val append = isResume && isPartialContent
-            val outputStream = FileOutputStream(partFile, append)
-            val inputStream = body.byteStream()
-
-            val contentLength = body.contentLength()
-            val totalExpectedBytes = if (isPartialContent && contentLength > 0) {
-                existingBytes + contentLength
-            } else if (contentLength > 0) {
-                contentLength
-            } else {
-                350L * 1024L * 1024L // fallback estimate
-            }
-
-            var totalRead = if (append) existingBytes else 0L
-            val buffer = ByteArray(65536)
-            var bytesRead: Int
-
-            var lastProgressTime = 0L
-            var lastBytesTime = System.currentTimeMillis()
-            var bytesSinceLastCalc = 0L
-            var currentSpeed = 0L
-
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                if (!currentCoroutineContext().isActive || _pausedDownloadKeys.value.contains(key)) {
-                    outputStream.flush()
-                    outputStream.close()
-                    inputStream.close()
-                    response.close()
-                    return@withContext false
+        val existingBytes = if (partFile.exists()) partFile.length() else 0L
+        val request = downloadRequest(streamUrl, headers, streamUrl).newBuilder().apply {
+            if (existingBytes > 0L) header("Range", "bytes=$existingBytes-")
+        }.build()
+        withResponse(request) { response ->
+            currentCoroutineContext().ensureActive()
+            val body = response.body ?: error("Download response is empty")
+            val plan = DownloadTransferPolicy.directPlan(
+                response.code, existingBytes, response.header("Content-Range"), body.contentLength()
+            )
+            var totalRead = if (plan.append) existingBytes else 0L
+            FileOutputStream(partFile, plan.append).use { output ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    var lastUpdate = android.os.SystemClock.elapsedRealtime()
+                    var bytesSinceUpdate = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        if (_pausedDownloadKeys.value.contains(key)) return@withResponse false
+                        val count = input.read(buffer)
+                        currentCoroutineContext().ensureActive()
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        totalRead += count
+                        bytesSinceUpdate += count
+                        require(plan.expectedBytes < 0L || totalRead <= plan.expectedBytes) { "Download exceeds declared size" }
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastUpdate >= 500L) {
+                            val speed = bytesSinceUpdate * 1000L / (now - lastUpdate).coerceAtLeast(1L)
+                            val progress = if (plan.expectedBytes > 0L)
+                                (totalRead.toDouble() / plan.expectedBytes).toFloat().coerceIn(0.02f, 0.99f) else 0.02f
+                            updateTask(DownloadTaskInfo(
+                                downloadKey = key, mediaId = media.id, mediaTitle = media.title,
+                                episodeTitle = episodeTitle, progress = progress, downloadedBytes = totalRead,
+                                totalBytes = plan.expectedBytes.coerceAtLeast(0L), speedBytesPerSec = speed,
+                                speedFormatted = formatSpeed(speed), status = DownloadTaskStatus.DOWNLOADING
+                            ))
+                            _downloadingProgress.update { it + (key to progress) }
+                            lastUpdate = now
+                            bytesSinceUpdate = 0L
+                        }
+                    }
                 }
-
-                outputStream.write(buffer, 0, bytesRead)
-                totalRead += bytesRead
-                bytesSinceLastCalc += bytesRead
-
-                val now = System.currentTimeMillis()
-                if (now - lastBytesTime >= 1000) {
-                    val seconds = (now - lastBytesTime) / 1000f
-                    currentSpeed = (bytesSinceLastCalc / seconds).toLong()
-                    bytesSinceLastCalc = 0L
-                    lastBytesTime = now
-                }
-
-                if (now - lastProgressTime >= 150) {
-                    val progress = (totalRead.toFloat() / totalExpectedBytes.toFloat()).coerceIn(0.02f, 0.99f)
-                    val speedStr = formatSpeed(currentSpeed)
-                    val remainingBytes = (totalExpectedBytes - totalRead).coerceAtLeast(0L)
-                    val etaSeconds = if (currentSpeed > 0) (remainingBytes / currentSpeed).toInt() else 0
-                    val etaStr = formatEta(etaSeconds)
-
-                    val updatedInfo = DownloadTaskInfo(
-                        downloadKey = key,
-                        mediaId = media.id,
-                        mediaTitle = media.title,
-                        episodeTitle = episodeTitle,
-                        progress = progress,
-                        downloadedBytes = totalRead,
-                        totalBytes = totalExpectedBytes,
-                        speedBytesPerSec = currentSpeed,
-                        speedFormatted = speedStr,
-                        etaFormatted = etaStr,
-                        status = DownloadTaskStatus.DOWNLOADING
-                    )
-                    updateTask(updatedInfo)
-                    _downloadingProgress.update { it + (key to progress) }
-                    lastProgressTime = now
-                }
+                output.fd.sync()
             }
-
-            outputStream.flush()
-            outputStream.close()
-            inputStream.close()
-            response.close()
-
-            partFile.length() > 0L
-        } catch (e: Exception) {
-            Log.e("DownloadManager", "Direct stream download error: ${e.message}", e)
-            false
+            currentCoroutineContext().ensureActive()
+            DownloadTransferPolicy.isComplete(partFile.length(), plan.expectedBytes)
         }
     }
 
@@ -435,151 +419,73 @@ class NetflixDownloadManager(
         episodeTitle: String?,
         isHighQuality: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            // 1. Fetch manifest
-            val manifestReq = Request.Builder().url(streamUrl)
-            headers.forEach { (k, v) -> manifestReq.header(k, v) }
-            val manifestRes = httpClient.newCall(manifestReq.build()).execute()
-            val manifestBody = manifestRes.body?.string() ?: ""
-            manifestRes.close()
-
-            if (manifestBody.isBlank()) return@withContext false
-
-            var variantUrl = streamUrl
-            if (manifestBody.contains("#EXT-X-STREAM-INF:")) {
-                val lines = manifestBody.lines()
-                val variants = mutableListOf<Pair<Int, String>>()
-                for (i in lines.indices) {
-                    val line = lines[i].trim()
-                    if (line.startsWith("#EXT-X-STREAM-INF:") && i + 1 < lines.size) {
-                        val bandwidth = extractBandwidth(line)
-                        val nextLine = lines[i + 1].trim()
-                        if (nextLine.isNotEmpty() && !nextLine.startsWith("#")) {
-                            variants.add(bandwidth to resolveRelativeUrl(streamUrl, nextLine))
-                        }
-                    }
-                }
-                if (variants.isNotEmpty()) {
-                    variants.sortByDescending { it.first }
-                    variantUrl = if (isHighQuality) {
-                        variants.first().second
-                    } else {
-                        variants.getOrNull(variants.size / 2)?.second ?: variants.first().second
-                    }
-                }
+        suspend fun fetchPlaylist(url: String): String = withResponse(downloadRequest(url, headers, streamUrl)) {
+            require(it.isSuccessful) { "Playlist request returned HTTP ${it.code}" }
+            it.body?.string()?.takeIf { text -> text.isNotBlank() } ?: error("Empty playlist")
+        }
+        val manifest = fetchPlaylist(streamUrl)
+        currentCoroutineContext().ensureActive()
+        val lines = manifest.lines().map { it.trim() }
+        val variants = lines.mapIndexedNotNull { index, line ->
+            if (!line.startsWith("#EXT-X-STREAM-INF:")) null else {
+                val next = lines.drop(index + 1).firstOrNull { it.isNotBlank() && !it.startsWith('#') }
+                    ?: error("Missing video variant")
+                extractBandwidth(line) to resolveRelativeUrl(streamUrl, next)
             }
-
-            val mediaPlaylist = if (variantUrl != streamUrl) {
-                val vReq = Request.Builder().url(variantUrl)
-                headers.forEach { (k, v) -> vReq.header(k, v) }
-                val vRes = httpClient.newCall(vReq.build()).execute()
-                val body = vRes.body?.string() ?: ""
-                vRes.close()
-                body
-            } else {
-                manifestBody
-            }
-
-            val segmentUrls = mutableListOf<String>()
-            val mediaLines = mediaPlaylist.lines()
-            for (i in mediaLines.indices) {
-                val line = mediaLines[i].trim()
-                if (line.startsWith("#EXTINF:") && i + 1 < mediaLines.size) {
-                    val nextLine = mediaLines[i + 1].trim()
-                    if (nextLine.isNotEmpty() && !nextLine.startsWith("#")) {
-                        segmentUrls.add(resolveRelativeUrl(variantUrl, nextLine))
-                    }
-                }
-            }
-
-            if (segmentUrls.isEmpty()) return@withContext false
-
-            val outputStream = FileOutputStream(partFile, true)
-            val totalSegments = segmentUrls.size
-            var completedSegments = 0
-            var totalBytesWritten = partFile.length()
-            var lastSpeedTime = System.currentTimeMillis()
-            var bytesSinceSpeedCalc = 0L
-            var currentSpeed = 0L
-
-            for (i in 0 until totalSegments) {
-                if (!currentCoroutineContext().isActive || _pausedDownloadKeys.value.contains(key)) {
-                    outputStream.flush()
-                    outputStream.close()
-                    return@withContext false
-                }
-
-                val segUrl = segmentUrls[i]
-                var segBytes: ByteArray? = null
-                
-                // Retry segment up to 3 times
-                for (retry in 1..3) {
+        }.sortedByDescending { it.first }
+        // Separate audio renditions cannot be represented by a concatenated TS file.
+        require(lines.none { it.startsWith("#EXT-X-MEDIA:") && it.contains("TYPE=AUDIO") && it.contains("URI=") }) {
+            "This video requires separate audio tracks that are not supported for offline viewing yet"
+        }
+        val variantUrl = if (variants.isEmpty()) streamUrl else if (isHighQuality)
+            variants.first().second else variants[variants.size / 2].second
+        val playlist = if (variantUrl == streamUrl) manifest else fetchPlaylist(variantUrl)
+        val segments = DownloadTransferPolicy.hlsSegments(playlist, variantUrl)
+        currentCoroutineContext().ensureActive()
+        // HLS retries restart from segment zero; appending the playlist duplicates earlier segments.
+        FileOutputStream(partFile, false).use { output ->
+            var totalBytes = 0L
+            for ((index, segmentUrl) in segments.withIndex()) {
+                currentCoroutineContext().ensureActive()
+                if (_pausedDownloadKeys.value.contains(key)) return@withContext false
+                var segment: ByteArray? = null
+                var failure: Exception? = null
+                for (attempt in 1..3) {
                     try {
-                        val segReq = Request.Builder().url(segUrl)
-                        headers.forEach { (k, v) -> segReq.header(k, v) }
-                        val segRes = httpClient.newCall(segReq.build()).execute()
-                        if (segRes.isSuccessful) {
-                            segBytes = segRes.body?.bytes()
-                            segRes.close()
-                            break
+                        withResponse(downloadRequest(segmentUrl, headers, streamUrl)) { response ->
+                            require(response.isSuccessful) { "Segment request returned HTTP ${response.code}" }
+                            segment = response.body?.bytes()?.takeIf { it.isNotEmpty() } ?: error("Empty video segment")
                         }
-                        segRes.close()
-                    } catch (e: Exception) {
-                        Log.w("DownloadManager", "Segment $i attempt $retry failed: ${e.message}")
-                        delay(250L * retry)
+                        currentCoroutineContext().ensureActive()
+                        break
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        failure = error
+                        if (attempt < 3) delay(attempt * 250L)
                     }
                 }
-
-                if (segBytes != null && segBytes.isNotEmpty()) {
-                    outputStream.write(segBytes)
-                    totalBytesWritten += segBytes.size
-                    bytesSinceSpeedCalc += segBytes.size
-                }
-                completedSegments++
-
-                val now = System.currentTimeMillis()
-                if (now - lastSpeedTime >= 1000) {
-                    val sec = (now - lastSpeedTime) / 1000f
-                    currentSpeed = (bytesSinceSpeedCalc / sec).toLong()
-                    bytesSinceSpeedCalc = 0L
-                    lastSpeedTime = now
-                }
-
-                val progress = (completedSegments.toFloat() / totalSegments.toFloat()).coerceIn(0.02f, 0.99f)
-                val speedStr = formatSpeed(currentSpeed)
-                val remainingSegs = totalSegments - completedSegments
-                val etaStr = if (completedSegments > 0) "${remainingSegs * 2}s left" else ""
-
-                val updatedInfo = DownloadTaskInfo(
-                    downloadKey = key,
-                    mediaId = media.id,
-                    mediaTitle = media.title,
-                    episodeTitle = episodeTitle,
-                    progress = progress,
-                    downloadedBytes = totalBytesWritten,
-                    totalBytes = (totalBytesWritten / completedSegments) * totalSegments,
-                    speedBytesPerSec = currentSpeed,
-                    speedFormatted = speedStr,
-                    etaFormatted = etaStr,
+                val bytes = segment ?: throw java.io.IOException("Video segment ${index + 1} could not be downloaded", failure)
+                output.write(bytes)
+                totalBytes += bytes.size
+                val progress = ((index + 1).toFloat() / segments.size).coerceIn(0.02f, 0.99f)
+                updateTask(DownloadTaskInfo(
+                    downloadKey = key, mediaId = media.id, mediaTitle = media.title,
+                    episodeTitle = episodeTitle, progress = progress, downloadedBytes = totalBytes,
                     status = DownloadTaskStatus.DOWNLOADING
-                )
-                updateTask(updatedInfo)
+                ))
                 _downloadingProgress.update { it + (key to progress) }
             }
-
-            outputStream.flush()
-            outputStream.close()
-            partFile.length() > 0L
-        } catch (e: Exception) {
-            Log.e("DownloadManager", "HLS download error: ${e.message}", e)
-            false
+            output.fd.sync()
         }
+        currentCoroutineContext().ensureActive()
+        partFile.length() > 0L
     }
 
+    @Synchronized
     fun pauseDownload(key: String) {
         _pausedDownloadKeys.update { it + key }
         activeJobs[key]?.cancel()
-        activeJobs.remove(key)
 
         val task = _downloadTasks.value[key]?.copy(
             status = DownloadTaskStatus.PAUSED,
@@ -590,32 +496,51 @@ class NetflixDownloadManager(
         emitToast("Download paused")
     }
 
+    @Synchronized
     fun cancelDownload(key: String) {
         _pausedDownloadKeys.update { it - key }
-        activeJobs[key]?.cancel()
-        activeJobs.remove(key)
+        val previousJob = activeJobs[key]
+        previousJob?.cancel()
         _downloadingProgress.update { it - key }
         _downloadTasks.update { it - key }
 
-        try {
-            val partFile = File(downloadsDir, "$key.mp4.part")
-            if (partFile.exists()) partFile.delete()
-            val mp4File = File(downloadsDir, "$key.mp4")
-            if (mp4File.exists()) mp4File.delete()
-        } catch (e: Exception) {
-            Log.e("DownloadManager", "Error removing download files for $key", e)
+        val cleanupJob = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                previousJob?.join()
+                if (!repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
+            } finally {
+                currentCoroutineContext()[Job]?.let {
+                    if (activeJobs.remove(key, it)) downloadOwners.remove(key)
+                }
+            }
         }
+        activeJobs[key] = cleanupJob
+        cleanupJob.start()
         emitToast("Download canceled")
+    }
+
+    private fun deleteDownloadFiles(key: String) {
+        for (suffix in listOf(".mp4", ".ts", ".mp4.part", ".source")) {
+            File(downloadsDir, key + suffix).let { if (it.exists()) it.delete() }
+        }
+    }
+
+    private suspend fun deleteUnreferencedFiles(key: String) {
+        if (activeJobs[key]?.isActive != true && !repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
+    }
+
+    fun close() {
+        scope.coroutineContext[Job]?.cancel()
     }
 
     fun deleteCompletedDownload(profileId: String, downloadKey: String) {
         scope.launch {
+            val transfer = activeJobs[downloadKey]?.takeIf { downloadOwners[downloadKey] == profileId }
+            transfer?.cancel()
+            transfer?.join()
             repository.removeDownload(profileId, downloadKey)
             try {
-                val mp4File = File(downloadsDir, "$downloadKey.mp4")
-                if (mp4File.exists()) mp4File.delete()
-                val partFile = File(downloadsDir, "$downloadKey.mp4.part")
-                if (partFile.exists()) partFile.delete()
+                deleteUnreferencedFiles(downloadKey)
             } catch (e: Exception) {
                 Log.e("DownloadManager", "Error deleting download file: ${e.message}")
             }
@@ -625,9 +550,20 @@ class NetflixDownloadManager(
 
     fun clearAllDownloads(profileId: String) {
         scope.launch {
-            repository.clearDownloads(profileId)
+            val keys = repository.getDownloadsOnce(profileId).map { it.downloadKey }.toSet() +
+                downloadOwners.filterValues { it == profileId }.keys
             try {
-                downloadsDir.listFiles()?.forEach { it.delete() }
+                for (key in keys) {
+                    val transfer = activeJobs[key]?.takeIf { downloadOwners[key] == profileId }
+                    transfer?.cancel()
+                    transfer?.join()
+                    repository.removeDownload(profileId, key)
+                    deleteUnreferencedFiles(key)
+                    _downloadingProgress.update { it - key }
+                    _downloadTasks.update { it - key }
+                    _pausedDownloadKeys.update { it - key }
+                    downloadOwners.remove(key, profileId)
+                }
             } catch (e: Exception) {
                 Log.e("DownloadManager", "Error clearing downloads dir: ${e.message}")
             }
@@ -653,10 +589,7 @@ class NetflixDownloadManager(
             
             // 1. Remove watched episode to immediately free up space on device
             repository.removeDownload(profileId, watchedKey)
-            val mp4File = File(downloadsDir, "$watchedKey.mp4")
-            if (mp4File.exists()) mp4File.delete()
-            val partFile = File(downloadsDir, "$watchedKey.mp4.part")
-            if (partFile.exists()) partFile.delete()
+            deleteUnreferencedFiles(watchedKey)
 
             // 2. Find next episode in the series
             val currentIdx = media.episodes.indexOfFirst { it.id == watchedEpisode.id }
@@ -760,7 +693,10 @@ class NetflixDownloadManager(
     }
 
     private fun updateTask(info: DownloadTaskInfo) {
-        _downloadTasks.update { it + (info.downloadKey to info) }
+        _downloadTasks.update { tasks ->
+            val previous = tasks[info.downloadKey]
+            tasks + (info.downloadKey to info.copy(episodeId = info.episodeId ?: previous?.episodeId))
+        }
     }
 
     private fun emitToast(msg: String) {

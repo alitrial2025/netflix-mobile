@@ -68,6 +68,8 @@ import com.example.ui.viewmodel.CategoryFilter
 import com.example.ui.viewmodel.NavigationTab
 import com.example.ui.viewmodel.NetflixViewModel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class MainActivity : ComponentActivity() {
     private var viewModelInstance: NetflixViewModel? = null
@@ -135,7 +137,9 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val showAvatarPicker by viewModel.showAvatarPicker.collectAsStateWithLifecycle()
     val transitioningProfile by viewModel.transitioningProfile.collectAsStateWithLifecycle()
     val selectedMedia by viewModel.selectedMedia.collectAsStateWithLifecycle()
-    val playerState by viewModel.playerState.collectAsStateWithLifecycle()
+    val isPlayerVisible by remember(viewModel) {
+        viewModel.playerState.map { it.media != null }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedSearchGenre by viewModel.selectedSearchGenre.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
@@ -194,7 +198,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 showAvatarPicker ||
                 showEditProfileScreen ||
                 showDownloadsScreen ||
-                playerState.media != null ||
+                isPlayerVisible ||
                 selectedMedia != null ||
                 continueWatchingOptions != null ||
                 showNotificationsSheet ||
@@ -209,7 +213,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             showAvatarPicker -> viewModel.closeAvatarPicker()
             showEditProfileScreen -> viewModel.closeEditProfile()
             showDownloadsScreen -> viewModel.openDownloadsScreen(false)
-            playerState.media != null -> viewModel.closePlayer()
+            isPlayerVisible -> viewModel.closePlayer()
             continueWatchingOptions != null -> viewModel.closeContinueWatchingOptions()
             showNotificationsSheet -> viewModel.openNotificationsSheet(false)
             showSettingsDrawer -> viewModel.openSettingsDrawer(false)
@@ -229,10 +233,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             containerColor = Color.Transparent
-        ) { _ ->
+        ) { contentPadding ->
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxSize().padding(contentPadding)
             ) {
                 // Tab Content Switcher
                 AnimatedContent(
@@ -295,6 +299,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                         reminders = reminders,
                                         onToggleReminder = stableOnToggleReminder,
                                         isLoadingCatalog = isLoadingCatalog,
+                                        onRetryCatalog = viewModel::refreshCatalog,
+                                        onOpenDownloads = stableOnDownloadsClick,
                                         activeProfile = activeProfile,
                                         categoryFilter = categoryFilter,
                                         selectedGenre = selectedCategoryGenre,
@@ -319,6 +325,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                     onDownloadsClick = stableOnDownloadsClick,
                                     onNotificationsClick = stableOnNotificationsClick,
                                     isGamesAllowed = userSubscription.isGamesAllowed,
+                                    unreadNotificationCount = notifications.count { !it.isRead },
                                     modifier = Modifier.align(Alignment.TopCenter),
                                     scrollFractionProvider = { scrollFractionState.value }
                                 )
@@ -409,6 +416,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 onNavigateToSearch = { viewModel.selectTab(NavigationTab.SEARCH) },
                                 onShowToast = { viewModel.showToast(it) },
                                 onOpenTvPair = { viewModel.openTvPairScreen(true) },
+                                onOpenClips = { viewModel.selectTab(NavigationTab.CLIPS) },
                                 userSubscription = userSubscription,
                                 onOpenAuth = { viewModel.openAuthScreen(true) }
                             )
@@ -417,7 +425,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 }
 
                 // Floating Bottom Navigation Bar
-                if (playerState.media == null && selectedMedia == null) {
+                if (!isPlayerVisible && selectedMedia == null) {
                     val onTabSelected = remember(viewModel) { { tab: NavigationTab -> viewModel.selectTab(tab) } }
                     val ambientColorProvider = remember(viewModel) { { viewModel.ambientColor.value } }
                     NetflixBottomNav(
@@ -432,7 +440,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                 // Modal Detail Screen Overlay
                 AnimatedVisibility(
-                    visible = selectedMedia != null && playerState.media == null,
+                    visible = selectedMedia != null && !isPlayerVisible,
                     enter = slideInVertically { it } + fadeIn(),
                     exit = slideOutVertically { it } + fadeOut()
                 ) {
@@ -470,41 +478,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             }
         }
 
-        // Full Screen Video Player Overlay
-        AnimatedVisibility(
-            visible = playerState.media != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            VideoPlayerScreen(
-                playerState = playerState,
-                modifier = Modifier.fillMaxSize(),
-                onClose = { viewModel.closePlayer() },
-                onTogglePlayPause = { viewModel.togglePlayPause() },
-                onSeek = { viewModel.seekTo(it) },
-                onSkipForward10 = { viewModel.skipForward10() },
-                onSkipBackward10 = { viewModel.skipBackward10() },
-                onSkipIntro = { viewModel.skipIntro() },
-                onSetSpeed = { viewModel.setPlaybackSpeed(it) },
-                onSetAudio = { viewModel.setAudioTrack(it) },
-                onSetSubtitle = { viewModel.setSubtitleTrack(it) },
-                onToggleLock = { viewModel.toggleLock() },
-                onToggleControls = { viewModel.toggleControlsVisibility() },
-                onShowAudioSubtitles = { viewModel.showAudioSubtitleDialog(it) },
-                onShowEpisodesDrawer = { viewModel.showEpisodeDrawer(it) },
-                onPlayNextEpisode = { viewModel.playNextEpisode() },
-                onSelectEpisode = { ep ->
-                    playerState.media?.let { m -> viewModel.playMedia(m, ep) }
-                },
-                onOpenCast = { viewModel.openCastDialog(true) },
-                onSetRating = { rating ->
-                    playerState.media?.let { m -> viewModel.setRating(m.id, rating) }
-                },
-                onUpdateProgress = { cur, dur -> viewModel.updatePlayerProgress(cur, dur) },
-                onTrailerEnded = { viewModel.onTrailerPlaybackEnded() }
-            )
-        }
+        PlayerOverlay(viewModel, isAutoPlayNextEnabled && activeProfile.autoplayNext)
 
         // Profile Picker Full Screen Overlay
         AnimatedVisibility(
@@ -514,7 +488,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         ) {
             ProfilePickerSheet(
                 profiles = profiles,
-                featuredMedia = catalogMedia.firstOrNull(),
+                featuredMedia = com.example.ui.components.featuredTrendingMedia(catalogMedia),
                 activeProfile = activeProfile,
                 userSubscription = userSubscription,
                 onSelectProfile = { viewModel.selectProfile(it) },
@@ -582,7 +556,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
         // Continue Watching 3-Dots Options Bottom Sheet Overlay
         AnimatedVisibility(
-            visible = continueWatchingOptions != null && playerState.media == null,
+            visible = continueWatchingOptions != null && !isPlayerVisible,
             enter = fadeIn() + slideInVertically { it },
             exit = fadeOut() + slideOutVertically { it }
         ) {
@@ -874,5 +848,48 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
+    val playerState by viewModel.playerState.collectAsStateWithLifecycle()
+    // Full Screen Video Player Overlay
+    AnimatedVisibility(
+        visible = playerState.media != null,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        VideoPlayerScreen(
+            playerState = playerState,
+            modifier = Modifier.fillMaxSize(),
+            onClose = { viewModel.closePlayer() },
+            onTogglePlayPause = { viewModel.togglePlayPause() },
+            onSeek = { viewModel.seekTo(it) },
+            onSkipForward10 = { viewModel.skipForward10() },
+            onSkipBackward10 = { viewModel.skipBackward10() },
+            onSkipIntro = { viewModel.skipIntro() },
+            onSetSpeed = { viewModel.setPlaybackSpeed(it) },
+            onSetAudio = { viewModel.setAudioTrack(it) },
+            onSetSubtitle = { viewModel.setSubtitleTrack(it) },
+            onToggleLock = { viewModel.toggleLock() },
+            onToggleControls = { viewModel.toggleControlsVisibility() },
+            onShowAudioSubtitles = { viewModel.showAudioSubtitleDialog(it) },
+            onShowEpisodesDrawer = { viewModel.showEpisodeDrawer(it) },
+            onPlayNextEpisode = { viewModel.playNextEpisode() },
+            autoPlayNext = autoPlayNext,
+            onSetIntroWindow = { viewModel.updateIntroWindow(it) },
+            onPersistProgress = { viewModel.savePlayerProgress() },
+            onSelectEpisode = { ep ->
+                playerState.media?.let { media -> viewModel.playMedia(media, ep) }
+            },
+            onOpenCast = { viewModel.openCastDialog(true) },
+            onSetRating = { rating ->
+                playerState.media?.let { media -> viewModel.setRating(media.id, rating) }
+            },
+            onUpdateProgress = { current, duration -> viewModel.updatePlayerProgress(current, duration) },
+            onTrailerEnded = { viewModel.onTrailerPlaybackEnded() }
+        )
     }
 }

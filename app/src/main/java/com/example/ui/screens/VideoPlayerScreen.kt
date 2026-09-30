@@ -74,6 +74,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -114,6 +118,7 @@ import com.example.ui.theme.NetflixCardBg
 import com.example.ui.theme.NetflixDarkGray
 import com.example.ui.theme.NetflixRed
 import com.example.ui.viewmodel.PlayerState
+import kotlinx.coroutines.ensureActive
 
 data class PlayerTrackOption(
     val id: String,
@@ -170,6 +175,9 @@ fun VideoPlayerScreen(
     currentRating: String? = null,
     onUpdateProgress: ((Int, Int) -> Unit)? = null,
     onTrailerEnded: (() -> Unit)? = null,
+    autoPlayNext: Boolean = false,
+    onSetIntroWindow: (com.example.ui.viewmodel.IntroWindow?) -> Unit = {},
+    onPersistProgress: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val media = playerState.media ?: return
@@ -178,6 +186,17 @@ fun VideoPlayerScreen(
     var isBuffering by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val latestPlayerState by androidx.compose.runtime.rememberUpdatedState(playerState)
+    val latestProgressCallback by rememberUpdatedState(onUpdateProgress)
+    val latestTrailerEnded by rememberUpdatedState(onTrailerEnded)
+    val latestTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
+    val latestNextEpisode by rememberUpdatedState(onPlayNextEpisode)
+    val latestAutoPlayNext by rememberUpdatedState(autoPlayNext)
+    val latestPersistProgress by rememberUpdatedState(onPersistProgress)
+    val latestSetIntroWindow by rememberUpdatedState(onSetIntroWindow)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var playbackActive by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
     var playbackError by remember { mutableStateOf<String?>(null) }
 
     var availableAudioTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
@@ -194,15 +213,61 @@ fun VideoPlayerScreen(
         }
     }
 
+    fun reportProgress() {
+        val state = latestPlayerState
+        val expectedId = "${state.media?.id}:${state.episode?.id.orEmpty()}"
+        if (state.media == null || exoPlayer.currentMediaItem?.mediaId != expectedId) return
+        val duration = exoPlayer.duration
+        if (duration > 0L && duration != C.TIME_UNSET) {
+            latestProgressCallback?.invoke((exoPlayer.currentPosition.coerceAtLeast(0L) / 1000L).toInt(),
+                (duration / 1000L).toInt())
+        }
+    }
+
+    LaunchedEffect(media.id, playerState.episode?.id, playerState.captions, playerState.sourceId) {
+        if (media.type != MediaType.TV_SHOW || playerState.sourceId == "Trailer") return@LaunchedEffect
+        val caption = playerState.captions.firstOrNull {
+            it.type != "thumbnails" && it.language.contains("English", true) &&
+                it.url.startsWith("https://") && !it.url.contains(".m3u8", true)
+        } ?: return@LaunchedEffect
+        try {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val source = com.example.data.ScopedPlaybackHttp.factory(playerState.resolveHeaders, caption.url).createDataSource()
+                try {
+                    source.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(caption.url)))
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val count = source.read(buffer, 0, buffer.size)
+                        if (count < 0) break
+                        require(output.size() + count <= 256 * 1024)
+                        output.write(buffer, 0, count)
+                    }
+                    output.toString("UTF-8")
+                } finally { source.close() }
+            }
+            latestSetIntroWindow(com.example.ui.viewmodel.EpisodePlaybackPolicy.detectIntro(text, latestPlayerState.durationSec))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Optional caption analysis must never interrupt playback.
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val state = latestPlayerState
+                if (exoPlayer.currentMediaItem?.mediaId != "${state.media?.id}:${state.episode?.id.orEmpty()}") return
                 isBuffering = (playbackState == Player.STATE_BUFFERING)
                 if (playbackState == Player.STATE_ENDED) {
-                    if (latestPlayerState.sourceId == "Trailer") {
-                        onTrailerEnded?.invoke()
-                    } else if (latestPlayerState.isPlaying) {
-                        onTogglePlayPause()
+                    reportProgress()
+                    if (state.sourceId == "Trailer") {
+                        latestTrailerEnded?.invoke()
+                    } else if (state.isPlaying) {
+                        val next = state.episode?.let { com.example.ui.viewmodel.nextEpisodeIndex(it.id, state.media?.episodes.orEmpty().map { ep -> ep.id }) }
+                        if (latestAutoPlayNext && next != null) latestNextEpisode() else latestTogglePlayPause()
                     }
                 }
             }
@@ -308,8 +373,8 @@ fun VideoPlayerScreen(
                     isSelected = !isAnySubSelected
                 )
 
-                if (playerState.captions.isNotEmpty()) {
-                    playerState.captions.filter { it.type != "thumbnails" }.forEachIndexed { idx, cap ->
+                if (latestPlayerState.captions.isNotEmpty()) {
+                    latestPlayerState.captions.filter { it.type != "thumbnails" }.forEachIndexed { idx, cap ->
                         val label = cap.language
                         if (subList.none { it.name.equals(label, ignoreCase = true) }) {
                             subList.add(
@@ -330,6 +395,7 @@ fun VideoPlayerScreen(
         }
         exoPlayer.addListener(listener)
         onDispose {
+            reportProgress()
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
@@ -380,7 +446,7 @@ fun VideoPlayerScreen(
                 .apply {
                     if (url.contains(".m3u8") || url.contains("playlist") || url.contains("hls")) {
                         setMimeType(MimeTypes.APPLICATION_M3U8)
-                    } else if (url.endsWith(".mp4") || url.endsWith(".ts")) {
+                    } else if (url.endsWith(".mp4")) {
                         setMimeType(MimeTypes.APPLICATION_MP4)
                     }
                 }
@@ -390,7 +456,7 @@ fun VideoPlayerScreen(
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.prepare()
-            if (playerState.isPlaying) {
+            if (playerState.isPlaying && playbackActive) {
                 exoPlayer.play()
             } else {
                 exoPlayer.pause()
@@ -409,8 +475,8 @@ fun VideoPlayerScreen(
     }
 
     // Sync Play/Pause
-    LaunchedEffect(playerState.isPlaying) {
-        if (playerState.isPlaying) {
+    LaunchedEffect(playerState.isPlaying, playbackActive) {
+        if (playerState.isPlaying && playbackActive) {
             if (exoPlayer.playbackState == Player.STATE_ENDED) {
                 exoPlayer.seekTo(0)
             }
@@ -428,15 +494,26 @@ fun VideoPlayerScreen(
     // Continuously sync ExoPlayer progress to ViewModel
     LaunchedEffect(exoPlayer) {
         while (true) {
-            if (exoPlayer.isPlaying) {
-                val curSec = (exoPlayer.currentPosition / 1000L).toInt()
-                val durSec = (exoPlayer.duration / 1000L).toInt().coerceAtLeast(0)
-                if (durSec > 0) {
-                    onUpdateProgress?.invoke(curSec, durSec)
-                }
-            }
+            if (exoPlayer.isPlaying && playbackActive) reportProgress()
             kotlinx.coroutines.delay(500)
         }
+    }
+
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> playbackActive = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    playbackActive = false
+                    reportProgress()
+                    latestPersistProgress()
+                    exoPlayer.pause()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Force landscape orientation, immersive full screen and keep screen awake (Wakelock)
@@ -444,6 +521,7 @@ fun VideoPlayerScreen(
         val activity = context as? Activity
         val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         val window = activity?.window
+        val originalBrightness = window?.attributes?.screenBrightness
         val insetsController = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
 
         window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -454,6 +532,9 @@ fun VideoPlayerScreen(
         onDispose {
             window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity?.requestedOrientation = originalOrientation
+            if (window != null && originalBrightness != null) {
+                window.attributes = window.attributes.apply { screenBrightness = originalBrightness }
+            }
             insetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
     }
@@ -833,8 +914,10 @@ fun VideoPlayerScreen(
         onSkipForward10()
     }
     val handleSkipIntro: () -> Unit = {
-        exoPlayer.seekTo(85000L)
-        onSkipIntro()
+        playerState.introWindow?.let {
+            exoPlayer.seekTo(it.endSec * 1000L)
+            onSkipIntro()
+        }
     }
 
     // Main Player Viewport
@@ -1297,6 +1380,26 @@ fun VideoPlayerScreen(
                     }
                 }
             }
+        }
+
+        val nextIndex = playerState.episode?.let {
+            com.example.ui.viewmodel.nextEpisodeIndex(it.id, media.episodes.map { ep -> ep.id })
+        }
+        val nextEpisode = nextIndex?.let { media.episodes[it] }
+        AnimatedVisibility(
+            visible = nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
+                !playerState.isResolving && playerState.durationSec > 60 &&
+                playerState.currentPositionSec >= playerState.durationSec - 30,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 80.dp)
+        ) {
+            Button(
+                onClick = { reportProgress(); onPlayNextEpisode() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier.testTag("next_episode_button")
+            ) { Text("NEXT EPISODE", fontWeight = FontWeight.Bold) }
         }
 
         // Animated "Skip Intro" pop-up on bottom-right
