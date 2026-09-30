@@ -1,0 +1,8 @@
+{
+  "name": "Netflix",
+  "description": "Stream movies, TV series, trending hits, manage your watchlist, download episodes offline, and switch user profiles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

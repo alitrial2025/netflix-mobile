@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="40dp"
+    android:viewportWidth="100"
+    android:viewportHeight="170">
+    <!-- Left Column (Dark Crimson) -->
+    <path
+        android:pathData="M 0,0 L 35,0 L 35,164 Q 17.5,168 0,170 Z"
+        android:fillColor="#B81D24" />
+
+    <!-- Right Column (Dark Crimson) -->
+    <path
+        android:pathData="M 65,0 L 100,0 L 100,170 Q 82.5,168 65,164 Z"
+        android:fillColor="#B81D24" />
+
+    <!-- Cast shadow on right column under diagonal ribbon -->
+    <path
+        android:pathData="M 65,75 L 100,170 L 65,164 Z"
+        android:fillColor="#33000000" />
+
+    <!-- Diagonal Ribbon (Bright Vibrant Netflix Red) -->
+    <path
+        android:pathData="M 0,0 L 35,0 L 100,170 Q 82.5,168 65,164 L 0,0 Z"
+        android:fillColor="#E50914" />
+</vector>
