@@ -17,10 +17,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -48,11 +50,16 @@ fun HeroBanner(
 ) {
     val colors by rememberPosterColors(media)
     LaunchedEffect(media.id, colors) { onColorsExtracted(colors.first, colors.second) }
-    val shape = RoundedCornerShape(14.dp)
-    Box(modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+    val shape = RoundedCornerShape(16.dp)
+    val footerColor = lerp(colors.second, Color.Black, .32f)
+    val rim = Brush.verticalGradient(listOf(
+        Color.White.copy(alpha = .38f), Color.White.copy(alpha = .12f), Color.White.copy(alpha = .24f)
+    ))
+    Box(modifier.fillMaxWidth().padding(start = 26.dp, end = 26.dp, top = 12.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier.fillMaxWidth().widthIn(max = 540.dp).height(cardHeight)
-                .clip(shape).border(1.dp, Color.White.copy(alpha = .28f), shape)
+                .shadow(8.dp, shape, clip = false, ambientColor = colors.first.copy(alpha = .25f), spotColor = Color.Black.copy(alpha = .55f))
+                .clip(shape).border(1.dp, rim, shape)
                 .background(colors.second).clickable(onClick = onInfoClick).testTag("hero_banner_card")
         ) {
             AsyncImage(
@@ -62,9 +69,9 @@ fun HeroBanner(
             )
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
                 0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
-                .62f to Color.Black.copy(alpha = .35f), .72f to Color.Black.copy(alpha = .99f),
-                .78f to Color.Black, .90f to Color.Black,
-                1f to Color(0xFF1B1B19)
+                .62f to footerColor.copy(alpha = .35f), .72f to footerColor.copy(alpha = .99f),
+                .78f to footerColor, .90f to footerColor,
+                1f to colors.second
             )))
             if (media.isOriginal) NetflixNLogo(size = 27.dp, modifier = Modifier.padding(14.dp).align(Alignment.TopStart))
             Column(

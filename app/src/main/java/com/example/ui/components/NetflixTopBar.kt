@@ -45,7 +45,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -205,7 +204,7 @@ fun NetflixTopBar(
                         .testTag("top_bar_download_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Download,
+                        painter = painterResource(id = R.drawable.ic_netflix_download_custom),
                         contentDescription = "Downloads",
                         tint = Color.White,
                         modifier = Modifier.size(22.dp)
@@ -260,9 +259,9 @@ fun NetflixTopBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val firstTabShape = RoundedCornerShape(16.dp)
-                    val middleTabShape = RoundedCornerShape(16.dp)
-                    val lastTabShape = RoundedCornerShape(16.dp)
+                    val firstTabShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+                    val middleTabShape = RoundedCornerShape(0.dp)
+                    val lastTabShape = RoundedCornerShape(topEnd = 26.dp, bottomEnd = 26.dp)
 
                     // Optional Clear Filter ("X") pill if a filter is active
                     if (isFilterActive) {
@@ -354,7 +353,7 @@ fun NetflixTopBar(
                             // Invisible placeholder so the parent Row maintains its exact spacing
                             Spacer(
                                 modifier = Modifier
-                                    .height(44.dp)
+                                    .height(52.dp)
                                     .width(pillWidth)
                             )
                         }
