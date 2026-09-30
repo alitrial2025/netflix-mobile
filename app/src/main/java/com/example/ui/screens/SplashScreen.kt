@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.ui.components.NetflixProLogoGeometry
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -47,11 +49,11 @@ fun SplashScreen(
     val reusableWipePath = remember { Path() }
     var logoSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // Mathematically calculated proportions of "N" within the NETFLIX logo
-    val nLeftPercent = 0.043f
-    val nWidthPercent = 0.0945f
-    val nRightPercent = nLeftPercent + nWidthPercent // 0.1375f
-    val nCenterPercent = nLeftPercent + nWidthPercent / 2f // 0.09025f
+    // Mathematically calculated proportions of "N" within the NETFLIXPRO wordmark
+    val nLeftPercent = 0f
+    val nWidthPercent = NetflixProLogoGeometry.WordmarkNWidthFraction
+    val nRightPercent = nLeftPercent + nWidthPercent
+    val nCenterPercent = nLeftPercent + nWidthPercent / 2f
 
     // Animation states
     val wipeProgress = remember { Animatable(1f) }
@@ -141,10 +143,10 @@ fun SplashScreen(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Original NETFLIX logo with right-to-left Zigzag / Scissors wipe clip mask
+            // NETFLIXPRO wordmark with right-to-left Zigzag / Scissors wipe clip mask
             Image(
                 painter = painterResource(id = R.drawable.ic_netflix_logo),
-                contentDescription = "Netflix Logo",
+                contentDescription = "NetflixPro logo",
                 modifier = Modifier
                     .width(280.dp)
                     .height(76.dp)
@@ -194,9 +196,7 @@ fun SplashScreen(
                     }
             )
 
-            // Standalone N logo (perfectly aligned and dynamically morphed to its natural aspect ratio)
-            val currentWidth = 26.46f + (44.7f - 26.46f) * crossfadeAlpha.value
-            val currentOffset = 25.27f - currentWidth / 2f
+            // Npro lockup uses its natural aspect ratio and the same slide anchor.
 
             Box(
                 modifier = Modifier
@@ -205,14 +205,14 @@ fun SplashScreen(
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_netflix_n),
-                    contentDescription = "Netflix N",
+                    contentDescription = "Npro logo",
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .offset(x = currentOffset.dp) // Pixel-perfect overlay centering alignment
-                        .width(currentWidth.dp)
+                        .offset(x = (280f * nCenterPercent - 76f * NetflixProLogoGeometry.MarkAspectRatio / 2f).dp)
+                        .width(76.dp * NetflixProLogoGeometry.MarkAspectRatio)
                         .height(76.dp)
                         .alpha(crossfadeAlpha.value),
-                    contentScale = ContentScale.FillBounds
+                    contentScale = ContentScale.Fit
                 )
             }
         }

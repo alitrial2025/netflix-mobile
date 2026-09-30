@@ -1198,7 +1198,7 @@ private fun GameFeedCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("N", color = NetflixRed, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        com.example.ui.components.NetflixNLogo(size = 14.dp)
                         Text("GAMES", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }
