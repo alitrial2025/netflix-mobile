@@ -62,7 +62,8 @@ fun HeroBanner(
             )
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
                 0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
-                .68f to Color.Black.copy(alpha = .12f), .87f to Color.Black.copy(alpha = .75f),
+                .68f to Color.Black.copy(alpha = .25f), .80f to Color.Black.copy(alpha = .90f),
+                .90f to Color.Black.copy(alpha = .96f),
                 1f to Color(0xFF1B1B19)
             )))
             if (media.isOriginal) NetflixNLogo(size = 27.dp, modifier = Modifier.padding(14.dp).align(Alignment.TopStart))
@@ -81,7 +82,7 @@ fun HeroBanner(
                 Text(media.genres.take(4).joinToString(" • "), color = Color.White.copy(alpha = .8f),
                     fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(18.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                     Button(onClick = onPlayClick, modifier = Modifier.weight(1f).height(44.dp).testTag("hero_play"),
                         shape = RoundedCornerShape(4.dp), contentPadding = PaddingValues(horizontal = 10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {

@@ -52,7 +52,10 @@ internal fun rememberPosterColors(media: MediaItem?): State<Pair<Color, Color>> 
                 if (bitmap == null) null else {
                     val palette = Palette.from(bitmap).generate()
                     val lower = Palette.from(bitmap).setRegion(0, bitmap.height / 2, bitmap.width, bitmap.height).generate()
-                    val base = Color(palette.dominantSwatch?.rgb ?: palette.mutedSwatch?.rgb ?: 0xFF343938.toInt())
+                    // Dark poster borders often dominate the pixels. Prefer a
+                    // muted artwork color so the Home header retains its tint.
+                    val base = Color(palette.mutedSwatch?.rgb ?: palette.vibrantSwatch?.rgb
+                        ?: palette.dominantSwatch?.rgb ?: 0xFF343938.toInt())
                     val bottom = Color(lower.mutedSwatch?.rgb ?: lower.dominantSwatch?.rgb ?: base.toArgbValue())
                     base.toTopPosterColor() to Color(ColorUtils.blendARGB(bottom.toArgbValue(), 0xFF384340.toInt(), .65f))
                 }

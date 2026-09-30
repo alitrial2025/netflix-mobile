@@ -111,8 +111,8 @@ fun NetflixTopBar(
     val bgGradient = remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color.Black.copy(alpha = 0.65f),
-                Color.Black.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.18f),
+                Color.Black.copy(alpha = 0.08f),
                 Color.Transparent
             )
         )
@@ -147,7 +147,7 @@ fun NetflixTopBar(
                 }
             }
             .statusBarsPadding()
-            .padding(top = 4.dp, bottom = 6.dp)
+            .padding(top = 14.dp, bottom = 6.dp)
     ) {
         // Main Header Row: [N Home] ... [Cast] [Download] [Notifications]
         Row(
@@ -163,7 +163,7 @@ fun NetflixTopBar(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onCategorySelected(CategoryFilter.ALL, null) }
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .padding(vertical = 2.dp)
             ) {
                 if (currentCategory == CategoryFilter.GAMES) {
                     Icon(
@@ -176,7 +176,7 @@ fun NetflixTopBar(
                     )
                 }
                 NetflixNLogo(size = 40.dp)
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = when {
                         currentCategory == CategoryFilter.TV_SHOWS -> "Series"
@@ -205,7 +205,7 @@ fun NetflixTopBar(
                         .testTag("top_bar_download_button")
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_netflix_download_custom),
+                        imageVector = Icons.Default.Download,
                         contentDescription = "Downloads",
                         tint = Color.White,
                         modifier = Modifier.size(22.dp)
@@ -249,7 +249,7 @@ fun NetflixTopBar(
                     }
             ) {
             Column {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Categories/Pills Row: Shows (rounded left, flat right), Middle tabs (flat edges), Last tab (flat left, rounded right) with even spacing
                 Row(
@@ -260,7 +260,7 @@ fun NetflixTopBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val firstTabShape = RoundedCornerShape(24.dp)
+                    val firstTabShape = RoundedCornerShape(16.dp)
                     val middleTabShape = RoundedCornerShape(16.dp)
                     val lastTabShape = RoundedCornerShape(16.dp)
 
@@ -486,11 +486,7 @@ fun NetflixTopBar(
 }
 }
 
-/**
- * Tactile Claymorphic Netflix Category Tab component.
- * Features an inflated matte clay body with top specular highlight, subtle depth bevel,
- * and responsive spring press physics for maximum tactile delight and smooth 60fps scrolling.
- */
+/** Translucent category buttons let the current poster's ambient color show through. */
 @Composable
 private fun CategoryPill(
     label: String,
@@ -511,16 +507,11 @@ private fun CategoryPill(
         label = "pill_scale"
     )
 
-    // Porcelain white clay when active vs sleek deep charcoal clay when inactive
-    val surfaceColor = if (isSelected) Color(0xFFF2F2F6) else Color(0xFF22202A)
     val contentColor = Color.White
-    val elevation = if (isPressed) 2.dp else if (isSelected) 8.dp else 5.dp
-    val highlightAlpha = if (isSelected) 0.78f else 0.48f
-    val depthAlpha = if (isSelected) 0.38f else 0.80f
 
     Box(
         modifier = Modifier
-            .height(44.dp)
+            .height(52.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -534,7 +525,7 @@ private fun CategoryPill(
                 onClick = onClick
             )
             .padding(
-                horizontal = if (leadingIcon != null && label.isEmpty()) 12.dp else 16.dp
+                horizontal = if (leadingIcon != null && label.isEmpty()) 12.dp else 18.dp
             )
             .testTag(testTag),
         contentAlignment = Alignment.Center
@@ -559,9 +550,9 @@ private fun CategoryPill(
                 Text(
                     text = label,
                     color = contentColor,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                    letterSpacing = 0.2.sp
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.sp
                 )
             }
 
@@ -581,6 +572,3 @@ private fun CategoryPill(
         }
     }
 }
-
-
-

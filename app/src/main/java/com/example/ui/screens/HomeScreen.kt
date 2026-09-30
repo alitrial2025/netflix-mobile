@@ -378,13 +378,18 @@ fun HomeScreen(
                     endY = currentEndY
                 )
                 drawRect(brush = gradient)
+                // The reference header shades the left edge while retaining the
+                // poster's ambient color behind the buttons on the right.
+                drawRect(brush = Brush.horizontalGradient(
+                    listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)
+                ))
             }
     ) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
             item(key = "hero") {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
-            Spacer(modifier = Modifier.height(116.dp))
+            Spacer(modifier = Modifier.height(136.dp))
 
             // Hero Banner with poster color extraction and adaptive phone height
             val onHeroPlay = remember(heroMedia, onPlayClick) { { onPlayClick(heroMedia) } }
@@ -419,8 +424,6 @@ fun HomeScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
             }
             // Continue Watching Row (only if present)
             if (continueWatchingList.isNotEmpty()) {
@@ -452,4 +455,3 @@ fun HomeScreen(
         }
     }
 }
-

@@ -40,7 +40,7 @@ fun NetflixBottomNav(
 ) {
     val shape = RoundedCornerShape(40.dp)
     Box(modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
-        Row(Modifier.widthIn(max = 330.dp).fillMaxWidth(.70f).height(70.dp).clip(shape)
+        Row(Modifier.widthIn(max = 330.dp).fillMaxWidth(.80f).height(70.dp).clip(shape)
             .background(Color(0xFF2B2B2B)).border(1.dp, Color.White.copy(alpha = .14f), shape).padding(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             listOf(NavigationTab.HOME, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX).forEach { tab ->
