@@ -62,8 +62,8 @@ fun HeroBanner(
             )
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
                 0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
-                .68f to Color.Black.copy(alpha = .25f), .80f to Color.Black.copy(alpha = .90f),
-                .90f to Color.Black.copy(alpha = .96f),
+                .62f to Color.Black.copy(alpha = .35f), .72f to Color.Black.copy(alpha = .99f),
+                .78f to Color.Black, .90f to Color.Black,
                 1f to Color(0xFF1B1B19)
             )))
             if (media.isOriginal) NetflixNLogo(size = 27.dp, modifier = Modifier.padding(14.dp).align(Alignment.TopStart))
