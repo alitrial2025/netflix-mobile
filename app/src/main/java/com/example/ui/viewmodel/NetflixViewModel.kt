@@ -38,6 +38,13 @@ import com.example.data.model.ProfilePin
 import com.example.data.repository.NetflixRepository
 import com.example.data.NetMirrorResolver
 import com.example.data.NetMirrorStream
+import com.example.data.MobileSettingsStore
+import com.example.data.MobileSetting
+import com.example.data.CellularDataMode
+import com.example.data.MobilePlaybackPolicy
+import com.example.data.playbackNetwork
+import com.example.data.observePlaybackNetwork
+import com.example.data.NetworkDiagnostic
 import com.example.data.TrailerResolver
 import com.example.data.TrailerResolverCallback
 import com.example.data.TrailerStream
@@ -796,22 +803,25 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }.toMap())
     val profileDownloadAllocations: StateFlow<Map<String, Float>> = _profileDownloadAllocations.asStateFlow()
 
-    private val _isWifiOnlyEnabled = MutableStateFlow(true)
+    private val mobileSettings by lazy { MobileSettingsStore(prefs) }
+    val playbackNetworkState = observePlaybackNetwork(application).stateIn(viewModelScope,
+        SharingStarted.WhileSubscribed(5000), playbackNetwork(application))
+    private val _isWifiOnlyEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.WIFI_ONLY_DOWNLOADS))
     val isWifiOnlyEnabled: StateFlow<Boolean> = _isWifiOnlyEnabled.asStateFlow()
 
-    private val _isHighQualityEnabled = MutableStateFlow(true)
+    private val _isHighQualityEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.HIGH_QUALITY))
     val isHighQualityEnabled: StateFlow<Boolean> = _isHighQualityEnabled.asStateFlow()
 
-    private val _isAutoPlayNextEnabled = MutableStateFlow(true)
+    private val _isAutoPlayNextEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.AUTOPLAY_NEXT))
     val isAutoPlayNextEnabled: StateFlow<Boolean> = _isAutoPlayNextEnabled.asStateFlow()
 
-    private val _isAutoPlayPreviewsEnabled = MutableStateFlow(true)
+    private val _isAutoPlayPreviewsEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.AUTOPLAY_PREVIEWS))
     val isAutoPlayPreviewsEnabled: StateFlow<Boolean> = _isAutoPlayPreviewsEnabled.asStateFlow()
 
-    private val _isSpatialAudioEnabled = MutableStateFlow(true)
+    private val _isSpatialAudioEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.SPATIAL_AUDIO))
     val isSpatialAudioEnabled: StateFlow<Boolean> = _isSpatialAudioEnabled.asStateFlow()
 
-    private val _cellularDataOption = MutableStateFlow("Automatic (Balanced)")
+    private val _cellularDataOption = MutableStateFlow(mobileSettings.cellularDataMode.label)
     val cellularDataOption: StateFlow<String> = _cellularDataOption.asStateFlow()
 
     // Network diagnostic test state
@@ -1795,6 +1805,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     resolveError = "This download is missing from your device. Delete it in Downloads and download it again.") }
                 return@launch
             }
+            if (!MobilePlaybackPolicy.permitsStreaming(mobileSettings.cellularDataMode,
+                    playbackNetwork(getApplication()).wifiOrEthernet)) {
+                _playerState.update { it.copy(isResolving = false, isPlaying = false,
+                    resolveError = "Connect to Wi-Fi or change Cellular Data in App Settings to play this title.") }
+                return@launch
+            }
             try {
                 val tmdbId = media.id
                 val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
@@ -2357,8 +2373,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     // Downloads screen navigation state
     private val _showDownloadsScreen = MutableStateFlow(false)
     val showDownloadsScreen: StateFlow<Boolean> = _showDownloadsScreen.asStateFlow()
+    private val _openSmartDownloadSettings = MutableStateFlow(false)
+    val openSmartDownloadSettings: StateFlow<Boolean> = _openSmartDownloadSettings.asStateFlow()
 
-    fun openDownloadsScreen(show: Boolean) {
+    fun openDownloadsScreen(show: Boolean, smartSettings: Boolean = false) {
+        _openSmartDownloadSettings.value = smartSettings
         _showDownloadsScreen.value = show
     }
 
@@ -2500,43 +2519,85 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun toggleWifiOnly(enabled: Boolean) {
         _isWifiOnlyEnabled.value = enabled
+        mobileSettings.set(MobileSetting.WIFI_ONLY_DOWNLOADS, enabled)
+        downloadManager.updateWifiOnlyPolicy(enabled)
         showToast("Wi-Fi Only ${if (enabled) "enabled" else "disabled"}")
     }
 
     fun toggleHighQuality(enabled: Boolean) {
         _isHighQualityEnabled.value = enabled
-        showToast("Video Quality set to ${if (enabled) "4K Ultra HD & Dolby Atmos" else "Standard HD"}")
+        mobileSettings.set(MobileSetting.HIGH_QUALITY, enabled)
+        showToast("Video Quality set to ${if (enabled) "High" else "Standard"}")
     }
 
     fun toggleAutoPlayNext(enabled: Boolean) {
         _isAutoPlayNextEnabled.value = enabled
+        mobileSettings.set(MobileSetting.AUTOPLAY_NEXT, enabled)
+        updateActivePlaybackPreferences(next = enabled)
         showToast("Auto-play Next Episode ${if (enabled) "ON" else "OFF"}")
     }
 
     fun toggleAutoPlayPreviews(enabled: Boolean) {
         _isAutoPlayPreviewsEnabled.value = enabled
+        mobileSettings.set(MobileSetting.AUTOPLAY_PREVIEWS, enabled)
+        updateActivePlaybackPreferences(previews = enabled)
         showToast("Auto-play Previews ${if (enabled) "ON" else "OFF"}")
     }
 
     fun toggleSpatialAudio(enabled: Boolean) {
         _isSpatialAudioEnabled.value = enabled
+        mobileSettings.set(MobileSetting.SPATIAL_AUDIO, enabled)
         showToast("Spatial Audio ${if (enabled) "Enabled" else "Disabled"}")
     }
 
     fun setCellularDataOption(option: String) {
-        _cellularDataOption.value = option
-        showToast("Cellular Data: $option")
+        val mode = CellularDataMode.fromLabel(option)
+        mobileSettings.cellularDataMode = mode
+        _cellularDataOption.value = mode.label
+        showToast("Cellular Data: ${mode.label}")
+    }
+
+    private var passwordResetPending = false
+    fun requestPasswordReset() {
+        if (passwordResetPending) return
+        passwordResetPending = true
+        syncManager.requestPasswordReset { success ->
+            passwordResetPending = false
+            showToast(if (success) "Password reset email sent to your account address."
+                else "Couldn't send the reset email. Check your connection and try again.")
+        }
+    }
+
+    private val playbackPreferenceWrites = kotlinx.coroutines.sync.Mutex()
+    private fun updateActivePlaybackPreferences(next: Boolean? = null, previews: Boolean? = null) {
+        val owner = syncManager.getUserId()
+        val profile = _activeProfile.value.let { it.copy(autoplayNext = next ?: it.autoplayNext,
+            autoplayPreviews = previews ?: it.autoplayPreviews) }
+        _activeProfile.value = profile
+        _profiles.update { list -> list.map { if (it.id == profile.id) profile else it } }
+        saveProfilesLocally(_profiles.value)
+        viewModelScope.launch {
+            playbackPreferenceWrites.lock()
+            try {
+                if (owner != syncManager.getUserId()) return@launch
+                val latest = _profiles.value.firstOrNull { it.id == profile.id } ?: return@launch
+                kotlinx.coroutines.withContext(Dispatchers.IO) { repository.insertProfile(latest.toEntity()) }
+                if (owner == syncManager.getUserId()) syncManager.syncProfilesToCloud(_profiles.value, _activeProfile.value.id)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { showToast("Playback preference saved locally. Profile sync couldn't finish.") }
+            finally { playbackPreferenceWrites.unlock() }
+        }
     }
 
     fun runDiagnosticTest() {
+        if (_diagnosticRunning.value) return
+        _diagnosticRunning.value = true
         viewModelScope.launch {
-            _diagnosticRunning.value = true
             _diagnosticResult.value = null
-            showToast("Running network speed test & NetflixPro server connection...")
-            delay(1500)
-            _diagnosticRunning.value = false
-            _diagnosticResult.value = "Connection: Excellent (118.4 Mbps) • 4K UHD Ready • Low Latency (14ms)"
-            showToast("Network check completed: 118.4 Mbps")
+            try {
+                _diagnosticResult.value = NetworkDiagnostic().run(playbackNetwork(getApplication()).online)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            finally { _diagnosticRunning.value = false }
         }
     }
 
@@ -2546,6 +2607,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun playTrailer(media: MediaItem, title: String) {
         if (!titleAllowed(media)) return
+        if (!MobilePlaybackPolicy.permitsStreaming(mobileSettings.cellularDataMode,
+                playbackNetwork(getApplication()).wifiOrEthernet)) {
+            showToast("Connect to Wi-Fi or change Cellular Data in App Settings to play trailers.")
+            return
+        }
         finishSmartReplacement()
         val durationSec = if (title.contains("teaser", ignoreCase = true)) 105 else 192
         _playerState.value = PlayerState(

@@ -132,6 +132,7 @@ dependencies {
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation("com.squareup.okhttp3:mockwebserver:4.10.0")
+  testImplementation("com.squareup.okhttp3:okhttp-tls:4.10.0")
   testImplementation("androidx.work:work-testing:2.10.1")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)

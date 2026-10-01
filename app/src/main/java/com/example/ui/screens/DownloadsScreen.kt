@@ -57,13 +57,14 @@ fun DownloadsScreen(
     activeProfile: UserProfile = UserProfile("profile", "Home"), profiles: List<UserProfile> = listOf(activeProfile),
     downloadsForYouEnabled: Boolean = false, profileAllocations: Map<String, Float> = emptyMap(),
     onToggleDownloadsForYou: (Boolean) -> Unit = {}, onProfileAllocation: (String, Float) -> Unit = { _, _ -> },
-    onOpenProfiles: () -> Unit = {}
+    onOpenProfiles: () -> Unit = {},
+    openSmartSettings: Boolean = false
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
     var deleteKeys by remember { mutableStateOf<Set<String>?>(null) }
     var clearAll by remember { mutableStateOf(false) }
-    var settings by rememberSaveable { mutableStateOf(false) }
+    var settings by rememberSaveable(openSmartSettings) { mutableStateOf(openSmartSettings) }
     var setup by rememberSaveable { mutableStateOf(false) }
     var showId by rememberSaveable { mutableStateOf<String?>(null) }
     val byId = remember(catalogMedia) { catalogMedia.associateBy { it.id } }

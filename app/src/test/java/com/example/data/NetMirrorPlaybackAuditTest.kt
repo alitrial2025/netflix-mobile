@@ -74,6 +74,25 @@ class NetMirrorPlaybackAuditTest {
         assertTrue(prefs.getString("netmirror_session", "")!!.contains("new-cookie"))
     }
 
+    @Test fun providerCaptionsKeepTheirOwnSessionWhenTheVideoIsOnACdn() = runBlocking {
+        NetMirrorResolver(context).invalidateDownloadSession("caption-fixture", "movie", 0, 0, true)
+        prefs.edit().clear().putString("netmirror_session", session("caption-cookie")).commit()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            when (request.url.encodedPath) {
+                "/3/movie/caption-fixture" -> response(request, """{"title":"Caption Fixture","release_date":"2001-01-01"}""")
+                "/mobile/search.php" -> response(request, """{"searchResult":[{"id":"caption-movie","t":"Caption Fixture","y":"2001"}]}""")
+                "/mobile/playlist.php" -> response(request, """{"sources":[{"file":"https://cdn.invalid/caption-video.m3u8"}],"tracks":[{"file":"/captions/english.vtt","kind":"subtitles","label":"English","srclang":"en"}]}""")
+                "/caption-video.m3u8" -> { assertNull(request.header("Cookie")); response(request, "#EXTM3U\n#EXTINF:1,\ns.jpg") }
+                else -> throw AssertionError("Unexpected request ${request.url.encodedPath}")
+            }
+        }.build()
+        val result = NetMirrorResolver(context, client).resolveStream("caption-fixture", "movie")
+        assertNull(result.headers["Cookie"])
+        assertTrue(result.captionHeaders["Cookie"].orEmpty().contains("caption-cookie"))
+        assertEquals("https://provider.invalid/captions/english.vtt", result.captions.single().url)
+    }
+
     private fun response(req: Request, body: String, code: Int = 200) = Response.Builder().request(req)
         .protocol(Protocol.HTTP_1_1).code(code).message("fixture").body(body.toResponseBody()).build()
 }

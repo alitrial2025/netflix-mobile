@@ -9,7 +9,7 @@ object ProfilePin {
 
     fun hash(pin: String?): String? {
         if (pin.isNullOrBlank()) return null
-        if (pin.length == 64 && pin.all { it in '0'..'9' || it in 'a'..'f' }) return pin
+        if (pin.length == 64 && pin.all { it in '0'..'9' || it.lowercaseChar() in 'a'..'f' }) return pin.lowercase(java.util.Locale.ROOT)
         val bytes = MessageDigest.getInstance("SHA-256")
             .digest((SALT + pin).toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }

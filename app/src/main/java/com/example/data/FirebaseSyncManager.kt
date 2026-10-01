@@ -132,6 +132,13 @@ class FirebaseSyncManager(private val context: Context) {
 
     fun isAuthenticated(): Boolean = auth?.currentUser?.isAnonymous == false
 
+    fun requestPasswordReset(onResult: (Boolean) -> Unit) {
+        val account = auth
+        val email = account?.currentUser?.email
+        if (account == null || email.isNullOrBlank() || !isAuthenticated()) { onResult(false); return }
+        account.sendPasswordResetEmail(email).addOnCompleteListener { onResult(it.isSuccessful) }
+    }
+
     // ==========================================
     // AUTHENTICATION (SIGN IN & SIGN UP)
     // ==========================================

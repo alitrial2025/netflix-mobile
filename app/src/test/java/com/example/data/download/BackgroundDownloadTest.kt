@@ -122,4 +122,31 @@ class BackgroundDownloadTest {
             assertTrue(DownloadRequestStore(root).all().isEmpty())
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun wifiPreferenceUpdatesDurableConstraintsAndLeavesPausedWorkPaused() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app,
+            Configuration.Builder().setExecutor(SynchronousExecutor()).setTaskExecutor(SynchronousExecutor()).build())
+        val database = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java).build()
+        val manager = NetflixDownloadManager(app, NetflixRepository(database.netflixDao()), NetMirrorResolver(app), accountIdProvider = { "account" })
+        val item = media().copy(id = "wifi_policy_movie")
+        val store = DownloadRequestStore(File(app.noBackupFilesDir, "download-requests"))
+        val work = WorkManager.getInstance(app)
+        val name = downloadWorkName(item.id)
+        try {
+            manager.startOrResumeDownload("profile", item, isWifiOnly = true)
+            manager.updateWifiOnlyPolicy(false)
+            val active = work.getWorkInfosForUniqueWork(name).get().last { it.state == WorkInfo.State.ENQUEUED }
+            assertEquals(NetworkType.CONNECTED, active.constraints.requiredNetworkType)
+            assertFalse(store.all().single { it.task.downloadKey == item.id }.wifiOnly)
+            manager.pauseDownload(item.id)
+            manager.updateWifiOnlyPolicy(true)
+            val paused = store.all().single { it.task.downloadKey == item.id }
+            assertTrue(paused.wifiOnly)
+            assertEquals(DownloadTaskStatus.PAUSED, paused.task.status)
+            assertTrue(work.getWorkInfosForUniqueWork(name).get().all { it.state == WorkInfo.State.CANCELLED })
+            assertTrue(manager.resumeSavedDownload(item.id, "profile"))
+            assertEquals(NetworkType.UNMETERED, work.getWorkInfosForUniqueWork(name).get().last { it.state == WorkInfo.State.ENQUEUED }
+                .constraints.requiredNetworkType)
+        } finally { manager.close(); database.close(); work.cancelAllWork().result.get(); store.remove(item.id) }
+    }
 }
