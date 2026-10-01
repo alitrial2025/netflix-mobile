@@ -19,6 +19,9 @@ class MediaPlaybackPolicyTest {
         assertEquals(3 to 7, episodeCoordinates(target.id))
         assertEquals("A remembered episode", target.title)
     }
+    @Test fun zeroPositionInNewEpisodeKeepsItsSeasonRatherThanRestartingEpisodeOne() {
+        assertEquals("ep_mr_robot_S3_7", initialPlaybackEpisode(show(), null, progress(0))?.id)
+    }
     @Test fun explicitEpisodeSelectionOverridesAnotherSavedSeason() {
         val chosen = Episode("ep_mr_robot_S2_1", 1, "Selected", 45, "")
         assertEquals(chosen, initialPlaybackEpisode(show(), chosen, progress()))

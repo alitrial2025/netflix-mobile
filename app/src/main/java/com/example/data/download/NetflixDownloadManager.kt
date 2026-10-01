@@ -24,6 +24,7 @@ import com.example.data.repository.NetflixRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -273,7 +274,13 @@ class NetflixDownloadManager(
                 transferSlots.acquire()
                 try {
                     updateTask(request.task.copy(status = DownloadTaskStatus.PREPARING, errorMessage = null))
-                    executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality)
+                    val plan = confirmedDownloadPlan(request.accountId)
+                    if (request.isForYou && !plan.downloadsForYou)
+                        throw DownloadMembershipException("Downloads for You is included with Premium. Upgrade to continue.")
+                    val completedDownloads = repository.getDownloadsOnce(request.profileId)
+                    if (completedDownloads.none { it.downloadKey == key } && completedDownloads.size >= plan.maxDownloads)
+                        throw DownloadMembershipException("Your plan's offline title limit is reached. Delete a download to continue.")
+                    executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
                     removeSavedRequest(key, token)
                     DownloadRunResult.COMPLETE
                 } finally { transferSlots.release() }
@@ -301,13 +308,40 @@ class NetflixDownloadManager(
         requestStore.remove(key)
     }
 
+    /** Workers must recheck the cloud plan after an Activity closes or a queued job resumes. */
+    private suspend fun confirmedDownloadPlan(accountId: String): com.example.data.model.SubscriptionPlan {
+        val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        if (user == null || user.isAnonymous || user.uid != accountId)
+            throw DownloadMembershipException("Sign in to the account that started this download.")
+        val snapshot = try {
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users").document(accountId).collection("subscription").document("current")
+                .get(com.google.firebase.firestore.Source.SERVER).await()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: com.google.firebase.firestore.FirebaseFirestoreException) {
+            if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED)
+                throw DownloadMembershipException("Your membership could not be confirmed. Sign in again or contact support.")
+            throw IOException("Could not refresh membership", error)
+        }
+        currentCoroutineContext().ensureActive()
+        if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid != accountId)
+            throw DownloadMembershipException("Your account changed. Sign in again to continue.")
+        if (snapshot.metadata.hasPendingWrites()) throw IOException("Membership confirmation is pending")
+        val plan = com.example.data.model.SubscriptionPlans.PLANS.firstOrNull { it.id == snapshot.getString("planId") }
+        if (plan == null || !com.example.data.RenewalPolicy.grantsAccess(snapshot.getString("status").orEmpty(),
+            snapshot.getLong("expiresAt") ?: 0L, com.example.data.SubscriptionTime.now()))
+            throw DownloadMembershipException("Renew your membership to continue this download.")
+        return plan
+    }
+
     private suspend fun executeDownloadPipeline(
         profileId: String,
         media: MediaItem,
         episode: Episode?,
         key: String,
         episodeTitle: String?,
-        isHighQuality: Boolean
+        isHighQuality: Boolean,
+        maxVideoHeight: Int = Int.MAX_VALUE
     ) = withContext(Dispatchers.IO) {
         val saved = requests[key]
         if (saved?.completedPath != null) {
@@ -327,7 +361,7 @@ class NetflixDownloadManager(
             val stream = netMirrorResolver.resolveNet52(media.id, type, season, number)
             currentCoroutineContext().ensureActive()
             try {
-                executeResolvedDownload(profileId, media, episode, key, episodeTitle, isHighQuality, stream)
+                executeResolvedDownload(profileId, media, episode, key, episodeTitle, isHighQuality, stream, maxVideoHeight)
                 return@withContext
             } catch (error: DownloadHttpException) {
                 if (error.code !in setOf(401, 403) || renewal == 1) throw error
@@ -338,7 +372,7 @@ class NetflixDownloadManager(
 
     internal suspend fun executeResolvedDownload(
         profileId: String, media: MediaItem, episode: Episode?, key: String, episodeTitle: String?,
-        isHighQuality: Boolean, resolvedStream: com.example.data.NetMirrorStream
+        isHighQuality: Boolean, resolvedStream: com.example.data.NetMirrorStream, maxVideoHeight: Int = Int.MAX_VALUE
     ) = withContext(Dispatchers.IO) {
         val itemTitle = if (episodeTitle != null) "${media.title} ($episodeTitle)" else media.title
         val targetUrl = resolvedStream.url
@@ -370,7 +404,8 @@ class NetflixDownloadManager(
             key = key,
             media = media,
             episodeTitle = episodeTitle,
-            isHighQuality = isHighQuality
+            isHighQuality = isHighQuality,
+            maxVideoHeight = maxVideoHeight
         )
 
         // If paused or cancelled, retain .part file for instant resumption
@@ -450,12 +485,13 @@ class NetflixDownloadManager(
         key: String,
         media: MediaItem,
         episodeTitle: String?,
-        isHighQuality: Boolean
+        isHighQuality: Boolean,
+        maxVideoHeight: Int
     ): Boolean = withContext(Dispatchers.IO) {
         val isHls = DownloadTransferPolicy.isHls(streamUrl)
 
         if (isHls) {
-            downloadHlsStream(streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality)
+            downloadHlsStream(streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality, maxVideoHeight)
         } else {
             downloadDirectStream(streamUrl, headers, partFile, key, media, episodeTitle)
         }
@@ -564,7 +600,7 @@ class NetflixDownloadManager(
 
     internal suspend fun downloadHlsStream(
         streamUrl: String, headers: Map<String, String>, partFile: File, key: String,
-        media: MediaItem, episodeTitle: String?, isHighQuality: Boolean
+        media: MediaItem, episodeTitle: String?, isHighQuality: Boolean, maxVideoHeight: Int = Int.MAX_VALUE
     ): Boolean = withContext(Dispatchers.IO) {
         suspend fun fetchPlaylist(url: String): String = withResponse(downloadRequest(url, headers, streamUrl)) {
             if (!it.isSuccessful) throw DownloadHttpException(it.code)
@@ -586,7 +622,7 @@ class NetflixDownloadManager(
         }
         val manifest = fetchPlaylist(streamUrl)
         currentCoroutineContext().ensureActive()
-        val selected = OfflineHlsPlan.variant(manifest, streamUrl, isHighQuality)
+        val selected = OfflineHlsPlan.variant(manifest, streamUrl, isHighQuality, maxVideoHeight)
         if (selected.audioUrl != null) return@withContext downloadOfflineHlsBundle(
             selected, ::fetchPlaylist, streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality)
         val variantUrl = selected.url

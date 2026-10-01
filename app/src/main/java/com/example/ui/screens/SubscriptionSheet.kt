@@ -210,7 +210,7 @@ fun SubscriptionSheet(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (currentSubscription.isGuest) "Free guest preview • Upgrade for 4K & TV access" else "KES ${currentSubscription.amount} / month • ${currentSubscription.daysRemaining} days remaining",
+                            text = if (currentSubscription.isGuest) "Free guest preview • Upgrade for 4K & TV access" else if (currentSubscription.isInRenewalGrace) "Renewal overdue • Access ends after the two-day allowance" else "KES ${currentSubscription.amount} / 30 days • ${currentSubscription.daysRemaining} days remaining",
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 13.sp
                         )
@@ -228,12 +228,16 @@ fun SubscriptionSheet(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
             Text(
-                text = "One calendar month per payment. Renewing the same plan preserves your remaining time; changing plans starts a new month.",
+                text = "Each payment adds 30 days. Renew the same plan early to keep your remaining time. A plan change starts a new 30-day period.",
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 13.sp,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
+            if (currentSubscription.isActive && selectedPlanId != currentSubscription.planId) {
+                Text("Changing plans now replaces your remaining ${currentSubscription.daysRemaining} days. Renew your current plan to keep that time.",
+                    color = Color(0xFFFFD166), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            }
             Spacer(modifier = Modifier.height(12.dp))
 
             // Plan Cards Carousel / List
@@ -709,7 +713,7 @@ private fun PlanCard(
                 }
 
                 Text(
-                    text = "KES ${plan.priceKes}/mo",
+                    text = "KES ${plan.priceKes} / 30 days",
                     color = if (isSelected) NetflixRed else Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -717,6 +721,20 @@ private fun PlanCard(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+            Text("${plan.maxDownloads} offline titles per profile • ${plan.catalogAccess}",
+                color = Color.LightGray, fontSize = 12.sp)
+            val extras = buildList {
+                if (plan.smartNextEpisode) add("Download Next Episode")
+                if (plan.downloadsForYou) add("Downloads for You")
+                if (plan.games) add("Games")
+                if (plan.clips) add("Clips")
+                if (plan.spatialAudio) add("Spatial Audio")
+            }
+            if (extras.isNotEmpty()) Text(extras.joinToString(" • "), color = Color.White,
+                fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            if (plan.id == "plan_premium") Text("4K, HDR and spatial audio require a supported title and device.",
+                color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Details Grid
             Row(
@@ -732,12 +750,12 @@ private fun PlanCard(
                     Text("${plan.maxProfiles} profile${if (plan.maxProfiles > 1) "s" else ""}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Column {
-                    Text("Screens", color = Color.Gray, fontSize = 11.sp)
-                    Text("${plan.screens} screen${if (plan.screens > 1) "s" else ""}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Offline", color = Color.Gray, fontSize = 11.sp)
+                    Text("${plan.maxDownloads} titles", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Column {
                     Text("Devices", color = Color.Gray, fontSize = 11.sp)
-                    Text(if (plan.id == "plan_mobile") "Phone/Tablet" else "All devices", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (plan.id == "plan_mobile") "Phone/Tablet" else "TV/Phone/Tablet", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

@@ -14,7 +14,7 @@ data class DetailLoadState(
 )
 
 internal fun WatchProgressEntity.canResume(): Boolean =
-    positionSeconds > 0 && totalSeconds > 0 && positionSeconds < totalSeconds * .95
+    positionSeconds >= 0 && totalSeconds > 0 && positionSeconds < totalSeconds * .95
 
 /** Preserve saved season coordinates even when a lightweight Home item has no episodes. */
 internal fun initialPlaybackEpisode(media: MediaItem, requested: Episode?, progress: WatchProgressEntity?): Episode? {

@@ -108,7 +108,9 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: android.content.Intent?, viewModel: NetflixViewModel) {
         if (intent == null) return
-        if (intent.getBooleanExtra("open_downloads", false)) {
+        if (intent.getBooleanExtra("open_subscription", false)) {
+            viewModel.openSubscriptionSheet(true)
+        } else if (intent.getBooleanExtra("open_downloads", false)) {
             viewModel.openDownloadsScreen(true)
         } else if (intent.getBooleanExtra("open_notifications", false)) {
             viewModel.openNotificationsSheet(true)
@@ -420,7 +422,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 watchHistory = watchHistory,
                                 reminders = reminders,
                                 connectedCastDevice = connectedCastDevice,
-                                smartDownloadsEnabled = isSmartDownloadsEnabled,
+                                smartDownloadsEnabled = isSmartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
                                 onSwitchProfileClick = { viewModel.openProfilePicker(true) },
                                 onMediaClick = { viewModel.openDetail(it) },
                                 onPlayClick = { viewModel.playMedia(it) },
@@ -638,10 +640,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 downloadingProgress = downloadingProgress,
                 downloadTasks = downloadTasks,
                 pausedDownloadKeys = pausedDownloadKeys,
-                smartDownloadsEnabled = isSmartDownloadsEnabled,
+                smartDownloadsEnabled = isSmartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
                 activeProfile = activeProfile, profiles = profiles,
                 openSmartSettings = openSmartDownloadSettings,
-                downloadsForYouEnabled = downloadsForYouEnabled,
+                downloadsForYouEnabled = downloadsForYouEnabled && userSubscription.isDownloadsForYouAllowed,
                 profileAllocations = profileDownloadAllocations,
                 onToggleDownloadsForYou = { viewModel.toggleDownloadsForYou(it) },
                 onProfileAllocation = { id, gb -> viewModel.setProfileDownloadAllocation(id, gb) },
@@ -717,7 +719,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         ) {
             NetflixSettingsScreen(
                 activeProfile = activeProfile,
-                smartDownloadsEnabled = isSmartDownloadsEnabled,
+                smartDownloadsEnabled = isSmartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
                 wifiOnlyEnabled = isWifiOnlyEnabled,
                 highQualityEnabled = isHighQualityEnabled,
                 autoPlayNextEnabled = isAutoPlayNextEnabled && activeProfile.autoplayNext,
