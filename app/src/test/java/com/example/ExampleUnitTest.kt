@@ -58,10 +58,11 @@ class ExampleUnitTest {
     assertEquals(4, standard.maxProfiles)
     assertEquals(5, premium.maxProfiles)
 
-    val mobileSub = com.example.data.model.UserSubscription(planId = "plan_mobile")
-    val basicSub = com.example.data.model.UserSubscription(planId = "plan_basic")
-    val standardSub = com.example.data.model.UserSubscription(planId = "plan_standard")
-    val premiumSub = com.example.data.model.UserSubscription(planId = "plan_premium")
+    val futureExpiry = System.currentTimeMillis() + 86_400_000L
+    val mobileSub = com.example.data.model.UserSubscription(planId = "plan_mobile", status = "ACTIVE", expiresAt = futureExpiry)
+    val basicSub = com.example.data.model.UserSubscription(planId = "plan_basic", status = "ACTIVE", expiresAt = futureExpiry)
+    val standardSub = com.example.data.model.UserSubscription(planId = "plan_standard", status = "ACTIVE", expiresAt = futureExpiry)
+    val premiumSub = com.example.data.model.UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = futureExpiry)
 
     assertEquals(1, mobileSub.maxProfiles)
     assertEquals(2, basicSub.maxProfiles)

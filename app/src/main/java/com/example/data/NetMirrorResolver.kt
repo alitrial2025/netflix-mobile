@@ -178,6 +178,16 @@ class NetMirrorResolver(private val context: Context) {
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")
     }
+    /** Renew CDN links without throwing away a still-valid provider handshake. */
+    suspend fun invalidateDownloadSession(tmdbId: String, type: String, season: Int, episode: Int, providerSessionRejected: Boolean = false) {
+        sessionMutex.withLock {
+            if (providerSessionRejected) {
+                _session = null
+                getPrefs().edit().remove(SESSION_STORAGE_KEY).apply()
+            }
+            evictCachedStream(tmdbId, type, season, episode)
+        }
+    }
     private class SessionRejectedException : java.io.IOException("Playback session expired. Please try again.")
     private fun rethrowControlFailure(error: Exception) {
         if (error is CancellationException || error is PlaybackRateLimitedException || error is SessionRejectedException) throw error

@@ -45,7 +45,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -92,6 +91,7 @@ fun NetflixTopBar(
     onNotificationsClick: () -> Unit,
     modifier: Modifier = Modifier,
     isGamesAllowed: Boolean = true,
+    unreadNotificationCount: Int = 0,
     scrollFractionProvider: () -> Float = { 0f }
 ) {
     var showCategoriesDropdown by remember { mutableStateOf(false) }
@@ -110,8 +110,8 @@ fun NetflixTopBar(
     val bgGradient = remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color.Black.copy(alpha = 0.65f),
-                Color.Black.copy(alpha = 0.25f),
+                Color.Black.copy(alpha = 0.18f),
+                Color.Black.copy(alpha = 0.08f),
                 Color.Transparent
             )
         )
@@ -146,7 +146,7 @@ fun NetflixTopBar(
                 }
             }
             .statusBarsPadding()
-            .padding(top = 4.dp, bottom = 6.dp)
+            .padding(top = 14.dp, bottom = 6.dp)
     ) {
         // Main Header Row: [N Home] ... [Cast] [Download] [Notifications]
         Row(
@@ -162,7 +162,7 @@ fun NetflixTopBar(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable { onCategorySelected(CategoryFilter.ALL, null) }
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                    .padding(vertical = 2.dp)
             ) {
                 if (currentCategory == CategoryFilter.GAMES) {
                     Icon(
@@ -174,18 +174,18 @@ fun NetflixTopBar(
                             .padding(end = 6.dp)
                     )
                 }
-                NetflixNLogo(size = 32.dp)
-                Spacer(modifier = Modifier.width(8.dp))
+                NetflixNLogo(size = 40.dp)
+                Spacer(modifier = Modifier.width(16.dp))
                 Text(
                     text = when {
-                        currentCategory == CategoryFilter.TV_SHOWS -> "Shows"
-                        currentCategory == CategoryFilter.MOVIES -> "Movies"
+                        currentCategory == CategoryFilter.TV_SHOWS -> "Series"
+                        currentCategory == CategoryFilter.MOVIES -> "Films"
                         currentCategory == CategoryFilter.GAMES -> "Games"
                         selectedGenre != null -> selectedGenre
                         else -> "Home"
                     },
                     color = Color.White,
-                    fontSize = 24.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("top_bar_title_home")
                 )
@@ -196,23 +196,6 @@ fun NetflixTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Cast Icon Button
-                IconButton(
-                    onClick = {
-                        Toast.makeText(context, "Searching for cast devices...", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier
-                        .size(38.dp)
-                        .testTag("top_bar_cast_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Cast,
-                        contentDescription = "Cast",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
                 // Download Button
                 IconButton(
                     onClick = onDownloadsClick,
@@ -243,30 +226,11 @@ fun NetflixTopBar(
                         modifier = Modifier.size(22.dp)
                     )
 
-                    // Red circular clay badge
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 4.dp, end = 4.dp)
-                            .size(15.dp)
-                            .claymorphic(
-                                shape = CircleShape,
-                                surfaceColor = NetflixRed,
-                                highlightColor = Color.White,
-                                elevation = 2.dp,
-                                strokeWidth = 0.6.dp,
-                                highlightAlpha = 0.55f,
-                                depthAlpha = 0.40f,
-                                gradientCurvature = 0.16f
-                            ),
+                    if (unreadNotificationCount > 0) Box(
+                        Modifier.align(Alignment.TopEnd).size(18.dp).background(NetflixRed, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "5",
-                            color = Color.White,
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(unreadNotificationCount.coerceAtMost(99).toString(), color = Color.White, fontSize = 9.sp)
                     }
                 }
             }
@@ -284,7 +248,7 @@ fun NetflixTopBar(
                     }
             ) {
             Column {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Categories/Pills Row: Shows (rounded left, flat right), Middle tabs (flat edges), Last tab (flat left, rounded right) with even spacing
                 Row(
@@ -295,19 +259,9 @@ fun NetflixTopBar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val firstTabShape = RoundedCornerShape(
-                        topStart = 24.dp,
-                        bottomStart = 24.dp,
-                        topEnd = 4.dp,
-                        bottomEnd = 4.dp
-                    )
-                    val middleTabShape = RoundedCornerShape(4.dp)
-                    val lastTabShape = RoundedCornerShape(
-                        topStart = 4.dp,
-                        bottomStart = 4.dp,
-                        topEnd = 24.dp,
-                        bottomEnd = 24.dp
-                    )
+                    val firstTabShape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp)
+                    val middleTabShape = RoundedCornerShape(0.dp)
+                    val lastTabShape = RoundedCornerShape(topEnd = 26.dp, bottomEnd = 26.dp)
 
                     // Optional Clear Filter ("X") pill if a filter is active
                     if (isFilterActive) {
@@ -323,7 +277,7 @@ fun NetflixTopBar(
 
                     // 1. Shows Pill (First Tab: rounded at left edge, flat at right edge)
                     CategoryPill(
-                        label = "Shows",
+                        label = "Series",
                         isSelected = currentCategory == CategoryFilter.TV_SHOWS && selectedGenre == null,
                         onClick = {
                             if (currentCategory == CategoryFilter.TV_SHOWS && selectedGenre == null) {
@@ -337,7 +291,7 @@ fun NetflixTopBar(
 
                     // 2. Movies Pill (Middle Tab: flat at edges)
                     CategoryPill(
-                        label = "Movies",
+                        label = "Films",
                         isSelected = currentCategory == CategoryFilter.MOVIES && selectedGenre == null,
                         onClick = {
                             if (currentCategory == CategoryFilter.MOVIES && selectedGenre == null) {
@@ -399,7 +353,7 @@ fun NetflixTopBar(
                             // Invisible placeholder so the parent Row maintains its exact spacing
                             Spacer(
                                 modifier = Modifier
-                                    .height(44.dp)
+                                    .height(52.dp)
                                     .width(pillWidth)
                             )
                         }
@@ -531,11 +485,7 @@ fun NetflixTopBar(
 }
 }
 
-/**
- * Tactile Claymorphic Netflix Category Tab component.
- * Features an inflated matte clay body with top specular highlight, subtle depth bevel,
- * and responsive spring press physics for maximum tactile delight and smooth 60fps scrolling.
- */
+/** Translucent category buttons let the current poster's ambient color show through. */
 @Composable
 private fun CategoryPill(
     label: String,
@@ -556,38 +506,25 @@ private fun CategoryPill(
         label = "pill_scale"
     )
 
-    // Porcelain white clay when active vs sleek deep charcoal clay when inactive
-    val surfaceColor = if (isSelected) Color(0xFFF2F2F6) else Color(0xFF22202A)
-    val contentColor = if (isSelected) Color(0xFF100E15) else Color.White
-    val elevation = if (isPressed) 2.dp else if (isSelected) 8.dp else 5.dp
-    val highlightAlpha = if (isSelected) 0.78f else 0.48f
-    val depthAlpha = if (isSelected) 0.38f else 0.80f
+    val contentColor = Color.White
 
     Box(
         modifier = Modifier
-            .height(44.dp)
+            .height(52.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .claymorphic(
-                shape = tabShape,
-                surfaceColor = surfaceColor,
-                highlightColor = Color.White,
-                shadowColor = Color.Black,
-                elevation = elevation,
-                strokeWidth = 1.3.dp,
-                highlightAlpha = highlightAlpha,
-                depthAlpha = depthAlpha,
-                gradientCurvature = if (isSelected) 0.16f else 0.24f
-            )
+            .clip(tabShape)
+            .background(if (isSelected) Color.White.copy(alpha = .28f) else Color.White.copy(alpha = .12f))
+            .border(1.dp, Color.White.copy(alpha = .18f), tabShape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
             .padding(
-                horizontal = if (leadingIcon != null && label.isEmpty()) 12.dp else 16.dp
+                horizontal = if (leadingIcon != null && label.isEmpty()) 12.dp else 18.dp
             )
             .testTag(testTag),
         contentAlignment = Alignment.Center
@@ -612,9 +549,9 @@ private fun CategoryPill(
                 Text(
                     text = label,
                     color = contentColor,
-                    fontSize = 14.sp,
-                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                    letterSpacing = 0.2.sp
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.sp
                 )
             }
 
@@ -634,6 +571,3 @@ private fun CategoryPill(
         }
     }
 }
-
-
-

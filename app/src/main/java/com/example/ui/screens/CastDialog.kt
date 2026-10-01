@@ -91,7 +91,7 @@ fun CastDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Select a display to play Netflix in 4K HDR with surround audio.",
+                    text = "Select a display to play NetflixPro in 4K HDR with surround audio.",
                     color = Color.White.copy(alpha = 0.65f),
                     fontSize = 12.sp
                 )

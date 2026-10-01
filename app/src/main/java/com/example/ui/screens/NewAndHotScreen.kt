@@ -289,7 +289,7 @@ fun NewAndHotScreen(
                             onShareClick = {
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "Watch '${item.title}' coming soon to Netflix! https://www.netflix.com/title/${item.id}")
+                                    putExtra(Intent.EXTRA_TEXT, "Watch '${item.title}' coming soon to NetflixPro! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Share Title"))
@@ -325,7 +325,7 @@ fun NewAndHotScreen(
                             onShareClick = {
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "Stream '${item.title}' now on Netflix! https://www.netflix.com/title/${item.id}")
+                                    putExtra(Intent.EXTRA_TEXT, "Stream '${item.title}' now on NetflixPro! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Share Title"))
@@ -357,7 +357,7 @@ fun NewAndHotScreen(
                             onShareClick = {
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "#${index + 1} TV Show on Netflix: '${item.title}'! https://www.netflix.com/title/${item.id}")
+                                    putExtra(Intent.EXTRA_TEXT, "#${index + 1} TV Show on NetflixPro: '${item.title}'! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Share"))
@@ -389,7 +389,7 @@ fun NewAndHotScreen(
                             onShareClick = {
                                 val sendIntent = Intent().apply {
                                     action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, "#${index + 1} Movie on Netflix: '${item.title}'! https://www.netflix.com/title/${item.id}")
+                                    putExtra(Intent.EXTRA_TEXT, "#${index + 1} Movie on NetflixPro: '${item.title}'! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}")
                                     type = "text/plain"
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Share"))
@@ -435,7 +435,7 @@ fun NewAndHotScreen(
                                 }
                                 Column {
                                     Text(
-                                        text = "Mobile Games on Netflix",
+                                        text = "Mobile Games on NetflixPro",
                                         color = Color.White,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold
@@ -1198,7 +1198,7 @@ private fun GameFeedCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("N", color = NetflixRed, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        com.example.ui.components.NetflixNLogo(size = 14.dp)
                         Text("GAMES", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                     }
                 }

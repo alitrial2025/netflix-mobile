@@ -17,6 +17,7 @@ import com.google.firebase.FirebaseApp
 import java.io.File
 import java.util.concurrent.Executors
 
+@androidx.media3.common.util.UnstableApi
 class NetflixApplication : Application(), ImageLoaderFactory {
     companion object {
         lateinit var downloadCache: Cache
@@ -66,6 +67,7 @@ class NetflixApplication : Application(), ImageLoaderFactory {
             .components {
                 add(SvgDecoder.Factory())
             }
+            .bitmapFactoryMaxParallelism(2)
             .respectCacheHeaders(false)
             .allowHardware(true)
             .build()

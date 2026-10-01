@@ -122,6 +122,8 @@ fun Modifier.claymorphic(
             end = Offset(w, h)
         )
 
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val rimStyle = Stroke(width = strokePx)
         onDrawBehind {
             // Draw inflated body fill
             drawRect(brush = bodyBrush)
@@ -134,11 +136,10 @@ fun Modifier.claymorphic(
 
             // Draw clay rim bevel
             if (strokePx > 0f) {
-                val outline = shape.createOutline(size, layoutDirection, this)
                 drawOutline(
                     outline = outline,
                     brush = rimStrokeBrush,
-                    style = Stroke(width = strokePx)
+                    style = rimStyle
                 )
             }
         }

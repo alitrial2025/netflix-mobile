@@ -1,6 +1,7 @@
 package com.example.data.local
 
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -49,7 +50,8 @@ data class DownloadEntity(
     val downloadedAt: Long = System.currentTimeMillis(),
     val localFilePath: String? = null,
     val videoUrl: String? = null,
-    val captionsJson: String? = null
+    val captionsJson: String? = null,
+    @ColumnInfo(defaultValue = "0") val isForYou: Boolean = false
 )
 
 @Entity(
@@ -81,7 +83,9 @@ data class ProfileEntity(
     val autoplayNext: Boolean = true,
     val autoplayPreviews: Boolean = true,
     val gameHandle: String? = null,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'Original'") val audioLanguage: String = "Original",
+    @ColumnInfo(defaultValue = "'Off'") val subtitleLanguage: String = "Off"
 )
 
 @Dao
@@ -153,6 +157,9 @@ interface NetflixDao {
     @Query("SELECT * FROM downloads WHERE profileId = :profileId ORDER BY downloadedAt DESC")
     suspend fun getAllDownloadsOnce(profileId: String): List<DownloadEntity>
 
+    @Query("SELECT COUNT(*) FROM downloads WHERE downloadKey = :downloadKey")
+    suspend fun downloadReferenceCount(downloadKey: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveDownload(download: DownloadEntity)
 
@@ -194,4 +201,3 @@ interface NetflixDao {
     @Query("DELETE FROM reminders")
     suspend fun clearReminders()
 }
-

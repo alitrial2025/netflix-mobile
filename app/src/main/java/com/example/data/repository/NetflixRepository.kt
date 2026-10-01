@@ -125,7 +125,8 @@ class NetflixRepository(private val dao: NetflixDao) {
         episodeId: String? = null,
         localFilePath: String? = null,
         videoUrl: String? = null,
-        captionsJson: String? = null
+        captionsJson: String? = null,
+        isForYou: Boolean = false
     ) {
         val downloadKey = if (episodeId != null) "${mediaId}_$episodeId" else mediaId
         dao.saveDownload(
@@ -138,7 +139,8 @@ class NetflixRepository(private val dao: NetflixDao) {
                 fileSizeMb = sizeMb,
                 localFilePath = localFilePath,
                 videoUrl = videoUrl,
-                captionsJson = captionsJson
+                captionsJson = captionsJson,
+                isForYou = isForYou
             )
         )
     }
@@ -146,6 +148,8 @@ class NetflixRepository(private val dao: NetflixDao) {
     suspend fun removeDownload(profileId: String, downloadKey: String) {
         dao.deleteDownload(profileId, downloadKey)
     }
+
+    suspend fun isDownloadReferenced(downloadKey: String): Boolean = dao.downloadReferenceCount(downloadKey) > 0
 
     suspend fun clearDownloads(profileId: String) {
         dao.clearAllDownloads(profileId)
@@ -192,4 +196,3 @@ class NetflixRepository(private val dao: NetflixDao) {
         dao.clearProfiles()
     }
 }
-

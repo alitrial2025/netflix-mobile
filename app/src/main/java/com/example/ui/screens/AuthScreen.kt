@@ -174,7 +174,7 @@ fun AuthScreen(
         // 1. Cinematic Background Poster Wall Image
         Image(
             painter = painterResource(id = R.drawable.img_onboarding_bg_1788023799582),
-            contentDescription = "Netflix Posters Collage",
+            contentDescription = "NetflixPro Posters Collage",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
@@ -1019,7 +1019,7 @@ private fun PrivacySheetContent(onClose: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Netflix is committed to protecting your personal information and streaming privacy.",
+            text = "NetflixPro is committed to protecting your personal information and streaming privacy.",
             color = Color.White.copy(alpha = 0.85f),
             fontSize = 14.sp,
             lineHeight = 20.sp
@@ -1116,12 +1116,12 @@ private fun FaqSheetContent(onClose: () -> Unit) {
 
     val faqs = remember {
         listOf(
-            "What is Netflix?" to "Netflix is a streaming service that offers a wide variety of award-winning TV programmes, films, anime, documentaries and more on thousands of internet-connected devices.\n\nYou can watch as much as you want, whenever you want – all for one low monthly price. There's always something new to discover.",
-            "How much does Netflix cost?" to "Watch Netflix on your smartphone, tablet, Smart TV, laptop, or streaming device, all for one fixed monthly fee. Plans range from KES 300 to KES 1,100 a month. No extra costs, no contracts.",
-            "Where can I watch?" to "Watch anywhere, anytime. Sign in with your Netflix account to watch instantly on the web or from any internet-connected device that offers the Netflix app, including Smart TVs, smartphones, tablets, streaming media players and game consoles.\n\nYou can also download your favourite shows with the Android app to watch while you're on the go without an internet connection.",
-            "How do I cancel?" to "Netflix is flexible. There are no annoying contracts and no commitments. You can easily cancel your account online in two clicks. There are no cancellation fees – start or stop your account anytime.",
-            "What can I watch on Netflix?" to "Netflix has an extensive library of feature films, documentaries, TV programmes, anime, award-winning Netflix originals, and more. Watch as much as you want, anytime you want.",
-            "Is Netflix good for kids?" to "The Netflix Kids experience is included in your membership to give parents control while kids enjoy family-friendly TV shows and films in their own space.\n\nKids profiles come with PIN-protected parental controls that let you restrict the maturity rating of content kids can watch and block specific titles."
+            "What is NetflixPro?" to "NetflixPro is a streaming service that offers a wide variety of award-winning TV programmes, films, anime, documentaries and more on thousands of internet-connected devices.\n\nYou can watch as much as you want, whenever you want – all for one low monthly price. There's always something new to discover.",
+            "How much does NetflixPro cost?" to "Watch NetflixPro on your smartphone, tablet, Smart TV, laptop, or streaming device, all for one fixed monthly fee. Plans range from KES 300 to KES 1,100 a month. No extra costs, no contracts.",
+            "Where can I watch?" to "Watch anywhere, anytime. Sign in with your NetflixPro account to watch instantly on the web or from any internet-connected device that offers the NetflixPro app, including Smart TVs, smartphones, tablets, streaming media players and game consoles.\n\nYou can also download your favourite shows with the Android app to watch while you're on the go without an internet connection.",
+            "How do I cancel?" to "NetflixPro is flexible. There are no annoying contracts and no commitments. You can easily cancel your account online in two clicks. There are no cancellation fees – start or stop your account anytime.",
+            "What can I watch on NetflixPro?" to "NetflixPro has an extensive library of feature films, documentaries, TV programmes, anime, award-winning NetflixPro originals, and more. Watch as much as you want, anytime you want.",
+            "Is NetflixPro good for kids?" to "The NetflixPro Kids experience is included in your membership to give parents control while kids enjoy family-friendly TV shows and films in their own space.\n\nKids profiles come with PIN-protected parental controls that let you restrict the maturity rating of content kids can watch and block specific titles."
         )
     }
 

@@ -51,7 +51,9 @@ fun ProfileAvatar(
         .clip(cardShape)
         .then(
             if (profile == null) {
-                if (isLocked) {
+                if (isEditMode) {
+                    Modifier.background(Color(0xFF53605D))
+                } else if (isLocked) {
                     Modifier
                         .background(Color(0xFF141416))
                         .border(1.dp, Color(0xFF333336), cardShape)
@@ -163,7 +165,14 @@ fun ProfileAvatar(
         }
 
         // Edit Mode overlay with pencil icon badge
-        if (isEditMode) {
+        if (isEditMode && profile == null) {
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Edit Profile",
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.4f)
+            )
+        } else if (isEditMode) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

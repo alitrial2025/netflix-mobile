@@ -71,6 +71,8 @@ fun UpdateGateHost(content: @Composable () -> Unit) {
     }
     if (state.phase == UpdatePhase.CONTINUE) {
         content()
+    } else if (state.phase == UpdatePhase.CHECKING) {
+        Box(Modifier.fillMaxSize().background(Color.Black))
     } else {
         BackHandler { gate.later() }
         UpdateGateScreen(

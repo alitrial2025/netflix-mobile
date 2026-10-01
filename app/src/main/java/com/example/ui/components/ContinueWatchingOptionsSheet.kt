@@ -253,7 +253,7 @@ fun ContinueWatchingOptionsSheet(
                         action = Intent.ACTION_SEND
                         putExtra(
                             Intent.EXTRA_TEXT,
-                            "Check out '${media.title}' on Netflix!\n${media.description}"
+                            "Check out '${media.title}' on NetflixPro!\n${media.description}"
                         )
                         type = "text/plain"
                     }

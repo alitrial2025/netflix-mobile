@@ -78,7 +78,8 @@ enum class RatingOption(
 fun NetflixRatingAction(
     currentRating: String? = null,
     onRatingSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp, labelSize: androidx.compose.ui.unit.TextUnit = 11.sp
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     var selectedOptionKey by remember { mutableStateOf<String?>(null) }
@@ -177,13 +178,13 @@ fun NetflixRatingAction(
                     painter = painterResource(id = activeIconRes),
                     contentDescription = "Rate",
                     tint = activeTint,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(iconSize)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = activeLabel,
                     color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 11.sp,
+                    fontSize = labelSize,
                     fontWeight = FontWeight.Medium
                 )
             }

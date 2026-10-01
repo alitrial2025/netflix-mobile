@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -14,13 +16,20 @@ import androidx.room.RoomDatabase
         RatingEntity::class,
         ReminderEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun netflixDao(): NetflixDao
 
     companion object {
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_profiles ADD COLUMN audioLanguage TEXT NOT NULL DEFAULT 'Original'")
+                db.execSQL("ALTER TABLE user_profiles ADD COLUMN subtitleLanguage TEXT NOT NULL DEFAULT 'Off'")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN isForYou INTEGER NOT NULL DEFAULT 0")
+            }
+        }
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -30,7 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "netflix_database.db"
-                ).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_7_8).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

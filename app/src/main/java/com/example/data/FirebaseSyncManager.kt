@@ -264,6 +264,8 @@ class FirebaseSyncManager(private val context: Context) {
                             "maxAge" to profile.maxAge,
                             "pin" to (ProfilePin.hash(profile.pin) ?: ""),
                             "language" to profile.language,
+                            "audioLanguage" to profile.audioLanguage,
+                            "subtitleLanguage" to profile.subtitleLanguage,
                             "autoplayNext" to profile.autoplayNext,
                             "autoplayPreviews" to profile.autoplayPreviews,
                             "gameHandle" to (profile.gameHandle ?: ""),
@@ -339,6 +341,8 @@ class FirebaseSyncManager(private val context: Context) {
                                     maxAge = (doc.getLong("maxAge") ?: 18).toInt(),
                                     pin = doc.getString("pin")?.takeIf { it.isNotBlank() },
                                     language = doc.getString("language") ?: "English",
+                                    audioLanguage = doc.getString("audioLanguage") ?: "Original",
+                                    subtitleLanguage = doc.getString("subtitleLanguage") ?: "Off",
                                     autoplayNext = doc.getBoolean("autoplayNext") ?: true,
                                     autoplayPreviews = doc.getBoolean("autoplayPreviews") ?: true,
                                     gameHandle = doc.getString("gameHandle")?.takeIf { it.isNotBlank() }

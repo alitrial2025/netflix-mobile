@@ -38,8 +38,15 @@ private val NetflixDarkRed = Color(0xFFB81D24)
 private val NetflixBrightRed = Color(0xFFE50914)
 private val NetflixRibbonHighlight = Color(0xFFF40612)
 
+/** Shared proportions for the outlined SVGs and their Android vector exports. */
+internal object NetflixProLogoGeometry {
+    const val MarkAspectRatio = 1044f / 1000f
+    const val WordmarkAspectRatio = 1506f / 277f
+    const val WordmarkNWidthFraction = 140.803f / 1506f
+}
+
 /**
- * Loads and renders the Netflix SVG wordmark from assets/netflix_logo.svg
+ * Renders the outlined NetflixPro SVG vector export synchronously.
  */
 @Composable
 fun NetflixSvgWordmark(
@@ -47,23 +54,19 @@ fun NetflixSvgWordmark(
     height: Dp = 26.dp,
     testTag: String = "netflix_svg_wordmark"
 ) {
-    val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data("file:///android_asset/netflix_logo.svg")
-            .decoderFactory(SvgDecoder.Factory())
-            .crossfade(true)
-            .build(),
-        contentDescription = "Netflix",
+    Image(
+        painter = painterResource(R.drawable.ic_netflix_logo),
+        contentDescription = "NetflixPro",
         contentScale = ContentScale.Fit,
         modifier = modifier
             .height(height)
+            .width(height * NetflixProLogoGeometry.WordmarkAspectRatio)
             .testTag(testTag)
     )
 }
 
 /**
- * Loads and renders the Netflix Ribbon 'N' SVG from assets/netflix_n.svg
+ * Renders the Npro ribbon lockup SVG vector export synchronously.
  */
 @Composable
 fun NetflixSvgNLogo(
@@ -71,24 +74,19 @@ fun NetflixSvgNLogo(
     size: Dp = 32.dp,
     testTag: String = "netflix_svg_n_logo"
 ) {
-    val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data("file:///android_asset/netflix_n.svg")
-            .decoderFactory(SvgDecoder.Factory())
-            .crossfade(true)
-            .build(),
-        contentDescription = "Netflix N Logo",
+    Image(
+        painter = painterResource(R.drawable.ic_netflix_n),
+        contentDescription = "Npro logo",
         contentScale = ContentScale.Fit,
         modifier = modifier
             .height(size)
-            .width(size * 0.62f)
+            .width(size * NetflixProLogoGeometry.MarkAspectRatio)
             .testTag(testTag)
     )
 }
 
 /**
- * Hardware-accelerated Netflix 3D Ribbon 'N' Logo using vector drawable.
+ * Hardware-accelerated Npro ribbon lockup using the shared vector drawable.
  */
 @Composable
 fun NetflixNLogo(
@@ -96,10 +94,10 @@ fun NetflixNLogo(
     size: Dp = 32.dp,
     testTag: String = "netflix_n_logo"
 ) {
-    val width = size * 0.60f
+    val width = size * NetflixProLogoGeometry.MarkAspectRatio
     Image(
         painter = painterResource(id = R.drawable.ic_netflix_n),
-        contentDescription = "Netflix N Logo",
+        contentDescription = "Npro logo",
         contentScale = ContentScale.Fit,
         modifier = modifier
             .size(width = width, height = size)
@@ -108,7 +106,7 @@ fun NetflixNLogo(
 }
 
 /**
- * Full Netflix Wordmark logo (SVG)
+ * Full NetflixPro wordmark (outlined SVG)
  */
 @Composable
 fun NetflixWordmark(

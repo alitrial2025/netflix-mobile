@@ -58,7 +58,7 @@ private val avatarCategories = listOf(
     "Squid Game",
     "Stranger Things",
     "Cyberpunk",
-    "Netflix Originals",
+    "NetflixPro Originals",
     "Trending"
 )
 
@@ -78,7 +78,7 @@ fun AvatarPickerSheet(
             "Squid Game" -> allUrls.drop(30).take(30)
             "Stranger Things" -> allUrls.drop(60).take(30)
             "Cyberpunk" -> allUrls.drop(90).take(30)
-            "Netflix Originals" -> allUrls.drop(120).take(40)
+            "NetflixPro Originals" -> allUrls.drop(120).take(40)
             "Trending" -> allUrls.drop(160)
             else -> allUrls
         }

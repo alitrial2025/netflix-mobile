@@ -3,11 +3,10 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <group
-        android:translateX="-25.5"
-        android:translateY="-3.77">
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M39.5,18.5H35.5V24.5H29V13.6235C29,13.5457 29.0363,13.4723 29.0981,13.425L37.3481,7.11613C37.4378,7.04758 37.5622,7.04758 37.6519,7.11613L45.9019,13.425C45.9637,13.4723 46,13.5457 46,13.6235V24.5H39.5V18.5Z"/>
-    </group>
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineJoin="round"
+        android:pathData="M3,10L12,3L21,10L21,21L3,21Z M9,21L9,14L15,14L15,21"/>
 </vector>

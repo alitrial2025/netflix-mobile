@@ -1,5 +1,12 @@
 package com.example.ui.screens
 
+import com.example.ui.theme.netflixProSwitchColors
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CircularProgressIndicator
+import com.example.data.model.profilePlaybackLanguages
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -38,7 +47,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,26 +79,30 @@ fun EditProfileScreen(
     onSaveProfile: (UserProfile) -> Unit,
     onDeleteProfile: (String) -> Unit,
     onOpenAvatarPicker: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    canDelete: Boolean = true, isSaving: Boolean = false, saveError: String? = null
 ) {
-    var profileName by remember(profile.id, profile.name) { mutableStateOf(profile.name) }
-    var isKids by remember(profile.id, profile.isKids) { mutableStateOf(profile.isKids) }
-    var maxAge by remember(profile.id, profile.maxAge) { mutableStateOf(profile.maxAge) }
+    var profileName by rememberSaveable(profile.id) { mutableStateOf(profile.name) }
+    var isKids by rememberSaveable(profile.id) { mutableStateOf(profile.isKids) }
+    var maxAge by rememberSaveable(profile.id) { mutableStateOf(profile.maxAge) }
     var maturityRating by remember(profile.id) {
         mutableStateOf(
             when {
                 profile.maxAge <= 7 -> "TV-Y"
                 profile.maxAge <= 12 -> "PG"
-                profile.maxAge <= 16 -> "PG-13"
+                profile.maxAge <= 16 -> "16+"
                 else -> "TV-MA"
             }
         )
     }
     var displayLanguage by remember(profile.id) { mutableStateOf(profile.language) }
-    var audioSubtitleLanguage by remember(profile.id) { mutableStateOf(profile.language) }
+    var audioLanguage by rememberSaveable(profile.id) { mutableStateOf(profile.audioLanguage) }
+    var subtitleLanguage by rememberSaveable(profile.id) { mutableStateOf(profile.subtitleLanguage) }
+    var settingsPage by rememberSaveable(profile.id) { mutableStateOf<String?>(null) }
+    var showDiscard by remember { mutableStateOf(false) }
     var autoPlayNext by remember(profile.id) { mutableStateOf(profile.autoplayNext) }
     var autoPlayPreviews by remember(profile.id) { mutableStateOf(profile.autoplayPreviews) }
-    var gameHandle by remember(profile.id, profile.name) { mutableStateOf(profile.gameHandle ?: "@${profile.name.lowercase().filter { it.isLetterOrDigit() }}gamer") }
+    var gameHandle by rememberSaveable(profile.id) { mutableStateOf(profile.gameHandle.orEmpty()) }
     var profilePin by remember(profile.id) { mutableStateOf(profile.pin) }
     var isProfileLocked by remember(profile.id) { mutableStateOf(!profile.pin.isNullOrBlank()) }
     var showSetPinDialog by remember { mutableStateOf(false) }
@@ -99,6 +112,18 @@ fun EditProfileScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showMaturityDialog by remember { mutableStateOf(false) }
 
+    val dirty = profileName != profile.name || isKids != profile.isKids || maxAge != profile.maxAge ||
+        audioLanguage != profile.audioLanguage || subtitleLanguage != profile.subtitleLanguage ||
+        displayLanguage != profile.language || autoPlayNext != profile.autoplayNext || autoPlayPreviews != profile.autoplayPreviews ||
+        gameHandle != profile.gameHandle.orEmpty() || profilePin != profile.pin
+    val requestDismiss: () -> Unit = { if (!isSaving) { if (dirty) showDiscard = true else onDismiss() } }
+    BackHandler { if (settingsPage != null) settingsPage = null else requestDismiss() }
+    if (settingsPage != null) {
+        ProfilePreferencesScreen(settingsPage!!, audioLanguage, subtitleLanguage, displayLanguage, gameHandle,
+            onBack = { settingsPage = null }, onAudio = { audioLanguage = it }, onSubtitle = { subtitleLanguage = it },
+            onDisplay = { displayLanguage = it }, onHandle = { gameHandle = it; settingsPage = null })
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -117,7 +142,7 @@ fun EditProfileScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = onDismiss,
+                    onClick = requestDismiss,
                     modifier = Modifier.testTag("edit_profile_back_button")
                 ) {
                     Icon(
@@ -140,22 +165,23 @@ fun EditProfileScreen(
                 TextButton(
                     onClick = {
                         val updated = profile.copy(
-                            name = profileName.ifBlank { profile.name },
+                            name = profileName.trim().filterNot { it.isISOControl() }.take(25).ifBlank { profile.name },
                             isKids = isKids,
                             maxAge = if (isKids) maxAge.coerceAtMost(12) else maxAge,
                             pin = if (isProfileLocked) profilePin?.takeIf { it.isNotBlank() } else null,
                             language = displayLanguage,
                             autoplayNext = autoPlayNext,
                             autoplayPreviews = autoPlayPreviews,
-                            gameHandle = gameHandle
+                            gameHandle = gameHandle.trim().takeIf { it.isNotBlank() },
+                            audioLanguage = audioLanguage, subtitleLanguage = subtitleLanguage
                         )
                         onSaveProfile(updated)
                     },
-                    enabled = profileName.isNotBlank(),
+                    enabled = profileName.trim().isNotBlank() && !isSaving,
                     modifier = Modifier.testTag("edit_profile_save_button")
                 ) {
                     Text(
-                        text = "SAVE",
+                        text = if (isSaving) "Saving…" else "Save",
                         color = if (profileName.isNotBlank()) NetflixRed else Color.Gray,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
@@ -167,9 +193,12 @@ fun EditProfileScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .navigationBarsPadding()
+                    .imePadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
+                if (saveError != null) Text(saveError, color = NetflixRed, modifier = Modifier.padding(bottom = 12.dp))
                 // Avatar Header with Edit Badge
                 Box(
                     modifier = Modifier
@@ -224,7 +253,7 @@ fun EditProfileScreen(
 
                 OutlinedTextField(
                     value = profileName,
-                    onValueChange = { profileName = it },
+                    onValueChange = { profileName = it.filterNot { char -> char.isISOControl() }.take(25) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("edit_profile_name_input"),
@@ -283,7 +312,7 @@ fun EditProfileScreen(
                 // Maturity Rating Selection Row
                 SettingItemRow(
                     title = "Maturity Rating",
-                    subtitle = "$maturityRating • ${if (isKids || maxAge <= 12) "Ages $maxAge and below" else "All Maturity Ratings"}",
+                    subtitle = "$maturityRating • ${if (isKids || maxAge <= 12) "Ages $maxAge and below" else if (maxAge >= 18) "All maturity ratings" else "Ages $maxAge and below"}",
                     onClick = { showMaturityDialog = true },
                     testTag = "maturity_rating_item"
                 )
@@ -296,7 +325,7 @@ fun EditProfileScreen(
                 SettingItemRow(
                     title = "Display Language",
                     subtitle = displayLanguage,
-                    onClick = { /* Select display language */ },
+                    onClick = { settingsPage = "display" },
                     testTag = "display_language_item"
                 )
 
@@ -304,8 +333,8 @@ fun EditProfileScreen(
 
                 SettingItemRow(
                     title = "Audio & Subtitles",
-                    subtitle = audioSubtitleLanguage,
-                    onClick = { /* Select audio/subtitle language */ },
+                    subtitle = "$audioLanguage audio · $subtitleLanguage subtitles",
+                    onClick = { settingsPage = "playback" },
                     testTag = "audio_subtitles_item"
                 )
 
@@ -316,7 +345,7 @@ fun EditProfileScreen(
 
                 SwitchRow(
                     title = "Autoplay next episode",
-                    subtitle = "Automatically play the next episode in a series on all devices",
+                    subtitle = "Automatically start the next available episode",
                     checked = autoPlayNext,
                     onCheckedChange = { autoPlayNext = it },
                     testTag = "autoplay_next_switch"
@@ -326,7 +355,7 @@ fun EditProfileScreen(
 
                 SwitchRow(
                     title = "Autoplay previews",
-                    subtitle = "Automatically play previews while browsing on all devices",
+                    subtitle = "Play trailers while browsing this profile",
                     checked = autoPlayPreviews,
                     onCheckedChange = { autoPlayPreviews = it },
                     testTag = "autoplay_previews_switch"
@@ -339,8 +368,8 @@ fun EditProfileScreen(
 
                 SettingItemRow(
                     title = "Game Handle",
-                    subtitle = gameHandle,
-                    onClick = { /* Change game handle */ },
+                    subtitle = gameHandle.ifBlank { "Create your handle" },
+                    onClick = { settingsPage = "handle" },
                     testTag = "game_handle_item"
                 )
 
@@ -415,6 +444,7 @@ fun EditProfileScreen(
                 // Delete Profile Button
                 Button(
                     onClick = { showDeleteConfirmDialog = true },
+                    enabled = canDelete && !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -437,6 +467,10 @@ fun EditProfileScreen(
             }
         }
 
+        if (showDiscard) AlertDialog(onDismissRequest = { showDiscard = false },
+            title = { Text("Discard changes?") }, text = { Text("Your profile changes haven't been saved.") },
+            confirmButton = { TextButton(onClick = { showDiscard = false; onDismiss() }) { Text("Discard") } },
+            dismissButton = { TextButton(onClick = { showDiscard = false }) { Text("Keep editing") } })
         // Delete Confirmation Dialog
         if (showDeleteConfirmDialog) {
             AlertDialog(
@@ -510,7 +544,7 @@ fun EditProfileScreen(
                         OutlinedTextField(
                             value = pinInput,
                             onValueChange = { input ->
-                                val filtered = input.filter { it.isDigit() }.take(4)
+                                val filtered = input.filter { it in '0'..'9' }.take(4)
                                 pinInput = filtered
                                 pinError = null
                             },
@@ -588,7 +622,7 @@ fun EditProfileScreen(
                             Triple("TV-Y (Ages 7 & below)", 7, "TV-Y"),
                             Triple("PG (Ages 10 & below)", 10, "PG"),
                             Triple("PG (Ages 12 & below)", 12, "PG"),
-                            Triple("PG-13 (Ages 16 & below)", 16, "PG-13"),
+                            Triple("16+ (Ages 16 & below)", 16, "16+"),
                             Triple("TV-MA (All Ratings / 18+)", 18, "TV-MA")
                         )
                         ratingTiers.forEach { (label, age, ratingCode) ->
@@ -718,12 +752,59 @@ private fun SwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = NetflixRed,
-                uncheckedThumbColor = Color.Gray,
-                uncheckedTrackColor = NetflixBlack
-            )
+            colors = netflixProSwitchColors()
         )
+    }
+}
+
+@Composable
+private fun ProfilePreferencesScreen(
+    page: String, audio: String, subtitles: String, display: String, handle: String,
+    onBack: () -> Unit, onAudio: (String) -> Unit, onSubtitle: (String) -> Unit,
+    onDisplay: (String) -> Unit, onHandle: (String) -> Unit
+) {
+    var handleDraft by rememberSaveable { mutableStateOf(handle) }
+    val validHandle = handleDraft.isBlank() || handleDraft.matches(Regex("[a-zA-Z0-9_]{3,16}"))
+    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onBack, Modifier.testTag("profile_preferences_back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+            Text(when(page) { "display" -> "Display language"; "playback" -> "Audio & subtitles"; else -> "Game handle" },
+                color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            if (page == "handle") TextButton(onClick = { onHandle(handleDraft.trim()) }, enabled = validHandle,
+                modifier = Modifier.testTag("profile_handle_apply")) { Text("Done", color = if (validHandle) Color.White else Color.Gray) }
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
+            when (page) {
+                "handle" -> item {
+                    Text("Choose a handle for this profile. Use 3–16 letters, numbers or underscores.", color = Color.LightGray)
+                    OutlinedTextField(handleDraft, onValueChange = { handleDraft = it.filter { c -> c.isLetterOrDigit() || c == '_' }.take(16) },
+                        label = { Text("Game handle") }, isError = !validHandle, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp).testTag("profile_handle_input"))
+                }
+                "display" -> {
+                    item { Text("The app interface is available in English.", color = Color.LightGray, modifier = Modifier.padding(bottom = 16.dp)) }
+                    item { ProfileLanguageRow("English", display == "English", "profile_display_English") { onDisplay("English") } }
+                }
+                else -> {
+                    item { Text("Your preferred languages are selected when available in the video. You can change tracks in the player.", color = Color.LightGray, fontSize = 13.sp, modifier = Modifier.padding(bottom = 24.dp)) }
+                    item { Text("Audio", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                    items(listOf("Original") + profilePlaybackLanguages.keys, key = { "audio:$it" }) { language ->
+                        ProfileLanguageRow(language, audio == language, "profile_audio_$language") { onAudio(language) }
+                    }
+                    item { HorizontalDivider(Modifier.padding(vertical = 24.dp), color = Color(0xFF333333)); Text("Subtitles", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                    items(listOf("Off") + profilePlaybackLanguages.keys, key = { "subtitle:$it" }) { language ->
+                        ProfileLanguageRow(language, subtitles == language, "profile_subtitle_$language") { onSubtitle(language) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileLanguageRow(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 16.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White, modifier = Modifier.weight(1f), fontSize = 16.sp)
+        if (selected) Icon(Icons.Default.Check, "Selected", tint = Color.White)
     }
 }

@@ -10,6 +10,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -56,6 +59,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -91,308 +95,92 @@ fun ProfilePickerSheet(
 ) {
     val context = LocalContext.current
     var isManageMode by remember { mutableStateOf(false) }
-    var ambientColor by remember(featuredMedia?.id) { mutableStateOf(Color(0xFF160B0F)) }
     var lockedProfileToUnlock by remember { mutableStateOf<UserProfile?>(null) }
     var enteredPin by remember { mutableStateOf("") }
     var pinError by remember { mutableStateOf<String?>(null) }
 
-    val animatedAmbientColor by animateColorAsState(
-        targetValue = ambientColor,
-        animationSpec = tween(durationMillis = 600),
-        label = "ambient_color"
-    )
+    val colors by com.example.ui.components.rememberPosterColors(featuredMedia)
+    val animatedAmbientColor by animateColorAsState(colors.second, tween(500), label = "profile_poster_color")
+    val imageModel = com.example.ui.components.posterModel(featuredMedia)
+    androidx.activity.compose.BackHandler { if (isManageMode) isManageMode = false else onDismiss() }
 
-    val imageModel = featuredMedia?.backdropUrl ?: featuredMedia?.posterUrl ?: featuredMedia?.bannerDrawableRes
-
-    val imageRequest = remember(imageModel) {
-        ImageRequest.Builder(context)
-            .data(imageModel)
-            .allowHardware(false)
-            .crossfade(true)
-            .build()
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-    ) {
-        // Atmospheric Background: Media poster / backdrop with multi-stop dark vignette
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val footerHeight = (maxHeight * .35f).coerceIn(300.dp, 390.dp)
         if (imageModel != null) {
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onSuccess = { state ->
-                    val bitmap = (state.result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                    if (bitmap != null) {
-                        Palette.from(bitmap).generate { palette ->
-                            if (palette != null) {
-                                val swatchRgb = palette.darkVibrantSwatch?.rgb
-                                    ?: palette.dominantSwatch?.rgb
-                                    ?: palette.vibrantSwatch?.rgb
-                                    ?: palette.darkMutedSwatch?.rgb
-                                if (swatchRgb != null) {
-                                    val c = Color(swatchRgb)
-                                    ambientColor = Color(
-                                        red = (c.red * 0.45f).coerceIn(0.08f, 0.25f),
-                                        green = (c.green * 0.35f).coerceIn(0.04f, 0.15f),
-                                        blue = (c.blue * 0.45f).coerceIn(0.08f, 0.25f),
-                                        alpha = 1f
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            )
-
-            // Deep cinematic vignette overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.55f),
-                            0.35f to Color.Black.copy(alpha = 0.78f),
-                            0.70f to animatedAmbientColor.copy(alpha = 0.92f),
-                            1.0f to Color(0xFF0A0A0C)
-                        )
-                    )
-            )
-        } else {
-            // Default ambient theatrical glow
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color(0xFF14070A),
-                            0.5f to Color(0xFF0D0D11),
-                            1f to Color.Black
-                        )
-                    )
-            )
+            AsyncImage(model = imageModel, contentDescription = featuredMedia?.title,
+                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-
-        // Soft spotlight radial glow directly behind the profiles
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(420.dp)
-                .align(Alignment.Center)
-                .drawBehind {
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                animatedAmbientColor.copy(alpha = 0.85f),
-                                animatedAmbientColor.copy(alpha = 0.35f),
-                                Color.Transparent
-                            ),
-                            center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height * 0.5f),
-                            radius = size.width * 0.65f
-                        )
-                    )
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+            0f to Color.Black.copy(alpha = .05f), .42f to Color.Transparent,
+            .57f to Color.Black.copy(alpha = .35f), .70f to Color.Black.copy(alpha = .88f),
+            1f to Color.Black
+        )))
+        featuredMedia?.let { media ->
+            Column(Modifier.align(Alignment.BottomCenter).padding(bottom = footerHeight + 40.dp, start = 32.dp, end = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                if (!media.logoUrl.isNullOrBlank()) {
+                    AsyncImage(model = media.logoUrl, contentDescription = media.title,
+                        modifier = Modifier.widthIn(max = 300.dp).fillMaxWidth(.78f).height(70.dp), contentScale = ContentScale.Fit)
+                } else {
+                    Text(media.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center, maxLines = 2)
                 }
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Top Bar: Netflix N Wordmark, Manage Profiles Toggle & Close
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    NetflixNLogo(size = 28.dp)
-                    NetflixWordmark(height = 18.dp)
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Manage / Done Toggle Button
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (isManageMode) NetflixRed else Color.White.copy(alpha = 0.12f)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isManageMode) NetflixRed else Color.White.copy(alpha = 0.25f),
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                            .clickable {
-                                isManageMode = !isManageMode
-                            }
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
-                            .testTag("manage_profiles_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isManageMode) Icons.Default.Check else Icons.Default.Edit,
-                                contentDescription = if (isManageMode) "Done" else "Manage Profiles",
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = if (isManageMode) "Done" else "Manage",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Close Button
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .testTag("profile_picker_close_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
+                media.top10Rank?.let { rank ->
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("TOP\n10", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black,
+                            lineHeight = 10.sp, textAlign = TextAlign.Center,
+                            modifier = Modifier.background(NetflixRed, RoundedCornerShape(2.dp)).padding(3.dp))
+                        Text("No. $rank in ${if (media.type == com.example.data.model.MediaType.TV_SHOW) "Series" else "Films"} Today",
+                            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.weight(0.6f))
-
-            // Dynamic Title Area
-            Text(
-                text = if (isManageMode) "Manage Profiles" else "Who's Watching?",
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold,
-                fontFamily = FontFamily.SansSerif,
-                letterSpacing = (-0.5).sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Subtitle / Profile Plan Allocation Pill
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (isManageMode) "Tap a profile to edit" else "${profiles.size}/${userSubscription.maxProfiles} Profiles • ${userSubscription.planName} Plan",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+        }
+        Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(footerHeight)) {
+            val curve = 28.dp.toPx()
+            val dome = Path().apply {
+                moveTo(0f, curve)
+                quadraticTo(size.width / 2f, -curve, size.width, curve)
+                lineTo(size.width, size.height); lineTo(0f, size.height); close()
             }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Profiles Grid
-            val columns = if (profiles.size <= 2) 2 else 3
+            drawPath(dome, Brush.verticalGradient(listOf(animatedAmbientColor, animatedAmbientColor.copy(alpha = .94f))))
+        }
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(footerHeight).navigationBarsPadding()
+            .padding(top = 4.dp, bottom = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (isManageMode) "Tap a profile to edit" else "Choose your profile", color = Color.White.copy(alpha = .75f), fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
             LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-                verticalArrangement = Arrangement.spacedBy(28.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 380.dp)
-                    .testTag("profile_picker_grid")
+                columns = GridCells.Fixed(if (profiles.size <= 2) 2 else 3),
+                contentPadding = PaddingValues(horizontal = 32.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+                modifier = Modifier.widthIn(max = 440.dp).fillMaxWidth().weight(1f).testTag("profile_picker_grid")
             ) {
-                items(profiles) { profile ->
-                    ProfileItem(
-                        profile = profile,
-                        isSelected = profile.id == activeProfile.id && !isManageMode,
-                        isEditMode = isManageMode,
-                        onClick = {
-                            if (isManageMode) {
-                                onEditProfile?.invoke(profile)
-                            } else if (!profile.pin.isNullOrBlank()) {
-                                lockedProfileToUnlock = profile
-                                enteredPin = ""
-                                pinError = null
-                            } else {
-                                onSelectProfile(profile)
-                            }
-                        }
-                    )
+                items(profiles, key = { it.id }) { profile ->
+                    ProfileItem(profile = profile, isEditMode = isManageMode, onClick = {
+                        if (isManageMode) onEditProfile?.invoke(profile)
+                        else if (!profile.pin.isNullOrBlank()) {
+                            lockedProfileToUnlock = profile; enteredPin = ""; pinError = null
+                        } else onSelectProfile(profile)
+                    })
                 }
-
-                // Add "Add Profile" button if allowed by subscription
-                if (profiles.size < userSubscription.maxProfiles) {
-                    item {
-                        ProfileItem(
-                            profile = null,
-                            name = "Add Profile",
-                            isAddMode = true,
-                            onClick = { onAddProfile?.invoke() }
-                        )
-                    }
-                } else if (profiles.size < 5) {
-                    // Profile quota limit reached -> show Upgrade Profile card
-                    item {
-                        ProfileItem(
-                            profile = null,
-                            name = "Add Profile",
-                            isAddMode = true,
-                            isLocked = true,
+                if (profiles.size < 5 && onAddProfile != null) {
+                    item(key = "add") {
+                        ProfileItem(profile = null, name = "Add Profile", isAddMode = true,
+                            isLocked = profiles.size >= userSubscription.maxProfiles,
                             onClick = {
-                                onUpgradePlan?.invoke() ?: onAddProfile?.invoke()
-                            }
-                        )
+                                if (profiles.size < userSubscription.maxProfiles) onAddProfile()
+                                else onUpgradePlan?.invoke()
+                            })
                     }
                 }
-
-                // "Edit" item maintained for legacy/test tag compatibility
-                if (!isManageMode && onEditProfile != null) {
-                    item {
-                        ProfileItem(
-                            profile = null,
-                            name = "Edit",
-                            isEditMode = true,
-                            onClick = {
-                                isManageMode = true
-                            }
-                        )
+                if (onEditProfile != null) {
+                    item(key = "edit") {
+                        ProfileItem(profile = null, name = if (isManageMode) "Done" else "Edit", isEditMode = true,
+                            onClick = { isManageMode = !isManageMode })
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.weight(1f))
         }
 
         // Elegant Profile PIN Unlock Modal
@@ -613,7 +401,7 @@ private fun ProfileItem(
     ) {
         ProfileAvatar(
             profile = profile,
-            size = 94.dp,
+            size = 76.dp,
             isSelected = isSelected,
             isEditMode = isEditMode,
             isAddMode = isAddMode,
@@ -623,8 +411,8 @@ private fun ProfileItem(
         Text(
             text = name ?: profile?.name ?: "",
             color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
             maxLines = 1
         )

@@ -46,6 +46,7 @@ import com.example.data.model.toUserProfile
 import com.example.data.download.NetflixDownloadManager
 import com.example.data.download.DownloadTaskInfo
 import com.example.data.download.DownloadTaskStatus
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.ensureActive
@@ -90,11 +91,20 @@ data class PlayerState(
     val showAudioSubtitleDialog: Boolean = false,
     val showEpisodeDrawer: Boolean = false,
     val showSkipIntro: Boolean = false,
+    val introWindow: IntroWindow? = null,
     val isResolving: Boolean = false,
     val resolvedUrl: String? = null,
     val resolveHeaders: Map<String, String> = emptyMap(),
     val resolveError: String? = null,
     val sourceId: String? = null,
+    val nextEpisode: Episode? = null,
+    val nextEpisodeMedia: MediaItem? = null,
+    val nextEpisodeLoading: Boolean = false,
+    val nextEpisodeError: String? = null,
+    val nextEpisodeChecked: Boolean = false,
+    val hasEnded: Boolean = false,
+    val audioLanguage: String = "Original",
+    val subtitleLanguage: String = "Off",
     val captions: List<com.example.data.Caption> = emptyList()
 )
 
@@ -122,6 +132,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private fun startNetMirrorWarmup() {
         viewModelScope.launch {
+            if (!hasCatalogNetwork()) { _isWarmupFinished.value = true; return@launch }
             android.util.Log.d("NetMirror", "🚀 starting NetMirror background session warmup...")
             val restored = netMirrorResolver.restoreSessionFromStorage()
             if (restored && netMirrorResolver.isSessionWarm()) {
@@ -140,15 +151,40 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private val catalogCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "catalog-cache.json"))
+
     private fun setupOfflineFallbacks() {
-        CatalogData.allMedia = emptyList()
-        _catalogMedia.value = emptyList()
+        // A failed refresh must not erase metadata needed by offline downloads and history.
+        CatalogData.allMedia = _catalogMedia.value
+    }
+
+    private var catalogRefreshJob: Job? = null
+
+    fun refreshCatalog() = fetchTmdbCatalog()
+
+    private fun hasCatalogNetwork(): Boolean {
+        val connectivity = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val network = connectivity?.activeNetwork ?: return false
+        val caps = connectivity.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun fetchTmdbCatalog() {
-        viewModelScope.launch {
+        if (catalogRefreshJob?.isActive == true) return
+        catalogRefreshJob = viewModelScope.launch(Dispatchers.Default) {
             _isLoadingCatalog.value = true
             try {
+                val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+                if (_catalogMedia.value.isEmpty() && cached.isNotEmpty()) {
+                    _catalogMedia.value = cached
+                    CatalogData.allMedia = cached
+                }
+                if (!hasCatalogNetwork()) { setupOfflineFallbacks(); return@launch }
+                val requestSlots = kotlinx.coroutines.sync.Semaphore(4)
+                fun request(block: suspend () -> com.example.data.network.TmdbResponse) = async {
+                    requestSlots.acquire()
+                    try { requestCatalogSection(block) } finally { requestSlots.release() }
+                }
                 val apiKey = TmdbClient.apiKey
                 if (apiKey.isEmpty() || apiKey == "PLACEHOLDER") {
                     setupOfflineFallbacks()
@@ -156,27 +192,27 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val trendingMoviesDeferred = async { TmdbClient.service.getTrendingMovies(apiKey) }
-                val trendingTvDeferred = async { TmdbClient.service.getTrendingTv(apiKey) }
-                val topRatedMoviesDeferred = async { TmdbClient.service.getTopRatedMovies(apiKey) }
-                val topRatedTvDeferred = async { TmdbClient.service.getTopRatedTv(apiKey) }
-                val upcomingMoviesDeferred = async { TmdbClient.service.getUpcomingMovies(apiKey) }
-                val popularMoviesDeferred = async { TmdbClient.service.getPopularMovies(apiKey) }
-                val popularTvDeferred = async { TmdbClient.service.getPopularTv(apiKey) }
+                val trendingMoviesDeferred = request { TmdbClient.service.getTrendingMovies(apiKey) }
+                val trendingTvDeferred = request { TmdbClient.service.getTrendingTv(apiKey) }
+                val topRatedMoviesDeferred = request { TmdbClient.service.getTopRatedMovies(apiKey) }
+                val topRatedTvDeferred = request { TmdbClient.service.getTopRatedTv(apiKey) }
+                val upcomingMoviesDeferred = request { TmdbClient.service.getUpcomingMovies(apiKey) }
+                val popularMoviesDeferred = request { TmdbClient.service.getPopularMovies(apiKey) }
+                val popularTvDeferred = request { TmdbClient.service.getPopularTv(apiKey) }
 
                 // Category & Genre Discovery (Crime, Action, Sci-Fi, Thriller, Animation, Comedy, Drama, Horror, Romance, Documentary)
-                val crimeMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") } catch (_: Exception) { null } }
-                val crimeTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") } catch (_: Exception) { null } }
-                val actionMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") } catch (_: Exception) { null } }
-                val sciFiMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") } catch (_: Exception) { null } }
-                val animationMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") } catch (_: Exception) { null } }
-                val comedyMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") } catch (_: Exception) { null } }
-                val dramaMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") } catch (_: Exception) { null } }
-                val horrorMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") } catch (_: Exception) { null } }
-                val romanceMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") } catch (_: Exception) { null } }
-                val docMoviesDeferred = async { try { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") } catch (_: Exception) { null } }
-                val actionTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") } catch (_: Exception) { null } }
-                val sciFiTvDeferred = async { try { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") } catch (_: Exception) { null } }
+                val crimeMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") }
+                val crimeTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") }
+                val actionMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") }
+                val sciFiMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") }
+                val animationMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") }
+                val comedyMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") }
+                val dramaMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") }
+                val horrorMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") }
+                val romanceMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") }
+                val docMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") }
+                val actionTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") }
+                val sciFiTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") }
 
                 val trendingMoviesTask = trendingMoviesDeferred.await()
                 val trendingTvTask = trendingTvDeferred.await()
@@ -201,31 +237,31 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
                 val mappedItems = mutableListOf<MediaItem>()
 
-                trendingMoviesTask.results.forEach { result ->
+                trendingMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isTrending = true))
                 }
 
-                trendingTvTask.results.forEach { result ->
+                trendingTvTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, isTrending = true))
                 }
 
-                topRatedMoviesTask.results.take(10).forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isTrending = true, topRank = index + 1))
+                topRatedMoviesTask?.results?.take(10)?.forEachIndexed { index, result ->
+                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, topRank = index + 1))
                 }
 
-                topRatedTvTask.results.take(10).forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, isTrending = true, topRank = index + 1))
+                topRatedTvTask?.results?.take(10)?.forEachIndexed { index, result ->
+                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, topRank = index + 1))
                 }
 
-                upcomingMoviesTask.results.forEach { result ->
+                upcomingMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isComingSoon = true))
                 }
 
-                popularMoviesTask.results.forEach { result ->
+                popularMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE))
                 }
 
-                popularTvTask.results.forEach { result ->
+                popularTvTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW))
                 }
 
@@ -245,83 +281,18 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
                 // Pure TMDB real catalog
                 val deduplicated = mappedItems.distinctBy { it.id }
+                if (deduplicated.isEmpty()) throw java.io.IOException("Catalog is unavailable")
+                withContext(Dispatchers.IO) { catalogCache.write(deduplicated) }
                 CatalogData.allMedia = deduplicated
                 _catalogMedia.value = deduplicated
 
                 // Fetch real TMDB logo titles in background for hero and trending items
                 fetchLogosForItems(apiKey, deduplicated)
 
-                // Wire real TMDB items into Continue Watching, Watchlist, Downloads, Likes & Notifications per profile
-                val tvShows = deduplicated.filter { it.type == MediaType.TV_SHOW }
-                val movies = deduplicated.filter { it.type == MediaType.MOVIE }
-                val kidMedia = deduplicated.filter { it.isKidSafe(12) }
+                // History and notifications come from actual user actions, not catalog fixtures.
 
-                val tv1 = tvShows.getOrNull(0)
-                val tv2 = tvShows.getOrNull(1)
-                val tv3 = tvShows.getOrNull(2)
-                val tv4 = tvShows.getOrNull(3)
-                val m1 = movies.getOrNull(0)
-                val m2 = movies.getOrNull(1)
-                val m3 = movies.getOrNull(2)
-
-                val kid1 = kidMedia.getOrNull(0) ?: tv1
-                val kid2 = kidMedia.getOrNull(1) ?: m1
-                val kid3 = kidMedia.getOrNull(2) ?: tv2
-
-                // Seed Watched Trailers with real TMDB items
-                val realTrailers = mutableListOf<TrailerItem>()
-                if (tv1 != null) realTrailers.add(TrailerItem("tr_1", tv1, "${tv1.title} — Official Trailer", "2:15", "Watched 2h ago"))
-                if (m1 != null) realTrailers.add(TrailerItem("tr_2", m1, "${m1.title} — Main Trailer", "1:52", "Watched yesterday"))
-                if (tv2 != null) realTrailers.add(TrailerItem("tr_3", tv2, "${tv2.title} — Teaser", "1:30", "Watched 3 days ago"))
-                if (realTrailers.isNotEmpty()) {
-                    _watchedTrailers.value = realTrailers
-                }
-
-                // Seed Notifications with real TMDB items
-                val realNotifs = mutableListOf<NotificationItem>()
-                if (tv1 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_1",
-                            title = "New Episode Streaming",
-                            message = "${tv1.title} is now available in 4K HDR.",
-                            timestamp = "2 hours ago",
-                            mediaId = tv1.id,
-                            isRead = false,
-                            iconType = NotificationIconType.NEW_SEASON
-                        )
-                    )
-                }
-                if (m1 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_2",
-                            title = "Trending #1 Today",
-                            message = "${m1.title} is the #1 movie today.",
-                            timestamp = "Yesterday",
-                            mediaId = m1.id,
-                            isRead = false,
-                            iconType = NotificationIconType.BELL
-                        )
-                    )
-                }
-                if (tv2 != null) {
-                    realNotifs.add(
-                        NotificationItem(
-                            id = "notif_3",
-                            title = "Download Ready",
-                            message = "${tv2.title} S1:E1 is downloaded for offline viewing.",
-                            timestamp = "2 days ago",
-                            mediaId = tv2.id,
-                            isRead = true,
-                            iconType = NotificationIconType.DOWNLOAD
-                        )
-                    )
-                }
-                if (realNotifs.isNotEmpty()) {
-                    _notifications.value = realNotifs
-                }
-
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 // If TMDB loading fails for network reasons, do offline fallbacks gracefully
                 setupOfflineFallbacks()
@@ -427,6 +398,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                             maxAge = obj.optInt("maxAge", 18),
                             pin = obj.optString("pin", null).takeIf { !it.isNullOrEmpty() },
                             language = obj.optString("language", "English"),
+                            audioLanguage = obj.optString("audioLanguage", "Original"),
+                            subtitleLanguage = obj.optString("subtitleLanguage", "Off"),
                             autoplayNext = obj.optBoolean("autoplayNext", true),
                             autoplayPreviews = obj.optBoolean("autoplayPreviews", true),
                             gameHandle = obj.optString("gameHandle", null).takeIf { !it.isNullOrEmpty() }
@@ -481,6 +454,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     put("maxAge", profile.maxAge)
                     put("pin", profile.pin ?: "")
                     put("language", profile.language)
+                    put("audioLanguage", profile.audioLanguage)
+                    put("subtitleLanguage", profile.subtitleLanguage)
                     put("autoplayNext", profile.autoplayNext)
                     put("autoplayPreviews", profile.autoplayPreviews)
                     put("gameHandle", profile.gameHandle ?: "")
@@ -524,6 +499,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _showProfilePicker = MutableStateFlow(syncManager.currentUserEmail.value != null && initialProfilesList.isNotEmpty())
     val showProfilePicker: StateFlow<Boolean> = _showProfilePicker.asStateFlow()
 
+    private val _isSavingProfile = MutableStateFlow(false)
+    val isSavingProfile: StateFlow<Boolean> = _isSavingProfile.asStateFlow()
+    private val _profileSaveError = MutableStateFlow<String?>(null)
+    val profileSaveError: StateFlow<String?> = _profileSaveError.asStateFlow()
+    private var profileWriteJob: Job? = null
     private val _editingProfile = MutableStateFlow<UserProfile?>(null)
     val editingProfile: StateFlow<UserProfile?> = _editingProfile.asStateFlow()
 
@@ -669,12 +649,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val displayCatalogMedia: StateFlow<List<MediaItem>> = combine(_catalogMedia, _activeProfile) { catalog, profile ->
-        if (profile.isKidProfile) {
-            catalog.filter { it.isKidSafe(profile.maxAge) }
+        if (profile.hasMaturityRestriction) {
+            catalog.filter { it.isKidSafe(profile.contentMaxAge) }
         } else {
             catalog
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Navigation and Categories
     private val _selectedTab = MutableStateFlow(NavigationTab.HOME)
@@ -708,11 +688,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     val selectedSearchGenre: StateFlow<String?> = _selectedSearchGenre.asStateFlow()
 
     // Downloads management via NetflixDownloadManager
-    val downloadManager: NetflixDownloadManager = NetflixDownloadManager(application, repository, netMirrorResolver)
+    val downloadManager: NetflixDownloadManager = NetflixDownloadManager.getInstance(application)
 
-    val downloadTasks: StateFlow<Map<String, DownloadTaskInfo>> = downloadManager.downloadTasks
-    val downloadingProgress: StateFlow<Map<String, Float>> = downloadManager.downloadingProgress
-    val pausedDownloadKeys: StateFlow<Set<String>> = downloadManager.pausedDownloadKeys
+    val downloadTasks: StateFlow<Map<String, DownloadTaskInfo>> = combine(downloadManager.downloadTasks, _activeProfile) { tasks, profile ->
+        tasks.filterValues { it.profileId == profile.id }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    val downloadingProgress: StateFlow<Map<String, Float>> = combine(downloadManager.downloadingProgress, downloadTasks) { progress, tasks ->
+        progress.filterKeys { it in tasks }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+    val pausedDownloadKeys: StateFlow<Set<String>> = combine(downloadManager.pausedDownloadKeys, downloadTasks) { paused, tasks ->
+        paused.filter { it in tasks }.toSet()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
     // Messages
     private val _toastEvent = MutableSharedFlow<String>()
@@ -727,6 +713,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 entries.mapNotNull { byId[it.mediaId] ?: CatalogData.getById(it.mediaId) }
             }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -744,6 +731,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 }.sortedByDescending { it.second.lastWatchedTimestamp }
             }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -800,6 +788,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private val _allocatedStorageGb = MutableStateFlow(prefs.getFloat("pref_allocated_storage_gb", 3.0f))
     val allocatedStorageGb: StateFlow<Float> = _allocatedStorageGb.asStateFlow()
+    private val _downloadsForYouEnabled = MutableStateFlow(prefs.getBoolean("pref_downloads_for_you", false))
+    val downloadsForYouEnabled: StateFlow<Boolean> = _downloadsForYouEnabled.asStateFlow()
+    private val _profileDownloadAllocations = MutableStateFlow<Map<String, Float>>(
+        prefs.all.filterKeys { it.startsWith("profile_download_gb_") }.mapNotNull { (key, value) ->
+            (value as? Float)?.let { key.removePrefix("profile_download_gb_") to it }
+        }.toMap())
+    val profileDownloadAllocations: StateFlow<Map<String, Float>> = _profileDownloadAllocations.asStateFlow()
 
     private val _isWifiOnlyEnabled = MutableStateFlow(true)
     val isWifiOnlyEnabled: StateFlow<Boolean> = _isWifiOnlyEnabled.asStateFlow()
@@ -839,7 +834,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     val games: StateFlow<List<GameItem>> = _games.asStateFlow()
 
     val displayGames: StateFlow<List<GameItem>> = combine(_games, _activeProfile) { list, profile ->
-        if (profile.isKidProfile) {
+        if (profile.hasMaturityRestriction) {
             list.filter { it.isKidFriendly() }
         } else {
             list
@@ -851,6 +846,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     val searchResults: StateFlow<List<MediaItem>> = _searchResults.asStateFlow()
 
     private var searchJob: Job? = null
+    private var searchGeneration = 0L
+    private var searchOwnerProfile: String? = null
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+    private val _searchError = MutableStateFlow<String?>(null)
+    val searchError: StateFlow<String?> = _searchError.asStateFlow()
 
     private var startupCacheJob: Job? = null
 
@@ -910,7 +911,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             combine(_catalogMedia, _activeProfile) { catalog, _ -> catalog }.collect {
-                if (_searchQuery.value.isBlank()) {
+                if (_searchQuery.value.isBlank() || searchOwnerProfile != _activeProfile.value.id) {
+                    _searchResults.value = emptyList()
+                    searchJob?.cancel()
                     performSearch()
                 }
             }
@@ -1078,7 +1081,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 onSuccess = { userEmail ->
                     viewModelScope.launch {
                         withContext(Dispatchers.IO) { ensureLocalAccountOwnership() }
-                    showToast("Welcome to Netflix Pro! Account created.")
+                    showToast("Welcome to NetflixPro! Account created.")
                     syncManager.listenToSubscription { remoteSub ->
                         setUserSubscription(remoteSub)
                         saveStoredSubscription(remoteSub)
@@ -1127,10 +1130,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signOutUser() {
+        pendingSmartReplacement = null
+        profileWriteJob?.cancel()
+        smartCuratorJob?.cancel()
         syncManager.signOutUser()
         _watchHistory.value = emptyList()
         accountResetJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                downloadManager.cancelAndJoinTransfers()
+                profileWriteJob?.join()
                 repository.clearAccountData()
             } catch (e: Exception) {
                 android.util.Log.e("NetflixViewModel", "Account cache cleanup failed", e)
@@ -1203,7 +1211,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun setCategoryFilter(filter: CategoryFilter, genre: String? = null) {
         if (filter == CategoryFilter.GAMES && !_userSubscription.value.isGamesAllowed) {
             if (_userSubscription.value.isGuest) {
-                showToast("Sign in and subscribe to Standard or Premium to play Netflix Games.")
+                showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
                 _showAuthScreen.value = true
             } else {
                 showToast("Games are included with Standard and Premium plans. Upgrade to play.")
@@ -1226,6 +1234,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectProfile(profile: UserProfile) {
         _activeProfile.value = profile
+        _allocatedStorageGb.value = _profileDownloadAllocations.value[profile.id] ?: 0f
         _showProfilePicker.value = false
         _transitioningProfile.value = profile
         syncManager.syncProfilesToCloud(_profiles.value, profile.id)
@@ -1241,6 +1250,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openEditProfile(profile: UserProfile? = null) {
+        _profileSaveError.value = null
         if (_userSubscription.value.isGuest) {
             showToast("Sign in to create or edit profiles.")
             _showAuthScreen.value = true
@@ -1286,35 +1296,37 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun saveProfile(updatedProfile: UserProfile) {
-        val safeProfile = updatedProfile.copy(pin = ProfilePin.hash(updatedProfile.pin))
-        val isNewProfile = _profiles.value.none { it.id == safeProfile.id }
-        if (isNewProfile && _profiles.value.size >= _userSubscription.value.maxProfiles) {
-            showToast("Profile limit reached (${_userSubscription.value.maxProfiles} profile(s) on ${_userSubscription.value.planName} Plan). Upgrade to add more.")
-            _showSubscriptionSheet.value = true
-            return
+        if (_isSavingProfile.value || !syncManager.isAuthenticated()) return
+        val name = updatedProfile.name.trim().filterNot { it.isISOControl() }.take(25)
+        if (name.isBlank()) { _profileSaveError.value = "Enter a profile name."; return }
+        val handle = updatedProfile.gameHandle?.trim()?.takeIf { it.isNotBlank() }
+        if (handle != null && !handle.matches(Regex("[a-zA-Z0-9_]{3,16}"))) {
+            _profileSaveError.value = "Game handles need 3–16 letters, numbers or underscores."; return
         }
-        _profiles.update { list ->
-            if (list.any { it.id == safeProfile.id }) {
-                list.map { if (it.id == safeProfile.id) safeProfile else it }
-            } else {
-                list + safeProfile
-            }
+        val safeProfile = updatedProfile.copy(name = name, gameHandle = handle,
+            maxAge = updatedProfile.maxAge.coerceIn(7, if (updatedProfile.isKids) 12 else 18),
+            pin = ProfilePin.hash(updatedProfile.pin))
+        val isNew = _profiles.value.none { it.id == safeProfile.id }
+        if (isNew && _profiles.value.size >= _userSubscription.value.maxProfiles) {
+            _profileSaveError.value = "Your plan's profile limit has been reached."; return
         }
-        if (_activeProfile.value.id == safeProfile.id || _profiles.value.size == 1) {
-            _activeProfile.value = safeProfile
-        }
-        _showEditProfileScreen.value = false
-        _editingProfile.value = null
-        saveProfilesLocally(_profiles.value)
-        viewModelScope.launch(Dispatchers.IO) {
+        val owner = syncManager.getUserId()
+        _isSavingProfile.value = true; _profileSaveError.value = null
+        profileWriteJob = viewModelScope.launch {
             try {
-                repository.insertProfile(safeProfile.toEntity())
-            } catch (e: Exception) {
-                android.util.Log.e("NetflixViewModel", "Error saving profile to Room: ${e.message}")
-            }
+                withContext(Dispatchers.IO) { repository.insertProfile(safeProfile.toEntity()) }
+                ensureActive()
+                if (owner != syncManager.getUserId()) return@launch
+                _profiles.update { list -> if (isNew) list + safeProfile else list.map { if (it.id == safeProfile.id) safeProfile else it } }
+                if (_activeProfile.value.id == safeProfile.id || _profiles.value.size == 1) _activeProfile.value = safeProfile
+                saveProfilesLocally(_profiles.value)
+                syncManager.syncProfilesToCloud(_profiles.value, _activeProfile.value.id)
+                _showEditProfileScreen.value = false; _editingProfile.value = null
+                showToast("Saved ${safeProfile.name}'s profile")
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { _profileSaveError.value = "Couldn't save your profile. Try again." }
+            finally { _isSavingProfile.value = false }
         }
-        syncManager.syncProfilesToCloud(_profiles.value, _activeProfile.value.id)
-        showToast("Saved ${safeProfile.name}'s profile")
     }
 
     fun deleteProfile(profileId: String) {
@@ -1322,7 +1334,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             showToast("Cannot delete the only profile")
             return
         }
-        val target = _profiles.value.find { it.id == profileId }
+        val target = _profiles.value.find { it.id == profileId } ?: return
+        downloadManager.clearAllDownloads(profileId)
         _profiles.update { list -> list.filter { it.id != profileId } }
         if (_activeProfile.value.id == profileId) {
             _activeProfile.value = _profiles.value.first()
@@ -1342,10 +1355,32 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         showToast("Deleted ${target?.name ?: "profile"}")
     }
 
+    private var detailJob: Job? = null
+    private var seasonJob: Job? = null
+    private var detailGeneration = 0L
+    private var seasonGeneration = 0L
+    private val seasonCache = object : java.util.LinkedHashMap<String, List<Episode>>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Episode>>?) = size > 12
+    }
+    private val _detailLoadState = MutableStateFlow(DetailLoadState())
+    val detailLoadState = _detailLoadState.asStateFlow()
+
     fun openDetail(media: MediaItem) {
+        if (!titleAllowed(media)) return
+        detailJob?.cancel()
+        seasonJob?.cancel()
+        detailGeneration++
+        seasonGeneration++
+        val latest = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
+        val season = latest?.takeIf { it.canResume() }?.season ?: 1
+        _detailLoadState.value = DetailLoadState(loading = true, season = season)
         _selectedMedia.value = media
         fetchMediaDetails(media)
+        if (media.type == MediaType.TV_SHOW) fetchTvSeasonEpisodes(media, season)
     }
+
+    fun retryMediaDetails() { _selectedMedia.value?.let(::fetchMediaDetails) }
+
 
     fun openHistoryDetail(item: CloudWatchHistoryItem) {
         val candidates = (_catalogMedia.value + CatalogData.allMedia)
@@ -1379,33 +1414,53 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private suspend fun loadSeasonEpisodes(media: MediaItem, season: Int): List<Episode> {
+        val key = "${media.type}:${media.id}:$season"
+        seasonCache[key]?.let { return it }
+        val id = resolveTmdbId(media.id) ?: error("Title metadata is unavailable")
+        val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) {
+            TmdbClient.service.getTvSeasonDetails(id, season, TmdbClient.apiKey)
+        } ?: throw java.io.IOException("Season lookup timed out")
+        val episodes = details.episodes.map { ep ->
+            Episode("ep_${media.id}_S${season}_${ep.episodeNumber}", ep.episodeNumber,
+                ep.name.ifEmpty { "Episode ${ep.episodeNumber}" }, ep.runtime ?: 45,
+                ep.overview.orEmpty(), ep.stillPath?.let { "https://image.tmdb.org/t/p/w500$it" })
+        }.sortedBy { it.episodeNumber }
+        if (episodes.isNotEmpty()) seasonCache[key] = episodes
+        return episodes
+    }
+
     fun fetchTvSeasonEpisodes(media: MediaItem, seasonNumber: Int) {
-        viewModelScope.launch {
+        if (_selectedMedia.value?.let { it.id == media.id && it.type == media.type } != true) return
+        if (_detailLoadState.value.season == seasonNumber && _detailLoadState.value.seasonLoading) return
+        seasonJob?.cancel()
+        val generation = ++seasonGeneration
+        _detailLoadState.update { it.copy(season = seasonNumber, seasonLoading = true, seasonError = null) }
+        // Hide outgoing-season episodes immediately; a late response cannot replace the requested season.
+        _selectedMedia.update { it?.copy(episodes = emptyList()) }
+        seasonJob = viewModelScope.launch {
             try {
-                val apiKey = TmdbClient.apiKey
-                val mediaIdInt = resolveTmdbId(media.id) ?: return@launch
-                val seasonDetails = TmdbClient.service.getTvSeasonDetails(mediaIdInt, seasonNumber, apiKey)
-                val episodesList = seasonDetails.episodes.map { ep ->
-                    Episode(
-                        id = "ep_${media.id}_S${seasonNumber}_${ep.episodeNumber}",
-                        episodeNumber = ep.episodeNumber,
-                        title = ep.name.ifEmpty { "Episode ${ep.episodeNumber}" },
-                        durationMinutes = ep.runtime ?: 45,
-                        description = ep.overview?.ifBlank { null } ?: "No description available for this episode.",
-                        stillUrl = ep.stillPath?.let { "https://image.tmdb.org/t/p/w500$it" }
-                    )
-                }
+                val episodes = loadSeasonEpisodes(media, seasonNumber)
+                ensureActive()
+                if (generation != seasonGeneration) return@launch
                 _selectedMedia.update { current ->
-                    if (current?.id == media.id) {
-                        current.copy(episodes = episodesList)
-                    } else current
+                    if (current?.id == media.id && current.type == media.type) current.copy(episodes = episodes) else current
                 }
-            } catch (_: Exception) {}
+                if (episodes.isEmpty()) _detailLoadState.update { it.copy(seasonError = "No episodes are available for this season yet.") }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (generation == seasonGeneration) _detailLoadState.update { it.copy(seasonError = "Episodes couldn't load. Check your connection and retry.") }
+            } finally {
+                if (generation == seasonGeneration) _detailLoadState.update { it.copy(seasonLoading = false) }
+            }
         }
     }
 
     private fun fetchMediaDetails(media: MediaItem) {
-        viewModelScope.launch {
+        detailJob?.cancel()
+        val generation = ++detailGeneration
+        _detailLoadState.update { it.copy(loading = true, error = null) }
+        detailJob = viewModelScope.launch {
             try {
                 val apiKey = TmdbClient.apiKey
                 val mediaIdInt = resolveTmdbId(media.id) ?: return@launch
@@ -1434,7 +1489,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     } ?: emptyList()
 
                     _selectedMedia.update { current ->
-                        if (current?.id == media.id) {
+                        if (generation == detailGeneration && current?.id == media.id && current.type == media.type) {
                             current.copy(
                                 tagline = details.tagline?.ifBlank { null } ?: current.tagline,
                                 cast = if (castNames.isNotEmpty()) castNames else current.cast,
@@ -1471,26 +1526,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         mapResultToMedia(res, MediaType.TV_SHOW)
                     } ?: emptyList()
 
-                    // Fetch episodes for Season 1 from TMDB
-                    val seasonDetails = try {
-                        TmdbClient.service.getTvSeasonDetails(mediaIdInt, 1, apiKey)
-                    } catch (e: Exception) {
-                        null
-                    }
-
-                    val episodesList = seasonDetails?.episodes?.map { ep ->
-                        Episode(
-                            id = "ep_${media.id}_S1_${ep.episodeNumber}",
-                            episodeNumber = ep.episodeNumber,
-                            title = ep.name.ifEmpty { "Episode ${ep.episodeNumber}" },
-                            durationMinutes = ep.runtime ?: 45,
-                            description = ep.overview?.ifBlank { null } ?: "No description available.",
-                            stillUrl = ep.stillPath?.let { "https://image.tmdb.org/t/p/w500$it" }
-                        )
-                    } ?: media.episodes
-
                     _selectedMedia.update { current ->
-                        if (current?.id == media.id) {
+                        if (generation == detailGeneration && current?.id == media.id && current.type == media.type) {
                             current.copy(
                                 tagline = details.tagline?.ifBlank { null } ?: current.tagline,
                                 cast = if (castNames.isNotEmpty()) castNames else current.cast,
@@ -1499,7 +1536,6 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                                 totalSeasons = numSeasons,
                                 totalEpisodes = numEpisodes,
                                 description = details.overview?.ifBlank { null } ?: current.description,
-                                episodes = episodesList,
                                 logoUrl = logoUrl,
                                 posterUrl = posterUrl,
                                 backdropUrl = backdropUrl,
@@ -1508,8 +1544,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         } else current
                     }
                 }
-            } catch (e: Exception) {
-                // Fail silently, keeping the lightweight details
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (generation == detailGeneration) _detailLoadState.update { it.copy(error = "Some title information couldn't load. You can retry below.") }
+            } finally {
+                if (generation == detailGeneration) _detailLoadState.update { it.copy(loading = false) }
             }
         }
     }
@@ -1545,12 +1584,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 if (anyUpdated) {
                     CatalogData.allMedia = updatedItems
                     _catalogMedia.value = updatedItems
+                    withContext(Dispatchers.IO) { catalogCache.write(updatedItems) }
                 }
             } catch (_: Exception) {}
         }
     }
 
     fun closeDetail() {
+        detailGeneration++
+        seasonGeneration++
+        detailJob?.cancel()
+        seasonJob?.cancel()
         _selectedMedia.value = null
     }
 
@@ -1627,8 +1671,30 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     // Playback Controls
     private var resolveJob: Job? = null
     private var playbackRequestGeneration = 0L
+    private val progressTracker = PlaybackProgressTracker()
+    private var pendingSmartReplacement: (() -> Unit)? = null
 
-    fun playMedia(media: MediaItem, episode: Episode? = null) {
+    private fun titleAllowed(media: MediaItem): Boolean {
+        val profile = _activeProfile.value
+        if (profile.hasMaturityRestriction && !media.isKidSafe(profile.contentMaxAge)) {
+            showToast("This title is not available for this profile.")
+            return false
+        }
+        return true
+    }
+
+    private fun finishSmartReplacement() {
+        val replacement = pendingSmartReplacement
+        pendingSmartReplacement = null
+        replacement?.invoke()
+    }
+
+    fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false) {
+        if (!titleAllowed(media)) return
+        smartCuratorJob?.cancel() // A background availability probe must yield to an explicit Play tap.
+        finishSmartReplacement()
+        persistPlayerProgress(_playerState.value)
+        progressTracker.reset()
         val requestGeneration = ++playbackRequestGeneration
         if (isMovieLocked(media)) {
             if (_userSubscription.value.isGuest) {
@@ -1641,12 +1707,21 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        val totalSec = if (episode != null) episode.durationMinutes * 60 else if (media.type == MediaType.MOVIE) 7200 else 3000
-        val targetEpisode = episode ?: media.episodes.firstOrNull()
+        nextEpisodeJob?.cancel()
+        val latestProgress = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
+        val targetEpisode = initialPlaybackEpisode(media, episode, latestProgress)
+        val totalSec = targetEpisode?.durationMinutes?.times(60) ?: 7200
 
         _playerState.value = PlayerState(
             media = media,
             episode = targetEpisode,
+            nextEpisode = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) },
+            nextEpisodeChecked = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) != null } == true,
+            audioLanguage = _activeProfile.value.audioLanguage,
+            subtitleLanguage = _activeProfile.value.subtitleLanguage,
+            audioTrack = _activeProfile.value.audioLanguage,
+            subtitleTrack = _activeProfile.value.subtitleLanguage,
+            nextEpisodeMedia = media,
             isPlaying = false,
             isResolving = true,
             currentPositionSec = 0,
@@ -1684,8 +1759,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
             if (requestGeneration != playbackRequestGeneration) return@launch
             if (progressEntity != null) {
-                if (targetEpisode == null || targetEpisode.id == progressEntity.episodeId) {
-                    if (progressEntity.positionSeconds > 10 && progressEntity.positionSeconds < totalSec - 60) {
+                if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
+                    episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
+                    if (progressEntity.canResume() && progressEntity.positionSeconds > 10) {
                         _playerState.update { it.copy(currentPositionSec = progressEntity.positionSeconds) }
                     }
                 }
@@ -1711,22 +1787,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         return@launch
                     }
                 }
-                if (!existingDownload.videoUrl.isNullOrEmpty()) {
-                    showToast("Playing downloaded stream offline...")
-                    _playerState.update {
-                        it.copy(
-                            isResolving = false,
-                            resolvedUrl = existingDownload.videoUrl,
-                            resolveHeaders = emptyMap(),
-                            sourceId = "Offline Download",
-                            captions = offlineCaptions,
-                            isPlaying = true
-                        )
-                    }
-                    return@launch
-                }
+
             }
 
+            if (offlineOnly) {
+                _playerState.update { it.copy(isResolving = false, isPlaying = false,
+                    resolveError = "This download is missing from your device. Delete it in Downloads and download it again.") }
+                return@launch
+            }
             try {
                 val tmdbId = media.id
                 val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
@@ -1767,7 +1835,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         resolveError = if (e is com.example.data.PlaybackRateLimitedException) {
                             val seconds = ((e.retryAfterMs ?: 60_000L) + 999L) / 1_000L
                             "Playback is busy. Please wait $seconds seconds before trying again."
-                        } else e.message ?: "This title could not be played.",
+                        } else "This title cannot be played. Try again later.",
                         resolvedUrl = null,
                         isPlaying = false
                     )
@@ -1777,17 +1845,22 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updatePlayerProgress(currentSec: Int, totalDurationSec: Int) {
-        val showSkip = currentSec in 5..30
+        val currentState = _playerState.value
+        val showSkip = currentState.sourceId != "Trailer" && currentState.media?.type == MediaType.TV_SHOW &&
+            currentState.introWindow?.let { currentSec in it.startSec until it.endSec } == true
         val dur = if (totalDurationSec > 0) totalDurationSec else _playerState.value.durationSec
+        if (currentState.media?.type == MediaType.TV_SHOW && !isMovieLocked(currentState.media) &&
+            currentState.sourceId != "Trailer" && dur > 60 && currentSec >= dur - 120) prepareNextEpisode()
         _playerState.update { it.copy(currentPositionSec = currentSec, durationSec = dur, showSkipIntro = showSkip) }
 
         val media = _playerState.value.media ?: return
         val ep = _playerState.value.episode
+        val coordinates = episodeCoordinates(ep?.id)
         val isTrailer = _playerState.value.sourceId == "Trailer"
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
 
-        if (!isTrailer && syncManager.isAuthenticated() && currentSec > 0 && currentSec % 10 == 0) {
+        if (!isTrailer && syncManager.isAuthenticated() && progressTracker.shouldSave(currentSec)) {
             viewModelScope.launch {
                 if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
                 repository.saveProgress(
@@ -1796,7 +1869,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     currentSec,
                     dur,
                     ep?.id,
-                    ep?.title
+                    ep?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -1805,6 +1880,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     totalSeconds = dur,
                     episodeId = ep?.id ?: "",
                     episodeTitle = ep?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second,
                     lastWatchedTimestamp = System.currentTimeMillis()
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
@@ -1812,21 +1889,38 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // Smart Downloads Auto-Watch Trigger
-        if (!isTrailer && currentSec > 0 && dur > 60 && (currentSec >= dur - 15 || currentSec >= (dur * 0.9f).toInt())) {
-            if (ep != null && _isSmartDownloadsEnabled.value) {
-                downloadManager.handleEpisodeWatched(
-                    profileId = _activeProfile.value.id,
-                    media = media,
-                    watchedEpisode = ep,
-                    isSmartDownloadsEnabled = _isSmartDownloadsEnabled.value,
-                    isWifiOnly = _isWifiOnlyEnabled.value,
-                    isHighQuality = _isHighQualityEnabled.value,
-                    allocatedGb = _allocatedStorageGb.value,
-                    catalog = _catalogMedia.value.ifEmpty { CatalogData.allMedia }
-                )
+        maybeStartSmartDownload(_playerState.value)
+    }
+
+    private fun maybeStartSmartDownload(state: PlayerState) {
+        val media = state.media ?: return
+        val episode = state.episode
+        if (state.sourceId == "Trailer" || !_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0 ||
+            !smartDownloadCompletionReady(state)) return
+        if (media.type == MediaType.MOVIE) {
+            if (_downloadsForYouEnabled.value && progressTracker.claimSmartDownload()) runSmartDownloadCurator()
+            return
+        }
+        if (episode == null || !state.nextEpisodeChecked || state.nextEpisodeLoading || state.nextEpisodeError != null) return
+        if (state.nextEpisode == null) {
+            if (_downloadsForYouEnabled.value && progressTracker.claimSmartDownload()) runSmartDownloadCurator()
+            return
+        }
+        if (!_isSmartDownloadsEnabled.value || !progressTracker.claimSmartDownload()) return
+        // Cross-season metadata is ready before replacing the watched download.
+        val nextMedia = (state.nextEpisodeMedia ?: media).copy(episodes = listOf(episode) + listOfNotNull(state.nextEpisode))
+        val ownerUid = syncManager.getUserId()
+        val ownerProfile = _activeProfile.value.id
+        val replacement = {
+            if (syncManager.getUserId() == ownerUid && _activeProfile.value.id == ownerProfile) {
+                downloadManager.handleEpisodeWatched(ownerProfile, nextMedia, episode, true,
+                    true, _isHighQualityEnabled.value, _allocatedStorageGb.value,
+                    emptyList(), _userSubscription.value.maxDownloads)
             }
         }
+        // Keep the current local file available for Watch again until the viewer leaves it.
+        if (state.sourceId?.startsWith("Offline Download") == true) pendingSmartReplacement = replacement
+        else replacement()
     }
 
     fun togglePlayPause() {
@@ -1837,8 +1931,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun seekTo(seconds: Int) {
         val state = _playerState.value
         val clamped = seconds.coerceIn(0, state.durationSec)
-        val showSkip = clamped in 5..30
-        _playerState.update { it.copy(currentPositionSec = clamped, showSkipIntro = showSkip) }
+        val showSkip = state.sourceId != "Trailer" && state.media?.type == MediaType.TV_SHOW &&
+            state.introWindow?.let { clamped in it.startSec until it.endSec } == true
+        _playerState.update { it.copy(currentPositionSec = clamped, showSkipIntro = showSkip, hasEnded = false) }
     }
 
     fun skipForward10() {
@@ -1852,9 +1947,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun skipIntro() {
-        seekTo(85)
+        val intro = _playerState.value.introWindow ?: return
+        seekTo(intro.endSec)
         _playerState.update { it.copy(showSkipIntro = false) }
         showToast("Skipped Intro")
+    }
+
+    fun updateIntroWindow(window: IntroWindow?) {
+        _playerState.update { it.copy(introWindow = window) }
     }
 
     fun setPlaybackSpeed(speed: Float) {
@@ -1863,12 +1963,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setAudioTrack(track: String) {
-        _playerState.update { it.copy(audioTrack = track, showAudioSubtitleDialog = false) }
+        _playerState.update { it.copy(audioTrack = track, audioLanguage = track, showAudioSubtitleDialog = false) }
         showToast("Audio: $track")
     }
 
     fun setSubtitleTrack(track: String) {
-        _playerState.update { it.copy(subtitleTrack = track, showAudioSubtitleDialog = false) }
+        _playerState.update { it.copy(subtitleTrack = track, subtitleLanguage = track, showAudioSubtitleDialog = false) }
         showToast("Subtitles: $track")
     }
 
@@ -1890,24 +1990,88 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _playerState.update { it.copy(showEpisodeDrawer = show) }
     }
 
-    fun playNextEpisode() {
+    private var nextEpisodeJob: Job? = null
+
+    /** Metadata warming happens near the end, never on Home or before stream resolution. */
+    fun prepareNextEpisode(retry: Boolean = false) {
         val state = _playerState.value
         val media = state.media ?: return
-        val currentEp = state.episode ?: return
-        val episodes = media.episodes
-        val nextIdx = episodes.indexOfFirst { it.id == currentEp.id } + 1
-        if (nextIdx in episodes.indices) {
-            playMedia(media, episodes[nextIdx])
-            showToast("Playing Next Episode: ${episodes[nextIdx].title}")
-        } else {
-            showToast("You've reached the latest episode!")
+        val episode = state.episode ?: return
+        if (state.sourceId == "Trailer" || state.isResolving || state.nextEpisode != null || nextEpisodeJob?.isActive == true) return
+        if (!retry && (state.nextEpisodeError != null || state.nextEpisodeChecked)) return
+        val generation = playbackRequestGeneration
+        _playerState.update { it.copy(nextEpisodeLoading = true, nextEpisodeError = null) }
+        nextEpisodeJob = viewModelScope.launch {
+            try {
+                val season = episodeCoordinates(episode.id).first
+                val loaded = media.episodes.takeIf { list -> list.any { it.id == episode.id } } ?: loadSeasonEpisodes(media, season)
+                var targetMedia = media.copy(episodes = loaded)
+                var next = nextLoadedEpisode(episode, loaded)
+                if (next == null) {
+                    if (loaded.any { episodeCoordinates(it.id).first == season && it.episodeNumber > episode.episodeNumber }) {
+                        throw java.io.IOException("Episode metadata is incomplete")
+                    }
+                    val id = resolveTmdbId(media.id) ?: error("Title metadata is unavailable")
+                    val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) { TmdbClient.service.getTvShowDetails(id, TmdbClient.apiKey) } ?: throw java.io.IOException("Series lookup timed out")
+                    val seasons = details.numberOfSeasons ?: media.totalSeasons
+                    targetMedia = targetMedia.copy(totalSeasons = seasons)
+                    if (season < seasons) {
+                        val nextSeason = loadSeasonEpisodes(media, season + 1)
+                        next = nextSeason.firstOrNull()
+                        targetMedia = targetMedia.copy(episodes = nextSeason)
+                    }
+                }
+                ensureActive()
+                if (generation != playbackRequestGeneration) return@launch
+                _playerState.update { it.copy(nextEpisode = next, nextEpisodeMedia = targetMedia.takeIf { next != null }, nextEpisodeLoading = false, nextEpisodeChecked = true) }
+                maybeStartSmartDownload(_playerState.value)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (generation == playbackRequestGeneration) _playerState.update { it.copy(nextEpisodeLoading = false, nextEpisodeError = "Couldn't check the next episode. Retry or choose one from Episodes.") }
+            }
         }
     }
 
+    fun onContentPlaybackEnded() {
+        val state = _playerState.value
+        if (state.sourceId == "Trailer") return
+        _playerState.update { it.copy(isPlaying = false, hasEnded = true, showControls = false) }
+        persistPlayerProgress(_playerState.value)
+        if (state.media?.type == MediaType.TV_SHOW) prepareNextEpisode()
+        maybeStartSmartDownload(_playerState.value)
+    }
+
+    fun replayCurrent() {
+        pendingSmartReplacement = null
+        progressTracker.reset()
+        _playerState.update { it.copy(currentPositionSec = 0, hasEnded = false, isPlaying = true, showControls = true) }
+    }
+
+    fun playNextEpisode() {
+        val state = _playerState.value
+        val next = state.nextEpisode
+        val media = state.nextEpisodeMedia ?: state.media ?: return
+        if (next != null) {
+            val speed = state.playbackSpeed
+            playMedia(media, next)
+            _playerState.update { it.copy(playbackSpeed = speed, audioTrack = state.audioTrack, subtitleTrack = state.subtitleTrack, audioLanguage = state.audioLanguage, subtitleLanguage = state.subtitleLanguage) }
+        } else prepareNextEpisode(retry = true)
+    }
+
     fun closePlayer() {
+        finishSmartReplacement()
+        nextEpisodeJob?.cancel()
         playbackRequestGeneration++
         resolveJob?.cancel()
         val current = _playerState.value
+        persistPlayerProgress(current)
+        val devId = "phone_${syncManager.getUserId()}"
+        syncManager.stopActiveStreamHeartbeat(devId)
+        _playerState.value = PlayerState(media = null)
+    }
+
+    private fun persistPlayerProgress(current: PlayerState) {
+        val coordinates = episodeCoordinates(current.episode?.id)
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
         if (current.media != null && current.sourceId != "Trailer" && current.currentPositionSec > 0 && syncManager.isAuthenticated()) {
@@ -1919,7 +2083,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     current.currentPositionSec,
                     current.durationSec,
                     current.episode?.id,
-                    current.episode?.title
+                    current.episode?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -1928,23 +2094,35 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     totalSeconds = current.durationSec,
                     episodeId = current.episode?.id ?: "",
                     episodeTitle = current.episode?.title,
+                    season = coordinates.first,
+                    episode = coordinates.second,
                     lastWatchedTimestamp = System.currentTimeMillis()
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
                 syncManager.syncWatchProgressToCloud(progressEntity, current.media)
             }
         }
-        val devId = "phone_${syncManager.getUserId()}"
-        syncManager.stopActiveStreamHeartbeat(devId)
-        _playerState.value = PlayerState(media = null)
+    }
+
+    fun savePlayerProgress() = persistPlayerProgress(_playerState.value)
+
+    override fun onCleared() {
+        detailJob?.cancel()
+        seasonJob?.cancel()
+        nextEpisodeJob?.cancel()
+        resolveJob?.cancel()
+        syncManager.cleanup()
+        super.onCleared()
     }
 
     // Search Actions
     fun setSearchQuery(query: String) {
-        _searchQuery.value = query
+        _searchQuery.value = query.take(150)
+        _isSearching.value = query.isNotBlank()
+        _searchError.value = null
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            delay(300)
+            if (_searchQuery.value.isNotBlank()) delay(300)
             performSearch()
         }
     }
@@ -1958,55 +2136,48 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun performSearch() {
+        val generation = ++searchGeneration
         val query = _searchQuery.value.trim()
         val genre = _selectedSearchGenre.value
         val profile = _activeProfile.value
-
-        if (query.isBlank()) {
-            var list = if (profile.isKidProfile) {
-                _catalogMedia.value.filter { it.isKidSafe(profile.maxAge) }
-            } else {
-                _catalogMedia.value
+        searchOwnerProfile = profile.id
+        fun ownsRequest() = generation == searchGeneration && profile.id == _activeProfile.value.id &&
+            query == _searchQuery.value.trim() && genre == _selectedSearchGenre.value
+        _isSearching.value = query.isNotBlank(); _searchError.value = null
+        try {
+            if (query.isBlank()) {
+                val list = _catalogMedia.value.filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+                    .filter { genre == null || it.matchesGenre(genre) }
+                if (ownsRequest()) _searchResults.value = list
+                return
             }
-            if (genre != null) {
-                list = list.filter { it.matchesGenre(genre) }
+            val apiKey = TmdbClient.apiKey
+            if (!hasCatalogNetwork() || apiKey.isEmpty() || apiKey == "PLACEHOLDER") {
+                if (ownsRequest()) { fallbackLocalSearch(query, genre); _searchError.value = "Showing saved titles. Connect for more results." }
+                return
             }
-            _searchResults.value = list
-        } else {
-            try {
-                val apiKey = TmdbClient.apiKey
-                if (apiKey.isEmpty() || apiKey == "PLACEHOLDER") {
-                    fallbackLocalSearch(query, genre)
-                    return
+            val response = kotlinx.coroutines.withTimeoutOrNull(12_000) { TmdbClient.service.searchMulti(apiKey, query) }
+                ?: throw java.io.IOException("Search timed out")
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val list = response.results.mapNotNull { result ->
+                when (result.mediaType) {
+                    "movie" -> mapResultToMedia(result, MediaType.MOVIE)
+                    "tv" -> mapResultToMedia(result, MediaType.TV_SHOW)
+                    else -> null
                 }
-
-                val response = TmdbClient.service.searchMulti(apiKey, query)
-                val mapped = response.results.mapNotNull { res ->
-                    if (res.mediaType == "person") return@mapNotNull null
-                    val mType = if (res.mediaType == "tv") MediaType.TV_SHOW else MediaType.MOVIE
-                    mapResultToMedia(res, mType)
-                }
-
-                var list = if (profile.isKidProfile) {
-                    mapped.filter { it.isKidSafe(profile.maxAge) }
-                } else {
-                    mapped
-                }
-                if (genre != null) {
-                    list = list.filter { it.matchesGenre(genre) }
-                }
-
-                _searchResults.value = list
-            } catch (e: Exception) {
-                fallbackLocalSearch(query, genre)
-            }
-        }
+            }.filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+                .filter { genre == null || it.matchesGenre(genre) }.distinctBy { it.type to it.id }
+            if (ownsRequest()) _searchResults.value = list
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (ownsRequest()) { fallbackLocalSearch(query, genre); _searchError.value = "Search couldn't refresh. Showing saved matches." }
+        } finally { if (ownsRequest()) _isSearching.value = false }
     }
 
     private fun fallbackLocalSearch(query: String, genre: String?) {
         val profile = _activeProfile.value
-        var list = if (profile.isKidProfile) {
-            _catalogMedia.value.filter { it.isKidSafe(profile.maxAge) }
+        var list = if (profile.hasMaturityRestriction) {
+            _catalogMedia.value.filter { it.isKidSafe(profile.contentMaxAge) }
         } else {
             _catalogMedia.value
         }
@@ -2031,18 +2202,23 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             _showAuthScreen.value = true
             return
         }
-        if (_userSubscription.value.maxDownloads <= 0) {
+        if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
             showToast("Offline downloads not supported on Mobile Plan. Upgrade to Basic or above.")
             _showSubscriptionSheet.value = true
             return
         }
-        if (downloads.value.size >= _userSubscription.value.maxDownloads) {
+        val key = if (episode == null) media.id else "${media.id}_${episode.id}"
+        if (downloads.value.any { it.downloadKey == key && it.isComplete }) {
+            showToast("Already downloaded. Open Downloads to watch or delete this title.")
+            return
+        }
+        if (key !in downloadTasks.value && downloads.value.size + downloadTasks.value.size >= _userSubscription.value.maxDownloads) {
             showToast("Download limit reached (${_userSubscription.value.maxDownloads} titles on ${_userSubscription.value.planName}). Upgrade plan to download more.")
             _showSubscriptionSheet.value = true
             return
         }
 
-        val epTitle = if (episode != null) "S1:E${episode.episodeNumber} ${episode.title}" else null
+        val epTitle = episode?.let(::episodeDownloadLabel)
         val itemTitle = if (epTitle != null) "${media.title} ($epTitle)" else media.title
 
         addNotification(
@@ -2071,26 +2247,22 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resumeDownload(key: String, media: MediaItem? = null, episode: Episode? = null) {
-        val mediaId = key.substringBefore("_")
-        val matchedMedia = media ?: CatalogData.getById(mediaId)
-        val matchedEpisode = episode ?: run {
-            if (key.contains("_") && matchedMedia != null) {
-                val epId = key.substringAfter("_")
-                matchedMedia.episodes.find { it.id == epId }
-            } else null
+        if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
+            showToast("An active download plan is required to continue.")
+            if (_userSubscription.value.isGuest) _showAuthScreen.value = true else _showSubscriptionSheet.value = true
+            return
         }
-
-        if (matchedMedia != null) {
-            downloadManager.startOrResumeDownload(
-                profileId = _activeProfile.value.id,
-                media = matchedMedia,
-                episode = matchedEpisode,
-                isWifiOnly = _isWifiOnlyEnabled.value,
-                isHighQuality = _isHighQualityEnabled.value
-            )
-        } else {
-            showToast("Unable to resume download")
+        if (downloadManager.resumeSavedDownload(key, _activeProfile.value.id)) return
+        val task = downloadTasks.value[key]
+        val matchedMedia = media ?: task?.mediaId?.let { CatalogData.getById(it) }
+            ?: CatalogData.allMedia.sortedByDescending { it.id.length }.firstOrNull { key == it.id || key.startsWith("${it.id}_") }
+        if (matchedMedia == null) { showToast("This title's metadata is unavailable. Open its details to retry."); return }
+        val episodeId = task?.episodeId ?: downloadEpisodeId(matchedMedia.id, key)
+        val matchedEpisode = episode ?: episodeId?.let { id ->
+            matchedMedia.episodes.find { it.id == id } ?: Episode(id, episodeCoordinates(id).second,
+                task?.episodeTitle ?: "Episode ${episodeCoordinates(id).second}", 45, "")
         }
+        startDownload(matchedMedia, matchedEpisode)
     }
 
     fun cancelDownload(key: String) {
@@ -2109,17 +2281,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _allocatedStorageGb.value = allocatedGb
         prefs.edit().putFloat("pref_allocated_storage_gb", allocatedGb).apply()
         showToast("Storage allocated for downloads: ${String.format(java.util.Locale.US, "%.1f", allocatedGb)} GB")
-        if (_isSmartDownloadsEnabled.value) {
-            runSmartDownloadCurator()
-        }
+        setProfileDownloadAllocation(_activeProfile.value.id, allocatedGb)
+        if (_downloadsForYouEnabled.value) runSmartDownloadCurator()
     }
 
     fun setupDownloadsForYouWithAllocation(allocatedGb: Float) {
         _allocatedStorageGb.value = allocatedGb
-        _isSmartDownloadsEnabled.value = true
+        _downloadsForYouEnabled.value = true
+        setProfileDownloadAllocation(_activeProfile.value.id, allocatedGb)
         prefs.edit()
             .putFloat("pref_allocated_storage_gb", allocatedGb)
-            .putBoolean("pref_smart_downloads_enabled", true)
+            .putBoolean("pref_downloads_for_you", true)
             .apply()
         showToast("Downloads for You enabled (${String.format(java.util.Locale.US, "%.1f", allocatedGb)} GB allocated)")
         runSmartDownloadCurator()
@@ -2129,11 +2301,29 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         setupDownloadsForYouWithAllocation(_allocatedStorageGb.value)
     }
 
+    fun setProfileDownloadAllocation(profileId: String, gb: Float) {
+        if (!gb.isFinite() || _profiles.value.none { it.id == profileId }) return
+        val amount = gb.coerceIn(0f, 10f)
+        _profileDownloadAllocations.update { it + (profileId to amount) }
+        prefs.edit().putFloat("profile_download_gb_$profileId", amount).apply()
+        if (profileId == _activeProfile.value.id) _allocatedStorageGb.value = amount
+    }
+
+    fun toggleDownloadsForYou(enabled: Boolean) {
+        _downloadsForYouEnabled.value = enabled
+        prefs.edit().putBoolean("pref_downloads_for_you", enabled).apply()
+        if (enabled) runSmartDownloadCurator() else smartCuratorJob?.cancel()
+    }
+
+    private var smartCuratorJob: Job? = null
     fun runSmartDownloadCurator() {
-        viewModelScope.launch {
+        smartCuratorJob?.cancel()
+        val subscription = _userSubscription.value
+        if (!_downloadsForYouEnabled.value || !subscription.isActive || subscription.maxDownloads <= 0) return
+        smartCuratorJob = viewModelScope.launch {
             val profile = _activeProfile.value
-            val pool = if (profile.isKidProfile) {
-                _catalogMedia.value.ifEmpty { CatalogData.allMedia }.filter { it.isKidSafe(profile.maxAge) }
+            val pool = if (profile.hasMaturityRestriction) {
+                _catalogMedia.value.ifEmpty { CatalogData.allMedia }.filter { it.isKidSafe(profile.contentMaxAge) }
             } else {
                 _catalogMedia.value.ifEmpty { CatalogData.allMedia }
             }
@@ -2143,12 +2333,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
             downloadManager.curateSmartDownloads(
                 profileId = profile.id,
-                allocatedGb = _allocatedStorageGb.value,
-                isWifiOnly = _isWifiOnlyEnabled.value,
+                allocatedGb = _profileDownloadAllocations.value[profile.id] ?: _allocatedStorageGb.value,
+                isWifiOnly = true,
                 isHighQuality = _isHighQualityEnabled.value,
                 candidatePool = pool,
                 userLikedIds = likedIds,
-                watchlistIds = watchlistIds
+                watchlistIds = watchlistIds,
+                maxDownloads = subscription.maxDownloads
             )
         }
     }
@@ -2215,7 +2406,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     "Downloads",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "Netflix Download Notifications"
+                    description = "NetflixPro Download Notifications"
                 }
                 notificationManager.createNotificationChannel(channel)
             }
@@ -2294,9 +2485,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _isSmartDownloadsEnabled.value = enabled
         prefs.edit().putBoolean("pref_smart_downloads_enabled", enabled).apply()
         showToast("Smart Downloads ${if (enabled) "turned ON" else "turned OFF"}")
-        if (enabled) {
-            runSmartDownloadCurator()
-        }
+        // Next-episode replacement is triggered by completed playback, not by this toggle.
     }
 
     fun toggleWifiOnly(enabled: Boolean) {
@@ -2333,7 +2522,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _diagnosticRunning.value = true
             _diagnosticResult.value = null
-            showToast("Running network speed test & Netflix server connection...")
+            showToast("Running network speed test & NetflixPro server connection...")
             delay(1500)
             _diagnosticRunning.value = false
             _diagnosticResult.value = "Connection: Excellent (118.4 Mbps) • 4K UHD Ready • Low Latency (14ms)"
@@ -2346,6 +2535,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playTrailer(media: MediaItem, title: String) {
+        if (!titleAllowed(media)) return
+        finishSmartReplacement()
         val durationSec = if (title.contains("teaser", ignoreCase = true)) 105 else 192
         _playerState.value = PlayerState(
             media = media.copy(title = title),
@@ -2422,7 +2613,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun installGame(gameId: String) {
         if (_userSubscription.value.isGuest) {
-            showToast("Sign in and subscribe to Standard or Premium to play Netflix Games.")
+            showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
             _showAuthScreen.value = true
             return
         }
@@ -2455,7 +2646,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun launchGame(game: GameItem) {
         if (_userSubscription.value.isGuest) {
-            showToast("Sign in and subscribe to Standard or Premium to play Netflix Games.")
+            showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
             _showAuthScreen.value = true
             return
         }
@@ -2464,7 +2655,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             _showSubscriptionSheet.value = true
             return
         }
-        showToast("Launching ${game.title} • Netflix Games Engine")
+        showToast("Launching ${game.title} • NetflixPro Games Engine")
     }
 
     fun showToast(message: String) {
