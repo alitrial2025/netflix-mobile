@@ -5,6 +5,12 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface TmdbApiService {
+    @GET("discover/movie")
+    suspend fun discoverReleaseMovies(@retrofit2.http.QueryMap parameters: Map<String, String>): TmdbResponse
+
+    @GET("discover/tv")
+    suspend fun discoverReleaseTv(@retrofit2.http.QueryMap parameters: Map<String, String>): TmdbResponse
+
     @GET("trending/movie/week")
     suspend fun getTrendingMovies(
         @Query("api_key") apiKey: String,

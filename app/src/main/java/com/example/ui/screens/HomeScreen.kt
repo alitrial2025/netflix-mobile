@@ -62,6 +62,7 @@ fun HomeScreen(
     onWatchlistToggle: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
     catalogMedia: List<MediaItem> = emptyList(),
+    personalizedMedia: List<MediaItem> = emptyList(),
     watchlistIds: Set<String>? = null,
     userSubscription: UserSubscription = UserSubscription(),
     reminders: List<ReminderEntity> = emptyList(),
@@ -162,12 +163,8 @@ fun HomeScreen(
     }
 
     // Cache categorized rows for performance and consistency (Offloaded to Dispatchers.Default to prevent UI thread lag)
-    val uiSections by produceState(
-        initialValue = emptyList<MediaSection>(),
-        key1 = catalogMedia,
-        key2 = categoryFilter,
-        key3 = selectedGenre
-    ) {
+    val uiSections by produceState(emptyList<MediaSection>(), catalogMedia, personalizedMedia,
+        categoryFilter, selectedGenre, activeProfile.name) {
         value = withContext(Dispatchers.Default) {
             val rawSections = mutableListOf<Triple<String, String, List<MediaItem>>>()
             val movies = catalogMedia.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
@@ -193,6 +190,8 @@ fun HomeScreen(
                         rawSections.add(Triple("section_top10", "Top 10 Today in Your Country", top10))
                         top10.take(5).forEach { usedMediaIds.add(it.id) }
                     }
+                    val picks = personalizedMedia
+                    if (picks.isNotEmpty()) rawSections.add(Triple("section_personalized", "Top Picks for ${activeProfile.name}", filterFresh(picks)))
                     if (trending.isNotEmpty()) rawSections.add(Triple("section_trending", "Trending Now", filterFresh(trending)))
                     if (comingSoon.isNotEmpty()) rawSections.add(Triple("section_coming_soon", "Worth the Wait / Coming Soon", comingSoon))
                     if (originals.isNotEmpty()) rawSections.add(Triple("section_originals", "Only on NetflixPro", filterFresh(originals)))
@@ -209,7 +208,7 @@ fun HomeScreen(
                     val comedy = catalogMedia.filter { it.matchesGenre("Comedy") }
                     if (comedy.isNotEmpty()) rawSections.add(Triple("section_comedy", "Comedies & Feel-Good", filterFresh(comedy)))
 
-                    val newReleases = catalogMedia.sortedByDescending { it.releaseYear }
+                    val newReleases = catalogMedia.filter { com.example.discovery.ReleasePolicy.isNew(it.releaseDate) }.sortedByDescending { it.releaseDate }
                     if (newReleases.isNotEmpty()) rawSections.add(Triple("section_new_releases", "New Releases & Fresh Arrivals", filterFresh(newReleases)))
 
                     val anime = catalogMedia.filter { it.matchesGenre("Anime") || it.matchesGenre("Animation") }
@@ -256,7 +255,7 @@ fun HomeScreen(
                     val tvOriginals = tvFiltered.filter { it.isOriginal }
                     if (tvOriginals.isNotEmpty()) rawSections.add(Triple("section_tv_originals", "NetflixPro Original Series", filterFresh(tvOriginals)))
 
-                    val tvNew = tvFiltered.sortedByDescending { it.releaseYear }
+                    val tvNew = tvFiltered.filter { com.example.discovery.ReleasePolicy.isNew(it.releaseDate) }.sortedByDescending { it.releaseDate }
                     if (tvNew.isNotEmpty()) rawSections.add(Triple("section_tv_new", "New TV Shows", filterFresh(tvNew)))
                 }
                 CategoryFilter.MOVIES -> {
@@ -291,7 +290,7 @@ fun HomeScreen(
                     val movOriginals = movFiltered.filter { it.isOriginal }
                     if (movOriginals.isNotEmpty()) rawSections.add(Triple("section_movies_originals", "NetflixPro Original Movies", movOriginals))
 
-                    val movNew = movFiltered.sortedByDescending { it.releaseYear }
+                    val movNew = movFiltered.filter { com.example.discovery.ReleasePolicy.isNew(it.releaseDate) }.sortedByDescending { it.releaseDate }
                     if (movNew.isNotEmpty()) rawSections.add(Triple("section_movies_new", "New Releases", movNew))
                 }
                 CategoryFilter.CATEGORIES -> {
@@ -306,7 +305,7 @@ fun HomeScreen(
                     val catTvShows = filtered.filter { it.type == MediaType.TV_SHOW }
                     val catMovies = filtered.filter { it.type == MediaType.MOVIE }
                     val catOriginals = filtered.filter { it.isOriginal }
-                    val catNew = filtered.sortedByDescending { it.releaseYear }
+                    val catNew = filtered.filter { com.example.discovery.ReleasePolicy.isNew(it.releaseDate) }.sortedByDescending { it.releaseDate }
                     val catAcclaimed = filtered.filter { it.matchPercentage >= 85 }
 
                     rawSections.add(Triple("section_category_highlights", "$genreFilter Highlights", filtered))

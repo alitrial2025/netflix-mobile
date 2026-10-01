@@ -28,6 +28,8 @@ import com.example.data.local.WatchProgressEntity
 import com.example.data.model.CastDevice
 import com.example.data.model.Episode
 import com.example.data.model.GameItem
+import com.example.discovery.recommendationTitle
+import com.example.discovery.toDiscoveryMedia
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.model.NotificationIconType
@@ -53,6 +55,10 @@ import com.example.data.model.toUserProfile
 import com.example.data.download.NetflixDownloadManager
 import com.example.data.download.DownloadTaskInfo
 import com.example.data.download.DownloadTaskStatus
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -203,7 +209,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 val trendingTvDeferred = request { TmdbClient.service.getTrendingTv(apiKey) }
                 val topRatedMoviesDeferred = request { TmdbClient.service.getTopRatedMovies(apiKey) }
                 val topRatedTvDeferred = request { TmdbClient.service.getTopRatedTv(apiKey) }
-                val upcomingMoviesDeferred = request { TmdbClient.service.getUpcomingMovies(apiKey) }
+
                 val popularMoviesDeferred = request { TmdbClient.service.getPopularMovies(apiKey) }
                 val popularTvDeferred = request { TmdbClient.service.getPopularTv(apiKey) }
 
@@ -225,7 +231,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 val trendingTvTask = trendingTvDeferred.await()
                 val topRatedMoviesTask = topRatedMoviesDeferred.await()
                 val topRatedTvTask = topRatedTvDeferred.await()
-                val upcomingMoviesTask = upcomingMoviesDeferred.await()
+
                 val popularMoviesTask = popularMoviesDeferred.await()
                 val popularTvTask = popularTvDeferred.await()
 
@@ -260,9 +266,6 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, topRank = index + 1))
                 }
 
-                upcomingMoviesTask?.results?.forEach { result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isComingSoon = true))
-                }
 
                 popularMoviesTask?.results?.forEach { result ->
                     mappedItems.add(mapResultToMedia(result, MediaType.MOVIE))
@@ -343,13 +346,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             maturityRating = maturityRating,
             releaseYear = year,
             durationOrSeasons = durationOrSeasons,
-            isOriginal = (result.voteAverage ?: 0.0) > 7.5,
+            isOriginal = false,
             top10Rank = topRank,
             genres = genreList,
             cast = emptyList(),
             director = "Unknown Director",
             isTrending = isTrending,
-            isComingSoon = isComingSoon,
+            isComingSoon = isComingSoon && com.example.discovery.ReleasePolicy.isUpcoming(result.releaseDate ?: result.firstAirDate),
+            releaseDate = result.releaseDate ?: result.firstAirDate,
+            genreIds = result.genreIds, voteAverage = result.voteAverage ?: 0.0,
+            voteCount = result.voteCount, popularity = result.popularity,
             releaseDateBadge = if (isComingSoon) {
                 val parts = (result.releaseDate ?: "").split("-")
                 if (parts.size >= 3) {
@@ -409,7 +415,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                             subtitleLanguage = obj.optString("subtitleLanguage", "Off"),
                             autoplayNext = obj.optBoolean("autoplayNext", true),
                             autoplayPreviews = obj.optBoolean("autoplayPreviews", true),
-                            gameHandle = obj.optString("gameHandle", null).takeIf { !it.isNullOrEmpty() }
+                            gameHandle = obj.optString("gameHandle", null).takeIf { !it.isNullOrEmpty() },
+                            favoriteGenres = obj.optJSONArray("favoriteGenres")?.let { array -> (0 until array.length()).map { array.getString(it) } }.orEmpty()
                         )
                     )
                 }
@@ -436,6 +443,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         } else if (previousUid != uid) {
             repository.clearAccountData()
             prefs.edit().clear().putString("local_account_uid", uid).apply()
+            _showProfileWalkthrough.value = false
+            _editingProfile.value = null
             _profiles.value = emptyList()
             _activeProfile.value = UserProfile(id = "p_temp", name = "User")
             _showProfilePicker.value = false
@@ -463,6 +472,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     put("language", profile.language)
                     put("audioLanguage", profile.audioLanguage)
                     put("subtitleLanguage", profile.subtitleLanguage)
+                    put("favoriteGenres", JSONArray(profile.favoriteGenres))
                     put("autoplayNext", profile.autoplayNext)
                     put("autoplayPreviews", profile.autoplayPreviews)
                     put("gameHandle", profile.gameHandle ?: "")
@@ -514,6 +524,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _editingProfile = MutableStateFlow<UserProfile?>(null)
     val editingProfile: StateFlow<UserProfile?> = _editingProfile.asStateFlow()
 
+    private val _showProfileWalkthrough = MutableStateFlow(false)
+    val showProfileWalkthrough: StateFlow<Boolean> = _showProfileWalkthrough.asStateFlow()
     private val _showEditProfileScreen = MutableStateFlow(false)
     val showEditProfileScreen: StateFlow<Boolean> = _showEditProfileScreen.asStateFlow()
 
@@ -670,18 +682,79 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private val sharedReleaseReminders by lazy { com.example.discovery.SharedReleaseReminders(getApplication()) }
+    private val liveDiscovery by lazy { com.example.discovery.createReleaseDiscovery(getApplication()) }
+    private val communityDiscovery = com.example.discovery.CommunityDiscovery()
+    private val qualifiedPlayback = com.example.discovery.QualifiedPlayback()
+    private val releaseTitles = MutableStateFlow<List<MediaItem>>(emptyList())
+    private val discoveryDay = MutableStateFlow(com.example.discovery.ReleasePolicy.day())
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val profileRatings = _activeProfile.flatMapLatest { repository.getAllRatings(it.id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private data class TasteInputs(val profile: UserProfile, val history: List<com.example.data.CloudWatchHistoryItem>,
+        val ratings: List<com.example.data.local.RatingEntity>)
+    private val tasteInputs = combine(_activeProfile, _watchHistory, profileRatings) { profile, history, ratings -> TasteInputs(profile,history,ratings) }
+    val upcomingReleases = combine(liveDiscovery.feed, _activeProfile) { feed, profile ->
+        feed.upcoming.map { it.toDiscoveryMedia(true) }.filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentReleases = combine(liveDiscovery.feed, _activeProfile, communityDiscovery.counts) { feed, profile, counts ->
+        val items = feed.recent.map { it.toDiscoveryMedia(false) }.filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+        items.sortedByDescending { counts[it.recommendationTitle().key] ?: 0L }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private fun startLiveDiscovery() {
+        communityDiscovery.start(viewModelScope)
+        viewModelScope.launch {
+            _activeProfile.collectLatest { profile ->
+                val owner=syncManager.getUserId()
+                val local=repository.reminders.first()
+                if(owner!=syncManager.getUserId() || _activeProfile.value.id!=profile.id) return@collectLatest
+                val legacy=local.mapNotNull { saved -> _catalogMedia.value.firstOrNull { it.id==saved.mediaId }?.recommendationTitle()?.key }.toSet()
+                sharedReleaseReminders.select(profile.id,legacy)
+            }
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            liveDiscovery.feed.collect { feed ->
+                releaseTitles.value = (feed.recent.map { it.toDiscoveryMedia(false) } + feed.upcoming.map { it.toDiscoveryMedia(true) })
+                    .distinctBy { "${it.type}:${it.id}" }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                discoveryDay.value = com.example.discovery.ReleasePolicy.day()
+                liveDiscovery.refresh(online = hasCatalogNetwork())
+                delay(60_000)
+            }
+        }
+    }
+
     // Dynamic catalog StateFlow
     private val _catalogMedia = MutableStateFlow<List<MediaItem>>(emptyList())
     val catalogMedia: StateFlow<List<MediaItem>> = _catalogMedia.asStateFlow()
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val displayCatalogMedia: StateFlow<List<MediaItem>> = combine(_catalogMedia, _activeProfile) { catalog, profile ->
-        if (profile.hasMaturityRestriction) {
-            catalog.filter { it.isKidSafe(profile.contentMaxAge) }
-        } else {
-            catalog
+    @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
+    private val recommendationResult = combine(_catalogMedia, tasteInputs, communityDiscovery.counts, releaseTitles, discoveryDay) { catalog, inputs, crowd, releases, _ ->
+        val profile = inputs.profile
+        // Keep legacy catalogue ID lookups unambiguous; the dedicated release feeds use typed identity.
+        val merged = (catalog.map { it.copy(isComingSoon = !com.example.discovery.ReleasePolicy.isPlayableDate(it.releaseDate)) } + releases)
+            .distinctBy { it.id }.filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+        val byKey = merged.associateBy { it.recommendationTitle().key }
+        val history = inputs.history.map { event ->
+            val kind = if(event.type == "TV_SHOW" || event.type == "Series") "tv" else "movie"
+            com.example.discovery.TasteSignal("$kind:${event.mediaId}",event.genreIds.toSet(),event.lastWatchedTimestamp,
+                event.positionSeconds,event.durationSeconds,kind == "movie")
         }
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        val ratings = inputs.ratings.mapNotNull { rating -> merged.firstOrNull { it.id == rating.mediaId }?.let { it.recommendationTitle().key to rating.ratingType } }.toMap()
+        val rank = com.example.discovery.RecommendationEngine.rank(merged.map { it.recommendationTitle() },profile.id,
+            com.example.discovery.RecommendationEngine.preferredGenres(profile.favoriteGenres),history,ratings,crowd,limit=merged.size)
+        val rankedKeys = rank.toHashSet()
+        val picks = rank.mapNotNull { byKey[it] }
+        RecommendationResult(picks + merged.filter { it.recommendationTitle().key !in rankedKeys }, picks.take(20))
+    }.debounce(300).flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RecommendationResult())
+    private data class RecommendationResult(val catalog: List<MediaItem> = emptyList(), val picks: List<MediaItem> = emptyList())
+    val displayCatalogMedia = recommendationResult.map { it.catalog }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val personalizedMedia = recommendationResult.map { it.picks }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Navigation and Categories
     private val _selectedTab = MutableStateFlow(NavigationTab.HOME)
@@ -772,7 +845,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         .flatMapLatest { profile -> repository.getDownloads(profile.id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val reminders: StateFlow<List<ReminderEntity>> = repository.reminders
+    val reminders: StateFlow<List<ReminderEntity>> = sharedReleaseReminders.keys.map { keys -> keys.map { ReminderEntity(mediaId=it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -889,6 +962,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     init {
         setUserSubscription(_userSubscription.value)
         fetchTmdbCatalog()
+        startLiveDiscovery()
         startNetMirrorWarmup()
 
         // Load Room DB profiles on startup for immediate offline availability
@@ -964,6 +1038,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         if (!syncManager.isAuthenticated()) return
         val uid = syncManager.getUserId()
         val profileId = _activeProfile.value.id
+        viewModelScope.launch {
+            val saved = repository.reminders.first()
+            if (syncManager.getUserId() != uid || _activeProfile.value.id != profileId) return@launch
+            sharedReleaseReminders.select(profileId, saved.mapNotNull { reminder ->
+                _catalogMedia.value.firstOrNull { it.id == reminder.mediaId }?.recommendationTitle()?.key
+            }.toSet())
+        }
         if (uid.isBlank() || profileId == "p_guest" || profileId == "p_temp") return
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -1021,6 +1102,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setGuestMode() {
+        sharedReleaseReminders.close()
         syncManager.signOutUser()
         accountResetJob = viewModelScope.launch(Dispatchers.IO) {
             repository.clearAccountData()
@@ -1148,7 +1230,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                     _showAuthScreen.value = false
-                    _showProfilePicker.value = true
+                    openProfileWalkthrough(primary)
                     onSuccess()
                     }
                 },
@@ -1188,6 +1270,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             planName = "Guest",
             expiresAt = 0L
         ))
+        _showProfileWalkthrough.value = false
+        _editingProfile.value = null
         _profiles.value = emptyList()
         _activeProfile.value = UserProfile(id = "p_guest", name = "Guest", avatarType = com.example.data.model.AvatarType.CUSTOM, avatarUrl = com.example.data.model.AvatarUrls.urls[0])
         _showAuthScreen.value = true
@@ -1311,6 +1395,20 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _editingProfile.value = null
     }
 
+    fun openProfileWalkthrough(profile: UserProfile? = null) {
+        openEditProfile(profile)
+        if (_editingProfile.value == null || !_showEditProfileScreen.value) return
+        _showProfileWalkthrough.value = true
+        _showEditProfileScreen.value = false
+        _showProfilePicker.value = false
+    }
+    fun closeProfileWalkthrough() {
+        if (_isSavingProfile.value) return
+        _showProfileWalkthrough.value = false
+        _editingProfile.value = null
+        _showProfilePicker.value = true
+    }
+
     fun openAvatarPicker() {
         _showAvatarPicker.value = true
     }
@@ -1352,6 +1450,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 if (_activeProfile.value.id == safeProfile.id || _profiles.value.size == 1) _activeProfile.value = safeProfile
                 saveProfilesLocally(_profiles.value)
                 syncManager.syncProfilesToCloud(_profiles.value, _activeProfile.value.id)
+                if (_showProfileWalkthrough.value) {
+                    _activeProfile.value = safeProfile
+                    _showProfileWalkthrough.value = false
+                    _showProfilePicker.value = false
+                    connectCloudDataForActiveProfile()
+                }
                 _showEditProfileScreen.value = false; _editingProfile.value = null
                 showToast("Saved ${safeProfile.name}'s profile")
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -1674,11 +1778,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             _showAuthScreen.value = true
             return
         }
-        viewModelScope.launch {
-            val hasReminder = reminders.value.any { it.mediaId == media.id }
-            repository.toggleReminder(media.id, hasReminder)
-            showToast(if (hasReminder) "Reminder removed" else "We'll remind you when ${media.title} is released!")
-        }
+        sharedReleaseReminders.toggle(media.recommendationTitle().key)
     }
 
     fun setRating(mediaId: String, rating: String) {
@@ -1721,6 +1821,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false) {
+        if (!offlineOnly && !com.example.discovery.ReleasePolicy.isPlayableDate(media.releaseDate)) {
+            showToast("This title hasn't been released yet. Add a reminder in Coming Soon.")
+            return
+        }
         if (!titleAllowed(media)) return
         smartCuratorJob?.cancel() // A background availability probe must yield to an explicit Play tap.
         finishSmartReplacement()
@@ -1901,6 +2005,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _playerState.update { it.copy(currentPositionSec = currentSec, durationSec = dur, showSkipIntro = showSkip) }
 
         val media = _playerState.value.media ?: return
+        if (_playerState.value.sourceId != "Trailer" && qualifiedPlayback.sample(media.recommendationTitle().key, currentSec,
+                _playerState.value.isPlaying, android.os.SystemClock.elapsedRealtime()))
+            viewModelScope.launch(Dispatchers.IO) { communityDiscovery.record(media.recommendationTitle().key) }
         val ep = _playerState.value.episode
         val coordinates = episodeCoordinates(ep?.id)
         val isTrailer = _playerState.value.sourceId == "Trailer"
@@ -2164,6 +2271,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         resolveJob?.cancel()
         syncManager.cleanup()
         super.onCleared()
+        sharedReleaseReminders.close()
     }
 
     // Search Actions

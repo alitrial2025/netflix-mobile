@@ -135,6 +135,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val showProfilePicker by viewModel.showProfilePicker.collectAsStateWithLifecycle()
     val editingProfile by viewModel.editingProfile.collectAsStateWithLifecycle()
+    val showProfileWalkthrough by viewModel.showProfileWalkthrough.collectAsStateWithLifecycle()
     val showEditProfileScreen by viewModel.showEditProfileScreen.collectAsStateWithLifecycle()
     val showAvatarPicker by viewModel.showAvatarPicker.collectAsStateWithLifecycle()
     val transitioningProfile by viewModel.transitioningProfile.collectAsStateWithLifecycle()
@@ -196,6 +197,12 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val diagnosticRunning by viewModel.diagnosticRunning.collectAsStateWithLifecycle()
     val diagnosticResult by viewModel.diagnosticResult.collectAsStateWithLifecycle()
     val catalogMedia by viewModel.displayCatalogMedia.collectAsStateWithLifecycle()
+    val personalizedMedia by viewModel.personalizedMedia.collectAsStateWithLifecycle()
+    val upcomingReleases by viewModel.upcomingReleases.collectAsStateWithLifecycle()
+    val recentReleases by viewModel.recentReleases.collectAsStateWithLifecycle()
+    val reminderMedia = remember(catalogMedia, upcomingReleases, recentReleases) {
+        catalogMedia + upcomingReleases + recentReleases
+    }
     val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
     val isWarmupFinished by viewModel.isWarmupFinished.collectAsStateWithLifecycle()
     val hasCompletedSplash by viewModel.hasCompletedSplash.collectAsStateWithLifecycle()
@@ -213,6 +220,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         enabled = showAuthScreen ||
                 showTvPairScreen ||
                 showAvatarPicker ||
+                showProfileWalkthrough ||
                 showEditProfileScreen ||
                 showDownloadsScreen ||
                 isPlayerVisible ||
@@ -228,6 +236,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             showAuthScreen -> viewModel.openAuthScreen(false)
             showTvPairScreen -> viewModel.openTvPairScreen(false)
             showAvatarPicker -> viewModel.closeAvatarPicker()
+            showProfileWalkthrough -> viewModel.closeProfileWalkthrough()
             showEditProfileScreen -> viewModel.closeEditProfile()
             showDownloadsScreen -> viewModel.openDownloadsScreen(false)
             isPlayerVisible -> viewModel.closePlayer()
@@ -312,6 +321,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 } else {
                                     HomeScreen(
                                         catalogMedia = catalogMedia,
+                                        personalizedMedia = personalizedMedia,
                                         userSubscription = userSubscription,
                                         reminders = reminders,
                                         onToggleReminder = stableOnToggleReminder,
@@ -351,6 +361,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                         NavigationTab.NEW_HOT -> {
                             NewAndHotScreen(
+                                upcomingReleases = upcomingReleases, recentReleases = recentReleases,
                                 reminders = reminders,
                                 games = games,
                                 notifications = notifications,
@@ -413,6 +424,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                         NavigationTab.MY_NETFLIX -> {
                             MyNetflixScreen(
                                 activeProfile = activeProfile,
+                                reminderMedia = reminderMedia,
                                 watchlist = watchlist,
                                 downloads = downloads,
                                 likedMedia = likedMedia,
@@ -451,7 +463,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 }
 
                 // Floating Bottom Navigation Bar
-                if (!isPlayerVisible && selectedMedia == null) {
+                if (!isPlayerVisible && selectedMedia == null && !showProfileWalkthrough) {
                     val onTabSelected = remember(viewModel) { { tab: NavigationTab -> viewModel.selectTab(tab) } }
                     val ambientColorProvider = remember(viewModel) { { viewModel.ambientColor.value } }
                     NetflixBottomNav(
@@ -534,7 +546,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                         viewModel.openSubscriptionSheet(true)
                     } else {
                         viewModel.openProfilePicker(false)
-                        viewModel.openEditProfile(null)
+                        viewModel.openProfileWalkthrough()
                     }
                 },
                 onEditProfile = { p ->
@@ -557,6 +569,14 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                     isWarmupFinished = isWarmupFinished,
                     onAnimationComplete = { viewModel.clearTransitioningProfile() }
                 )
+            }
+        }
+
+        if (showProfileWalkthrough) {
+            editingProfile?.let { profile ->
+                com.example.ui.screens.ProfileSetupWalkthroughScreen(profile,
+                    onComplete = viewModel::saveProfile, onChooseIcon = viewModel::openAvatarPicker,
+                    onCancel = viewModel::closeProfileWalkthrough, isSaving = isSavingProfile, saveError = profileSaveError)
             }
         }
 
@@ -842,7 +862,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
         // Elegant full screen TMDB API loader
         if (isLoadingCatalog && hasCompletedSplash && !isPlayerVisible && selectedMedia == null &&
-            !showSettingsDrawer && !showDownloadsScreen && !showAuthScreen && !showProfilePicker && !showEditProfileScreen) {
+            !showSettingsDrawer && !showDownloadsScreen && !showAuthScreen && !showProfilePicker && !showEditProfileScreen && !showProfileWalkthrough) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

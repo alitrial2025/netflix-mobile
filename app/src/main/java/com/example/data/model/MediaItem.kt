@@ -47,7 +47,12 @@ data class MediaItem(
     val videoPreviewDurationSec: Int = 120,
     val totalSeasons: Int = 1,
     val totalEpisodes: Int = 0,
-    val similarMedia: List<MediaItem> = emptyList()
+    val similarMedia: List<MediaItem> = emptyList(),
+    val releaseDate: String? = null,
+    val genreIds: List<Int> = emptyList(),
+    val voteAverage: Double = 0.0,
+    val voteCount: Int = 0,
+    val popularity: Double = 0.0
 ) {
     fun isKidSafe(maxAge: Int = 12): Boolean {
         val rating = maturityRating.trim().uppercase()

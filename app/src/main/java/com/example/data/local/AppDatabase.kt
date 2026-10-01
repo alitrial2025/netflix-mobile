@@ -16,13 +16,19 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RatingEntity::class,
         ReminderEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun netflixDao(): NetflixDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_profiles ADD COLUMN favoriteGenresJson TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE user_profiles ADD COLUMN audioLanguage TEXT NOT NULL DEFAULT 'Original'")
@@ -39,7 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "netflix_database.db"
-                ).addMigrations(MIGRATION_7_8).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_7_8, MIGRATION_8_9).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }
