@@ -1844,6 +1844,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun evictFailedPlayback() {
+        val state = _playerState.value
+        val media = state.media ?: return
+        if (state.sourceId?.startsWith("Offline") == true || state.sourceId == "Trailer") return
+        val season = state.episode?.id?.substringAfter("_S", "")?.substringBefore('_')?.toIntOrNull()
+            ?: if (media.type == MediaType.TV_SHOW) 1 else 0
+        netMirrorResolver.evictCachedStream(media.id, if (media.type == MediaType.MOVIE) "movie" else "tv",
+            season, state.episode?.episodeNumber ?: if (media.type == MediaType.TV_SHOW) 1 else 0)
+    }
+
     fun updatePlayerProgress(currentSec: Int, totalDurationSec: Int) {
         val currentState = _playerState.value
         val showSkip = currentState.sourceId != "Trailer" && currentState.media?.type == MediaType.TV_SHOW &&

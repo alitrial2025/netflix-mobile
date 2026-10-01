@@ -901,6 +901,7 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
         modifier = Modifier.fillMaxSize()
     ) {
         VideoPlayerScreen(
+            onPlaybackFailed = viewModel::evictFailedPlayback,
             playerState = playerState,
             modifier = Modifier.fillMaxSize(),
             onClose = { viewModel.closePlayer() },

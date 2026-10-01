@@ -48,7 +48,8 @@ internal object StreamSessionPolicy {
         isWaitingVideo(body) || limitMessage.containsMatchIn(body)
 
     fun isSessionRejected(code: Int, body: String): Boolean = code == 401 || code == 403 ||
-        listOf("in=unknown", "session expired", "token expired", "invalid token", "unauthenticated", "login required", "only valid users allowed")
+        (body.trimStart().startsWith("#EXTM3U") && body.contains("in=unknown", ignoreCase = true)) ||
+        listOf("session expired", "token expired", "invalid token", "unauthenticated", "login required", "only valid users allowed")
             .any { body.contains(it, ignoreCase = true) } || authError.containsMatchIn(body)
 
     // The authenticated search/post endpoints return JSON. HTML from a captive
