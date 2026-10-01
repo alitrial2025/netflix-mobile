@@ -125,7 +125,8 @@ class NetflixRepository(private val dao: NetflixDao) {
         episodeId: String? = null,
         localFilePath: String? = null,
         videoUrl: String? = null,
-        captionsJson: String? = null
+        captionsJson: String? = null,
+        isForYou: Boolean = false
     ) {
         val downloadKey = if (episodeId != null) "${mediaId}_$episodeId" else mediaId
         dao.saveDownload(
@@ -138,7 +139,8 @@ class NetflixRepository(private val dao: NetflixDao) {
                 fileSizeMb = sizeMb,
                 localFilePath = localFilePath,
                 videoUrl = videoUrl,
-                captionsJson = captionsJson
+                captionsJson = captionsJson,
+                isForYou = isForYou
             )
         )
     }

@@ -110,12 +110,13 @@ fun MediaPosterCard(
             )
         } else {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(imageModel)
-                    .crossfade(true)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .build(),
+                model = remember(context, imageModel, width, height, androidx.compose.ui.platform.LocalDensity.current.density) {
+                    ImageRequest.Builder(context).data(imageModel)
+                        .size((width.value * context.resources.displayMetrics.density).toInt().coerceAtLeast(1),
+                            (height.value * context.resources.displayMetrics.density).toInt().coerceAtLeast(1))
+                        .crossfade(false)
+                        .memoryCachePolicy(CachePolicy.ENABLED).diskCachePolicy(CachePolicy.ENABLED).build()
+                },
                 contentDescription = media.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop

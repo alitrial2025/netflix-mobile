@@ -317,7 +317,7 @@ fun MyNetflixScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Sign In to Netflix",
+                            text = "Sign In to NetflixPro",
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold

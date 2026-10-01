@@ -35,8 +35,12 @@ data class UserProfile(
     val language: String = "English",
     val autoplayNext: Boolean = true,
     val autoplayPreviews: Boolean = true,
-    val gameHandle: String? = null
+    val gameHandle: String? = null,
+    val audioLanguage: String = "Original",
+    val subtitleLanguage: String = "Off"
 ) {
+    val contentMaxAge: Int get() = if (isKids) maxAge.coerceIn(0, 12) else maxAge.coerceIn(0, 18)
+    val hasMaturityRestriction: Boolean get() = contentMaxAge < 18
     val isKidProfile: Boolean
         get() = isKids || maxAge <= 12
 }
@@ -57,7 +61,9 @@ fun UserProfile.toEntity(): com.example.data.local.ProfileEntity {
         language = language,
         autoplayNext = autoplayNext,
         autoplayPreviews = autoplayPreviews,
-        gameHandle = gameHandle
+        gameHandle = gameHandle,
+        audioLanguage = audioLanguage,
+        subtitleLanguage = subtitleLanguage
     )
 }
 
@@ -77,6 +83,8 @@ fun com.example.data.local.ProfileEntity.toUserProfile(): UserProfile {
         language = language,
         autoplayNext = autoplayNext,
         autoplayPreviews = autoplayPreviews,
-        gameHandle = gameHandle
+        gameHandle = gameHandle,
+        audioLanguage = audioLanguage,
+        subtitleLanguage = subtitleLanguage
     )
 }

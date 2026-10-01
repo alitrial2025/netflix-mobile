@@ -176,6 +176,11 @@ fun VideoPlayerScreen(
     onUpdateProgress: ((Int, Int) -> Unit)? = null,
     onTrailerEnded: (() -> Unit)? = null,
     autoPlayNext: Boolean = false,
+    onContentEnded: () -> Unit = {},
+    onReplay: () -> Unit = {},
+    onRetryNext: () -> Unit = {},
+    recommendations: List<com.example.data.model.MediaItem> = emptyList(),
+    onRecommendationClick: (com.example.data.model.MediaItem) -> Unit = {},
     onSetIntroWindow: (com.example.ui.viewmodel.IntroWindow?) -> Unit = {},
     onPersistProgress: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -190,7 +195,7 @@ fun VideoPlayerScreen(
     val latestTrailerEnded by rememberUpdatedState(onTrailerEnded)
     val latestTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
     val latestNextEpisode by rememberUpdatedState(onPlayNextEpisode)
-    val latestAutoPlayNext by rememberUpdatedState(autoPlayNext)
+    val latestContentEnded by rememberUpdatedState(onContentEnded)
     val latestPersistProgress by rememberUpdatedState(onPersistProgress)
     val latestSetIntroWindow by rememberUpdatedState(onSetIntroWindow)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -198,6 +203,34 @@ fun VideoPlayerScreen(
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
     var playbackError by remember { mutableStateOf<String?>(null) }
+
+    var thumbnailCues by remember(media.id, playerState.episode?.id) { mutableStateOf<List<SeekThumbnail>>(emptyList()) }
+    var scrubPosition by remember(media.id, playerState.episode?.id) { mutableStateOf<Int?>(null) }
+    var thumbnailRequested by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
+    val thumbnailCaption = remember(playerState.captions) { playerState.captions.firstOrNull { it.type == "thumbnails" && it.url.startsWith("https://") } }
+    LaunchedEffect(thumbnailRequested, thumbnailCaption?.url, media.id, playerState.episode?.id) {
+        val caption = thumbnailCaption ?: return@LaunchedEffect
+        if (!thumbnailRequested || playerState.isResolving) return@LaunchedEffect
+        try {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val source = com.example.data.ScopedPlaybackHttp.factory(playerState.resolveHeaders, caption.url).createDataSource()
+                try {
+                    source.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(caption.url)))
+                    val output = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
+                    while (true) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val count = source.read(buffer, 0, buffer.size)
+                        if (count < 0) break
+                        require(output.size() + count <= 1024 * 1024)
+                        output.write(buffer, 0, count)
+                    }
+                    output.toString("UTF-8")
+                } finally { source.close() }
+            }
+            thumbnailCues = parseSeekThumbnails(text, caption.url)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Optional thumbnail metadata never blocks the video. */ }
+    }
 
     var availableAudioTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
     var availableSubtitleTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
@@ -207,8 +240,9 @@ fun VideoPlayerScreen(
         ExoPlayer.Builder(context).build().apply {
             repeatMode = Player.REPEAT_MODE_OFF
             trackSelectionParameters = trackSelectionParameters.buildUpon()
-                .setPreferredAudioLanguage("en")
-                .setPreferredTextLanguage("en")
+                .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
+                .setPreferredTextLanguage(com.example.data.model.playbackLanguageCode(playerState.subtitleLanguage))
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleLanguage == "Off")
                 .build()
         }
     }
@@ -265,10 +299,7 @@ fun VideoPlayerScreen(
                     reportProgress()
                     if (state.sourceId == "Trailer") {
                         latestTrailerEnded?.invoke()
-                    } else if (state.isPlaying) {
-                        val next = state.episode?.let { com.example.ui.viewmodel.nextEpisodeIndex(it.id, state.media?.episodes.orEmpty().map { ep -> ep.id }) }
-                        if (latestAutoPlayNext && next != null) latestNextEpisode() else latestTogglePlayPause()
-                    }
+                    } else latestContentEnded()
                 }
             }
 
@@ -354,16 +385,6 @@ fun VideoPlayerScreen(
                     }
                 }
 
-                if (audioList.isEmpty()) {
-                    audioList.add(
-                        PlayerTrackOption(
-                            id = "default_audio",
-                            name = "English [Original]",
-                            language = "en",
-                            isSelected = true
-                        )
-                    )
-                }
 
                 val isAnySubSelected = subList.any { it.isSelected }
                 val offOption = PlayerTrackOption(
@@ -454,6 +475,11 @@ fun VideoPlayerScreen(
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
+            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
+                .setPreferredTextLanguage(com.example.data.model.playbackLanguageCode(playerState.subtitleLanguage))
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleTrack == "Off").build()
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.prepare()
             if (playerState.isPlaying && playbackActive) {
@@ -607,12 +633,9 @@ fun VideoPlayerScreen(
 
     // Audio & Subtitles Dialog
     if (playerState.showAudioSubtitleDialog) {
-        val currentAudioTracks = if (availableAudioTracks.isNotEmpty()) availableAudioTracks else listOf(
-            PlayerTrackOption("default", "English [Original]", "en", true)
-        )
+        val currentAudioTracks = availableAudioTracks
         val currentSubTracks = if (availableSubtitleTracks.isNotEmpty()) availableSubtitleTracks else listOf(
-            PlayerTrackOption("off", "Off", "", true),
-            PlayerTrackOption("en", "English", "en", false)
+            PlayerTrackOption("off", "Off", "", true)
         )
 
         AlertDialog(
@@ -648,8 +671,9 @@ fun VideoPlayerScreen(
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(currentAudioTracks) { track ->
-                                val isSelected = playerState.audioTrack == track.name || track.isSelected
+                            if (currentAudioTracks.isEmpty()) item { Text("Audio tracks will appear when available.", color = Color.Gray, fontSize = 12.sp) }
+                            items(currentAudioTracks, key = { it.id }) { track ->
+                                val isSelected = track.isSelected
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -753,6 +777,7 @@ fun VideoPlayerScreen(
                                                     exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                                                         .buildUpon()
                                                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                                                         .setPreferredTextLanguage(track.language)
                                                         .build()
                                                 }
@@ -925,7 +950,7 @@ fun VideoPlayerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
+            .pointerInput(playerState.isResolving) {
                 if (!playerState.isResolving) {
                     detectTapGestures(onTap = { onToggleControls() })
                 }
@@ -958,7 +983,8 @@ fun VideoPlayerScreen(
                                 null
                             )
                         )
-                        setFractionalTextSize(0.0533f)
+                        setUserDefaultStyle()
+                        setUserDefaultTextSize()
                         setBottomPaddingFraction(0.10f)
                     }
                 }
@@ -1264,6 +1290,7 @@ fun VideoPlayerScreen(
                             currentSec = playerState.currentPositionSec,
                             durationSec = playerState.durationSec,
                             onSeek = handleSeek,
+                            onScrub = { value -> scrubPosition = value; if (value != null) thumbnailRequested = true },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("player_timeline_slider")
@@ -1382,24 +1409,31 @@ fun VideoPlayerScreen(
             }
         }
 
-        val nextIndex = playerState.episode?.let {
-            com.example.ui.viewmodel.nextEpisodeIndex(it.id, media.episodes.map { ep -> ep.id })
+        val scrub = scrubPosition
+        if (scrub != null && !playerState.isLocked) {
+            val cue = remember(scrub, thumbnailCues) { seekThumbnailAt(thumbnailCues, scrub * 1000L) }
+            Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp).background(Color(0xFF202020), RoundedCornerShape(6.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (cue != null) {
+                    SeekThumbnailFrame(cue, playerState.resolveHeaders, "Preview at ${formatTimeString(scrub)}")
+                }
+                Text(formatTimeString(scrub), color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(5.dp))
+            }
         }
-        val nextEpisode = nextIndex?.let { media.episodes[it] }
-        AnimatedVisibility(
-            visible = nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
-                !playerState.isResolving && playerState.durationSec > 60 &&
-                playerState.currentPositionSec >= playerState.durationSec - 30,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 80.dp)
-        ) {
-            Button(
-                onClick = { reportProgress(); onPlayNextEpisode() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                shape = RoundedCornerShape(4.dp),
-                modifier = Modifier.testTag("next_episode_button")
-            ) { Text("NEXT EPISODE", fontWeight = FontWeight.Bold) }
+
+        var watchCredits by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
+        val nearEnd = playerState.durationSec > 60 && playerState.currentPositionSec >= playerState.durationSec - 30
+        LaunchedEffect(nearEnd) { if (!nearEnd) watchCredits = false }
+        if (playerState.hasEnded && playerState.sourceId != "Trailer" && !playerState.isLocked) {
+            PostPlayOverlay(playerState, recommendations,
+                onReplay = { watchCredits = false; exoPlayer.seekTo(0); onSeek(0); onReplay() },
+                onClose = onClose, onNext = { reportProgress(); onPlayNextEpisode() }, onRetryNext = onRetryNext,
+                onRecommendation = { reportProgress(); onRecommendationClick(it) }, onRating = { onSetRating?.invoke(it) })
+        }
+        if (playerState.nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
+            !playerState.isResolving && !watchCredits && (nearEnd || playerState.hasEnded)) {
+            NextEpisodeCard(playerState, autoPlayNext, playbackActive,
+                onNext = { reportProgress(); onPlayNextEpisode() }, onWatchCredits = { watchCredits = true },
+                modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 48.dp))
         }
 
         // Animated "Skip Intro" pop-up on bottom-right
@@ -1440,8 +1474,11 @@ private fun PlayerProgressBar(
     currentSec: Int,
     durationSec: Int,
     onSeek: (Int) -> Unit,
+    onScrub: (Int?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val latestSeek by rememberUpdatedState(onSeek)
+    val latestScrub by rememberUpdatedState(onScrub)
     val progress = if (durationSec > 0) (currentSec.toFloat() / durationSec.toFloat()).coerceIn(0f, 1f) else 0f
 
     Row(
@@ -1460,26 +1497,30 @@ private fun PlayerProgressBar(
                 .pointerInput(durationSec) {
                     detectTapGestures { offset ->
                         val newProgress = (offset.x / size.width).coerceIn(0f, 1f)
-                        onSeek((newProgress * durationSec).toInt())
+                        latestSeek((newProgress * durationSec).toInt())
                     }
                 }
                 .pointerInput(durationSec) {
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
                             isDragging = true
-                            dragProgress = (offset.x / size.width).coerceIn(0f, 1f)
+                            dragProgress = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                            latestScrub((dragProgress * durationSec).toInt())
                         },
                         onDragEnd = {
                             isDragging = false
-                            onSeek((dragProgress * durationSec).toInt())
+                            latestSeek((dragProgress * durationSec).toInt())
+                            latestScrub(null)
                         },
                         onDragCancel = {
                             isDragging = false
+                            latestScrub(null)
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
                             val widthPx = size.width.toFloat().coerceAtLeast(1f)
                             dragProgress = (dragProgress + dragAmount / widthPx).coerceIn(0f, 1f)
+                            latestScrub((dragProgress * durationSec).toInt())
                         }
                     )
                 },
@@ -1518,7 +1559,7 @@ private fun PlayerProgressBar(
         }
 
         // Duration / Remaining text on the right
-        val remainingSec = (durationSec - currentSec).coerceAtLeast(0)
+        val remainingSec = (durationSec - (displayProgress * durationSec).toInt()).coerceAtLeast(0)
         Text(
             text = formatTimeString(remainingSec),
             color = Color.White,

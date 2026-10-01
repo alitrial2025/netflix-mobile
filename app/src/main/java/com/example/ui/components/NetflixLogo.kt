@@ -46,7 +46,7 @@ internal object NetflixProLogoGeometry {
 }
 
 /**
- * Loads and renders the outlined NetflixPro SVG wordmark from assets/netflix_logo.svg
+ * Renders the outlined NetflixPro SVG vector export synchronously.
  */
 @Composable
 fun NetflixSvgWordmark(
@@ -54,13 +54,8 @@ fun NetflixSvgWordmark(
     height: Dp = 26.dp,
     testTag: String = "netflix_svg_wordmark"
 ) {
-    val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data("file:///android_asset/netflix_logo.svg")
-            .decoderFactory(SvgDecoder.Factory())
-            .crossfade(true)
-            .build(),
+    Image(
+        painter = painterResource(R.drawable.ic_netflix_logo),
         contentDescription = "NetflixPro",
         contentScale = ContentScale.Fit,
         modifier = modifier
@@ -71,7 +66,7 @@ fun NetflixSvgWordmark(
 }
 
 /**
- * Loads and renders the Npro ribbon lockup SVG from assets/netflix_n.svg
+ * Renders the Npro ribbon lockup SVG vector export synchronously.
  */
 @Composable
 fun NetflixSvgNLogo(
@@ -79,13 +74,8 @@ fun NetflixSvgNLogo(
     size: Dp = 32.dp,
     testTag: String = "netflix_svg_n_logo"
 ) {
-    val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data("file:///android_asset/netflix_n.svg")
-            .decoderFactory(SvgDecoder.Factory())
-            .crossfade(true)
-            .build(),
+    Image(
+        painter = painterResource(R.drawable.ic_netflix_n),
         contentDescription = "Npro logo",
         contentScale = ContentScale.Fit,
         modifier = modifier

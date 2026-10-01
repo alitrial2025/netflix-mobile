@@ -29,6 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -61,6 +64,7 @@ fun HomeScreen(
     onWatchlistToggle: (MediaItem) -> Unit,
     modifier: Modifier = Modifier,
     catalogMedia: List<MediaItem> = emptyList(),
+    watchlistIds: Set<String>? = null,
     userSubscription: UserSubscription = UserSubscription(),
     reminders: List<ReminderEntity> = emptyList(),
     onToggleReminder: ((MediaItem) -> Unit)? = null,
@@ -193,7 +197,7 @@ fun HomeScreen(
                     }
                     if (trending.isNotEmpty()) rawSections.add(Triple("section_trending", "Trending Now", filterFresh(trending)))
                     if (comingSoon.isNotEmpty()) rawSections.add(Triple("section_coming_soon", "Worth the Wait / Coming Soon", comingSoon))
-                    if (originals.isNotEmpty()) rawSections.add(Triple("section_originals", "Only on Netflix", filterFresh(originals)))
+                    if (originals.isNotEmpty()) rawSections.add(Triple("section_originals", "Only on NetflixPro", filterFresh(originals)))
                     
                     val actionSciFi = catalogMedia.filter { it.matchesGenre("Action") || it.matchesGenre("Sci-Fi") }
                     if (actionSciFi.isNotEmpty()) rawSections.add(Triple("section_action_scifi", "Action & Sci-Fi Thrillers", filterFresh(actionSciFi)))
@@ -252,7 +256,7 @@ fun HomeScreen(
                     if (tvComedy.isNotEmpty()) rawSections.add(Triple("section_tv_comedy", "Sitcoms & Comedies", filterFresh(tvComedy)))
 
                     val tvOriginals = tvFiltered.filter { it.isOriginal }
-                    if (tvOriginals.isNotEmpty()) rawSections.add(Triple("section_tv_originals", "Netflix Original Series", filterFresh(tvOriginals)))
+                    if (tvOriginals.isNotEmpty()) rawSections.add(Triple("section_tv_originals", "NetflixPro Original Series", filterFresh(tvOriginals)))
 
                     val tvNew = tvFiltered.sortedByDescending { it.releaseYear }
                     if (tvNew.isNotEmpty()) rawSections.add(Triple("section_tv_new", "New TV Shows", filterFresh(tvNew)))
@@ -287,7 +291,7 @@ fun HomeScreen(
                     if (movComedy.isNotEmpty()) rawSections.add(Triple("section_movies_comedy", "Comedies", movComedy))
 
                     val movOriginals = movFiltered.filter { it.isOriginal }
-                    if (movOriginals.isNotEmpty()) rawSections.add(Triple("section_movies_originals", "Netflix Original Movies", movOriginals))
+                    if (movOriginals.isNotEmpty()) rawSections.add(Triple("section_movies_originals", "NetflixPro Original Movies", movOriginals))
 
                     val movNew = movFiltered.sortedByDescending { it.releaseYear }
                     if (movNew.isNotEmpty()) rawSections.add(Triple("section_movies_new", "New Releases", movNew))
@@ -322,7 +326,7 @@ fun HomeScreen(
                         rawSections.add(Triple("section_category_movies", "$genreFilter Movies & Blockbusters", catMovies))
                     }
                     if (catOriginals.isNotEmpty()) {
-                        rawSections.add(Triple("section_category_originals", "Only on Netflix • $genreFilter", catOriginals))
+                        rawSections.add(Triple("section_category_originals", "Only on NetflixPro • $genreFilter", catOriginals))
                     }
                     if (catAcclaimed.isNotEmpty()) {
                         rawSections.add(Triple("section_cat_acclaimed", "Critically Acclaimed $genreFilter", catAcclaimed))
@@ -331,7 +335,7 @@ fun HomeScreen(
                         rawSections.add(Triple("section_category_new", "New Releases in $genreFilter", catNew))
                     }
                     if (filtered.size < 6 && trending.isNotEmpty()) {
-                        rawSections.add(Triple("section_cat_popular_more", "Popular on Netflix", trending))
+                        rawSections.add(Triple("section_cat_popular_more", "Popular on NetflixPro", trending))
                     }
                 }
             }
@@ -353,40 +357,29 @@ fun HomeScreen(
 
     val maxScrollOffsetPx = remember(density) { with(density) { 134.dp.toPx() } }
 
+    // Brushes depend on artwork, not scroll position: translate a cached shader in the draw phase.
+    val ambientBrush = remember(currentTopColor, currentBottomColor, gradientEndPx) {
+        Brush.verticalGradient(colorStops = arrayOf(
+            0f to currentTopColor, .20f to currentTopColor.copy(alpha = .88f),
+            .38f to currentBottomColor.copy(alpha = .72f), .54f to currentBottomColor.copy(alpha = .50f),
+            .68f to currentBottomColor.copy(alpha = .30f), .80f to currentBottomColor.copy(alpha = .15f),
+            .90f to currentBottomColor.copy(alpha = .05f), .97f to currentBottomColor.copy(alpha = .01f),
+            1f to Color.Black), startY = 0f, endY = gradientEndPx)
+    }
+    val edgeBrush = remember { Brush.horizontalGradient(listOf(Color.Black.copy(alpha = .55f), Color.Transparent)) }
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .drawBehind {
-                val scrollY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else gradientEndPx
-                val currentStartY = -scrollY
-                val currentEndY = gradientEndPx - scrollY
-
-                val gradient = Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0.00f to currentTopColor,
-                        0.20f to currentTopColor.copy(alpha = 0.88f),
-                        0.38f to currentBottomColor.copy(alpha = 0.72f),
-                        0.54f to currentBottomColor.copy(alpha = 0.50f),
-                        0.68f to currentBottomColor.copy(alpha = 0.30f),
-                        0.80f to currentBottomColor.copy(alpha = 0.15f),
-                        0.90f to currentBottomColor.copy(alpha = 0.05f),
-                        0.97f to currentBottomColor.copy(alpha = 0.01f),
-                        1.00f to Color.Black
-                    ),
-                    startY = currentStartY,
-                    endY = currentEndY
-                )
-                drawRect(brush = gradient)
-                // The reference header shades the left edge while retaining the
-                // poster's ambient color behind the buttons on the right.
-                drawRect(brush = Brush.horizontalGradient(
-                    listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent)
-                ))
+        modifier = modifier.fillMaxSize().background(Color.Black).drawBehind {
+            val scrollY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else gradientEndPx
+            clipRect {
+                withTransform({ translate(0f, -scrollY) }) {
+                    drawRect(ambientBrush, size = Size(size.width, gradientEndPx))
+                }
             }
+            drawRect(edgeBrush)
+        }
     ) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
-            item(key = "hero") {
+            item(key = "hero", contentType = "hero") {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
             Spacer(modifier = Modifier.height(136.dp))
@@ -395,7 +388,7 @@ fun HomeScreen(
             val onHeroPlay = remember(heroMedia, onPlayClick) { { onPlayClick(heroMedia) } }
             val onHeroToggle = remember(heroMedia, onWatchlistToggle) { { onWatchlistToggle(heroMedia) } }
             val onHeroInfo = remember(heroMedia, onMediaClick) { { onMediaClick(heroMedia) } }
-            val isInWatchlist = isWatchlistContains(heroMedia.id)
+            val isInWatchlist = watchlistIds?.contains(heroMedia.id) ?: isWatchlistContains(heroMedia.id)
             
             val parallaxOffset = remember {
                 derivedStateOf {
@@ -427,7 +420,7 @@ fun HomeScreen(
             }
             // Continue Watching Row (only if present)
             if (continueWatchingList.isNotEmpty()) {
-                item(key = "continue_watching") {
+                item(key = "continue_watching", contentType = "continue_watching") {
                 ContinueWatchingSectionRow(
                     title = "Continue Watching for ${activeProfile.name}",
                     items = continueWatchingList,
@@ -440,7 +433,7 @@ fun HomeScreen(
             }
 
             // Catalog Section Rows based on selected category filter
-            items(uiSections, key = { it.id }) { section ->
+            items(uiSections, key = { it.id }, contentType = { if (it.isTop10) "ranked_row" else "poster_row" }) { section ->
                 val rowState = rememberLazyListState()
                 MediaSectionRow(
                     section = section,

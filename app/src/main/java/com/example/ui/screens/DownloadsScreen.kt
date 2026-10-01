@@ -1,1373 +1,235 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.CastConnected
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.CatalogData
-import com.example.data.download.DownloadTaskInfo
-import com.example.data.download.DownloadTaskStatus
+import com.example.data.download.*
 import com.example.data.local.DownloadEntity
-import com.example.data.model.CastDevice
-import com.example.data.model.MediaItem
-import com.example.data.model.Episode
-import com.example.ui.theme.NetflixBlack
-import com.example.ui.theme.NetflixBorderGray
-import com.example.ui.theme.NetflixCardBg
-import com.example.ui.theme.NetflixDarkGray
-import com.example.ui.theme.NetflixGreen
+import com.example.data.model.*
+import com.example.ui.components.DownloadAction
+import com.example.ui.components.ProfileAvatar
 import com.example.ui.theme.NetflixRed
+import com.example.ui.viewmodel.downloadEpisodeId
+import com.example.ui.viewmodel.episodeCoordinates
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DownloadsScreen(
-    downloads: List<DownloadEntity>,
-    downloadingProgress: Map<String, Float> = emptyMap(),
-    downloadTasks: Map<String, DownloadTaskInfo> = emptyMap(),
-    pausedDownloadKeys: Set<String> = emptySet(),
-    smartDownloadsEnabled: Boolean,
-    allocatedStorageGb: Float = 3.0f,
-    connectedCastDevice: CastDevice?,
-    onClose: () -> Unit,
-    onPlayMedia: (MediaItem, Episode?) -> Unit,
-    onDeleteDownload: (String) -> Unit,
-    onClearAllDownloads: () -> Unit,
-    onToggleSmartDownloads: (Boolean) -> Unit,
-    onUpdateAllocatedStorage: (Float) -> Unit = {},
-    onSetUpDownloadsForYouWithAllocation: (Float) -> Unit = {},
-    onSetUpDownloadsForYou: () -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenCast: () -> Unit,
-    onOpenMediaDetail: (MediaItem) -> Unit,
-    onShowToast: (String) -> Unit,
-    onPauseDownload: (String) -> Unit = {},
-    onResumeDownload: (String) -> Unit = {},
-    onCancelDownload: (String) -> Unit = {},
-    userSubscription: com.example.data.model.UserSubscription = com.example.data.model.UserSubscription(),
-    onOpenSubscription: () -> Unit = {},
-    onOpenAuth: () -> Unit = {},
-    modifier: Modifier = Modifier
+    downloads: List<DownloadEntity>, downloadingProgress: Map<String, Float> = emptyMap(),
+    downloadTasks: Map<String, DownloadTaskInfo> = emptyMap(), pausedDownloadKeys: Set<String> = emptySet(),
+    smartDownloadsEnabled: Boolean, allocatedStorageGb: Float = 3.0f, connectedCastDevice: CastDevice?,
+    onClose: () -> Unit, onPlayMedia: (MediaItem, Episode?) -> Unit, onDeleteDownload: (String) -> Unit,
+    onClearAllDownloads: () -> Unit, onToggleSmartDownloads: (Boolean) -> Unit,
+    onUpdateAllocatedStorage: (Float) -> Unit = {}, onSetUpDownloadsForYouWithAllocation: ((Float) -> Unit)? = null,
+    onSetUpDownloadsForYou: () -> Unit, onOpenSearch: () -> Unit, onOpenCast: () -> Unit,
+    onOpenMediaDetail: (MediaItem) -> Unit, onShowToast: (String) -> Unit,
+    onPauseDownload: (String) -> Unit = {}, onResumeDownload: (String) -> Unit = {}, onCancelDownload: (String) -> Unit = {},
+    userSubscription: UserSubscription = UserSubscription(), onOpenSubscription: () -> Unit = {},
+    onOpenAuth: () -> Unit = {}, modifier: Modifier = Modifier, catalogMedia: List<MediaItem> = CatalogData.allMedia,
+    activeProfile: UserProfile = UserProfile("profile", "Home"), profiles: List<UserProfile> = listOf(activeProfile),
+    downloadsForYouEnabled: Boolean = false, profileAllocations: Map<String, Float> = emptyMap(),
+    onToggleDownloadsForYou: (Boolean) -> Unit = {}, onProfileAllocation: (String, Float) -> Unit = { _, _ -> },
+    onOpenProfiles: () -> Unit = {}
 ) {
-    var isEditMode by remember { mutableStateOf(false) }
-    var showClearDialog by remember { mutableStateOf(false) }
-    var showAllocationDialog by remember { mutableStateOf(false) }
-    val selectedDownloadKeys = remember { mutableStateMapOf<String, Boolean>() }
-    var showSmartDownloadsInfo by remember { mutableStateOf(false) }
-
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    var deleteKeys by remember { mutableStateOf<Set<String>?>(null) }
+    var clearAll by remember { mutableStateOf(false) }
+    var settings by rememberSaveable { mutableStateOf(false) }
+    var setup by rememberSaveable { mutableStateOf(false) }
+    var showId by rememberSaveable { mutableStateOf<String?>(null) }
+    val byId = remember(catalogMedia) { catalogMedia.associateBy { it.id } }
+    val ready = remember(downloads) { downloads.filter { it.isComplete } }
+    val readyKeys = remember(ready) { ready.map { it.downloadKey }.toSet() }
+    val groups = remember(ready) { ready.groupBy { it.mediaId to it.isForYou }.values.toList() }
+    val activeKeys = remember(downloadingProgress, downloadTasks, readyKeys) {
+        (downloadingProgress.keys + downloadTasks.filterValues { it.status != DownloadTaskStatus.COMPLETED }.keys).filter { it !in readyKeys }.sorted()
+    }
+    LaunchedEffect(readyKeys) { selected = selected.intersect(readyKeys); if (readyKeys.isEmpty()) editing = false; if (ready.none { it.mediaId == showId }) showId = null }
     val context = LocalContext.current
-    val statFs = remember(downloads) {
-        try {
-            android.os.StatFs(context.filesDir.absolutePath)
-        } catch (e: Exception) {
-            null
+    val storage by produceState<Pair<Long, Long>?>(null, ready) {
+        value = withContext(Dispatchers.IO) { runCatching { android.os.StatFs(context.filesDir.absolutePath).let { it.totalBytes to it.availableBytes } }.getOrNull() }
+    }
+    val canDownload = userSubscription.isActive && userSubscription.maxDownloads > 0
+    val requirePlan: () -> Unit = { if (userSubscription.isGuest) onOpenAuth() else onOpenSubscription() }
+    val back: () -> Unit = { if (showId != null) { showId = null; editing = false } else onClose() }
+    BackHandler(enabled = showId != null, onBack = back)
+    fun mediaFor(download: DownloadEntity): MediaItem = byId[download.mediaId] ?: MediaItem(download.mediaId, download.mediaTitle,
+        if (download.episodeTitle != null) MediaType.TV_SHOW else MediaType.MOVIE, "", "", 0, "16+", 0, "Downloaded",
+        genres = emptyList(), cast = emptyList(), director = "", isOriginal = false)
+    fun play(download: DownloadEntity) {
+        if (!canDownload) { onShowToast("Offline playback requires an active download plan."); requirePlan(); return }
+        val media = mediaFor(download)
+        val id = downloadEpisodeId(download.mediaId, download.downloadKey)
+        val episode = id?.let { media.episodes.firstOrNull { ep -> ep.id == it } ?: Episode(it, episodeCoordinates(it).second, download.episodeTitle.orEmpty(), 45, "") }
+        onPlayMedia(media, episode)
+    }
+    if (settings) {
+        val allocations = profileAllocations + (activeProfile.id to (profileAllocations[activeProfile.id] ?: allocatedStorageGb))
+        SmartDownloadsScreen(profiles.sortedByDescending { it.id == activeProfile.id }, allocations, smartDownloadsEnabled,
+            downloadsForYouEnabled, storage?.second, ready.filter { it.isForYou }.sumOf { it.fileSizeMb.toLong() },
+            onBack = { settings = false }, onNextEpisode = { if (canDownload) onToggleSmartDownloads(it) else requirePlan() },
+            onForYou = { if (canDownload) onToggleDownloadsForYou(it) else requirePlan() }, onAllocation = onProfileAllocation,
+            onSearch = onOpenSearch, onProfile = onOpenProfiles)
+        return
+    }
+    if (setup) {
+        DownloadsForYouSetup(catalogMedia, allocatedStorageGb, onBack = { setup = false }, onConfirm = { allocation ->
+            if (onSetUpDownloadsForYouWithAllocation != null) onSetUpDownloadsForYouWithAllocation(allocation)
+            else { onUpdateAllocatedStorage(allocation); onToggleDownloadsForYou(true); onSetUpDownloadsForYou() }
+            setup = false
+        })
+        return
+    }
+    Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
+            Text(showId?.let { id -> ready.firstOrNull { it.mediaId == id }?.mediaTitle } ?: "Downloads", color = Color.White,
+                fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            IconButton(onOpenCast) { Icon(painterResource(R.drawable.ic_outline_cast), if (connectedCastDevice != null) "Connected to TV" else "Cast", tint = Color.White) }
+            IconButton(onOpenSearch) { Icon(painterResource(R.drawable.ic_outline_search), "Search", tint = Color.White) }
+            IconButton(onOpenProfiles) { ProfileAvatar(activeProfile, size = 26.dp) }
         }
-    }
-    val totalDeviceBytes = statFs?.totalBytes ?: (64L * 1024 * 1024 * 1024)
-    val freeDeviceBytes = statFs?.availableBytes ?: (38L * 1024 * 1024 * 1024)
-    val totalStorageUsedMb = downloads.sumOf { it.fileSizeMb.toLong() }
-    val netflixBytes = totalStorageUsedMb * 1024 * 1024
-    val otherBytes = (totalDeviceBytes - freeDeviceBytes - netflixBytes).coerceAtLeast(0)
-
-    val netflixStr = if (totalStorageUsedMb >= 1000) {
-        String.format(java.util.Locale.US, "%.1f GB", totalStorageUsedMb / 1024f)
-    } else {
-        "$totalStorageUsedMb MB"
-    }
-    val otherGbStr = String.format(java.util.Locale.US, "%.1f GB", otherBytes / (1024f * 1024f * 1024f))
-    val freeGbStr = String.format(java.util.Locale.US, "%.1f GB", freeDeviceBytes / (1024f * 1024f * 1024f))
-
-    val netflixUsedFraction = (netflixBytes.toFloat() / totalDeviceBytes.toFloat()).coerceIn(0.005f, 0.95f)
-    val otherUsedFraction = (otherBytes.toFloat() / totalDeviceBytes.toFloat()).coerceIn(0.005f, 0.95f)
-
-    if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = {
-                Text(
-                    text = "Delete All Downloads?",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Text(
-                    text = "This will remove all downloaded movies and episodes from this device.",
-                    color = Color.White.copy(alpha = 0.8f)
-                )
-            },
-            containerColor = NetflixDarkGray,
-            confirmButton = {
-                Button(
+        LazyColumn(Modifier.weight(1f).testTag("downloads_list"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (showId == null) item(key = "smart_settings") {
+                Row(Modifier.clickable { settings = true }.testTag("downloads_smart_settings").padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Settings, null, tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                    Text("Smart Downloads", color = Color.LightGray, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp))
+                    Icon(Icons.Default.ChevronRight, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
+                }
+            }
+            items(activeKeys, key = { "active:$it" }, contentType = { "transfer" }) { key ->
+                Column {
+                    Text(downloadTasks[key]?.let { it.mediaTitle + (it.episodeTitle?.let { ep -> " · $ep" } ?: "") } ?: "Downloading title", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 8.dp))
+                    DownloadAction(key, downloadingProgress[key], key in pausedDownloadKeys, false, downloadTasks[key], {}, { onPauseDownload(key) }, { onResumeDownload(key) }, { onCancelDownload(key) }, {})
+                }
+            }
+            if (ready.isNotEmpty()) item(key = "profile_header") {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(activeProfile, size = 24.dp)
+                    Text(activeProfile.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 10.dp))
+                    TextButton(onClick = { editing = !editing; selected = emptySet() }, modifier = Modifier.testTag("downloads_edit_toggle_btn")) { Text(if (editing) "Done" else "Edit", color = Color.White) }
+                }
+            }
+            val shown = if (showId != null || editing) ready.filter { showId == null || it.mediaId == showId }.map { listOf(it) } else groups.filter { !it.first().isForYou }
+            items(shown, key = { "ready:${it.first().downloadKey}" }, contentType = { "downloaded_title" }) { group ->
+                val download = group.first(); val media = mediaFor(download)
+                ReadyDownloadRow(download.copy(fileSizeMb = group.sumOf { it.fileSizeMb }), media, group.size, editing, download.downloadKey in selected,
                     onClick = {
-                        showClearDialog = false
-                        onClearAllDownloads()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed)
-                ) {
-                    Text("Delete All", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = Color.White)
-                }
+                        if (editing) selected = if (download.downloadKey in selected) selected - download.downloadKey else selected + download.downloadKey
+                        else if (group.size > 1) showId = download.mediaId else play(download)
+                    }, onInfo = { onOpenMediaDetail(media) }, onDelete = { deleteKeys = group.map { it.downloadKey }.toSet() })
             }
-        )
+            if (showId == null && !editing) {
+                if (ready.any { it.isForYou }) item(key = "for_you_header") { Text("Downloads for You", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                items(groups.filter { it.first().isForYou }, key = { "for_you:${it.first().downloadKey}" }, contentType = { "downloaded_title" }) { group ->
+                    val first = group.first(); val media = mediaFor(first)
+                    ReadyDownloadRow(first.copy(fileSizeMb = group.sumOf { it.fileSizeMb }), media, group.size, false, false, { if (group.size > 1) showId = first.mediaId else play(first) }, { onOpenMediaDetail(media) }, { deleteKeys = group.map { it.downloadKey }.toSet() })
+                }
+                if (!downloadsForYouEnabled) item(key = "introducing") {
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text("Introducing Downloads for You", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("We’ll download a selection of movies and shows so there’s always something to watch on your phone.", color = Color.LightGray, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp))
+                        DownloadPosterFan(catalogMedia, Modifier.fillMaxWidth().height(230.dp))
+                        Button(onClick = { if (canDownload) setup = true else requirePlan() }, shape = RoundedCornerShape(3.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)), modifier = Modifier.fillMaxWidth().height(48.dp).testTag("downloads_for_you_setup")) {
+                            Text(if (userSubscription.isGuest) "Sign in to download" else "Set up", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                item(key = "discover") { TextButton(onOpenSearch, Modifier.fillMaxWidth()) { Text("Find more to download", color = Color.White) } }
+            }
+            if (editing && selected.isNotEmpty()) item(key = "delete_selection") { Button(onClick = { deleteKeys = selected }, colors = ButtonDefaults.buttonColors(containerColor = NetflixRed), modifier = Modifier.fillMaxWidth().testTag("downloads_delete_selected_btn")) { Text("Delete selected (${selected.size})") } }
+            if (editing && ready.isNotEmpty()) item(key = "clear_all") { TextButton(onClick = { clearAll = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete all downloads", color = NetflixRed) } }
+            item(key = "storage") {
+                val free = storage?.second
+                Text("NetflixPro · ${ready.sumOf { it.fileSizeMb.toLong() }} MB" + (free?.let { "    Free · ${String.format(java.util.Locale.US, "%.1f", it / (1024f * 1024 * 1024))} GB" } ?: ""), color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp))
+            }
+        }
     }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(NetflixBlack)
-            .statusBarsPadding()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 16.dp)
-        ) {
-            // ====================================================
-            // 1. TOP APP BAR: [<- Downloads] ... [Edit] [Cast] [Search]
-            // ====================================================
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = onClose,
-                        modifier = Modifier.testTag("downloads_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Text(
-                        text = "Downloads",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("downloads_screen_title")
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (downloads.isNotEmpty()) {
-                        TextButton(
-                            onClick = {
-                                isEditMode = !isEditMode
-                                if (!isEditMode) {
-                                    selectedDownloadKeys.clear()
-                                }
-                            },
-                            modifier = Modifier.testTag("downloads_edit_toggle_btn")
-                        ) {
-                            Text(
-                                text = if (isEditMode) "Done" else "Edit",
-                                color = if (isEditMode) NetflixRed else Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onOpenCast,
-                        modifier = Modifier.testTag("downloads_cast_btn")
-                    ) {
-                        Icon(
-                            imageVector = if (connectedCastDevice != null) Icons.Default.CastConnected else Icons.Default.Cast,
-                            contentDescription = "Cast",
-                            tint = if (connectedCastDevice != null) NetflixRed else Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onOpenSearch,
-                        modifier = Modifier.testTag("downloads_search_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-
-            // ====================================================
-            // 2. MAIN SCROLLABLE BODY
-            // ====================================================
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
-            ) {
-                // Smart Downloads Header Card
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(NetflixDarkGray)
-                            .border(1.dp, NetflixBorderGray, RoundedCornerShape(12.dp))
-                            .padding(14.dp)
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF0071EB).copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_netflix_download_custom),
-                                            contentDescription = null,
-                                            tint = Color(0xFF0071EB),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(12.dp))
-
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "Smart Downloads",
-                                                color = Color.White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(
-                                                        if (smartDownloadsEnabled) NetflixGreen.copy(alpha = 0.2f)
-                                                        else Color.White.copy(alpha = 0.1f)
-                                                    )
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = if (smartDownloadsEnabled) "ON" else "OFF",
-                                                    color = if (smartDownloadsEnabled) NetflixGreen else Color.White.copy(alpha = 0.6f),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(2.dp))
-
-                                        Text(
-                                            text = "Auto-downloads curated titles within your allocated space.",
-                                            color = Color.White.copy(alpha = 0.6f),
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-
-                                Switch(
-                                    checked = smartDownloadsEnabled,
-                                    onCheckedChange = { onToggleSmartDownloads(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFF0071EB),
-                                        uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                                        uncheckedTrackColor = Color.Black.copy(alpha = 0.5f)
-                                    )
-                                )
-                            }
-
-                            if (smartDownloadsEnabled) {
-                                Spacer(modifier = Modifier.height(14.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(1.dp)
-                                        .background(Color.White.copy(alpha = 0.1f))
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Allocated Download Space",
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = "${String.format(java.util.Locale.US, "%.1f", allocatedStorageGb)} GB",
-                                        color = Color(0xFF0071EB),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Slider(
-                                    value = allocatedStorageGb,
-                                    onValueChange = { onUpdateAllocatedStorage(it) },
-                                    valueRange = 0.5f..10.0f,
-                                    steps = 18,
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = Color(0xFF0071EB),
-                                        activeTrackColor = Color(0xFF0071EB),
-                                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
-                                    )
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf(1.0f, 3.0f, 5.0f, 10.0f).forEach { gb ->
-                                        val isSelected = kotlin.math.abs(allocatedStorageGb - gb) < 0.2f
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(
-                                                    if (isSelected) Color(0xFF0071EB) else Color.White.copy(alpha = 0.08f)
-                                                )
-                                                .clickable { onUpdateAllocatedStorage(gb) }
-                                                .padding(vertical = 6.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "${gb.toInt()} GB",
-                                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Storage Meter Bar
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(NetflixDarkGray)
-                            .border(1.dp, NetflixBorderGray, RoundedCornerShape(12.dp))
-                            .padding(14.dp)
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Device Storage",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Text(
-                                    text = "$netflixStr used by Netflix",
-                                    color = Color(0xFF0071EB),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Storage Bar Breakdown
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White.copy(alpha = 0.15f))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(netflixUsedFraction)
-                                        .fillMaxSize()
-                                        .background(Color(0xFF0071EB))
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(otherUsedFraction)
-                                        .fillMaxSize()
-                                        .background(Color.White.copy(alpha = 0.45f))
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight((1f - netflixUsedFraction - otherUsedFraction).coerceAtLeast(0.05f))
-                                        .fillMaxSize()
-                                        .background(Color.Transparent)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF0071EB))
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Netflix ($netflixStr)",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 10.sp
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White.copy(alpha = 0.45f))
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Other Apps ($otherGbStr)",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 10.sp
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White.copy(alpha = 0.15f))
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Free ($freeGbStr)",
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Batch Actions when in Edit Mode
-                if (isEditMode && downloads.isNotEmpty()) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${selectedDownloadKeys.filter { it.value }.size} of ${downloads.size} selected",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(
-                                    onClick = {
-                                        val allSelected = selectedDownloadKeys.size == downloads.size && selectedDownloadKeys.values.all { it }
-                                        if (allSelected) {
-                                            selectedDownloadKeys.clear()
-                                        } else {
-                                            downloads.forEach { selectedDownloadKeys[it.downloadKey] = true }
-                                        }
-                                    }
-                                ) {
-                                    Text(
-                                        text = if (selectedDownloadKeys.size == downloads.size && selectedDownloadKeys.values.all { it }) "Deselect All" else "Select All",
-                                        color = Color.White,
-                                        fontSize = 12.sp
-                                    )
-                                }
-
-                                Button(
-                                    onClick = {
-                                        val toDelete = selectedDownloadKeys.filter { it.value }.keys
-                                        toDelete.forEach { onDeleteDownload(it) }
-                                        selectedDownloadKeys.clear()
-                                        if (downloads.size <= toDelete.size) {
-                                            isEditMode = false
-                                        }
-                                    },
-                                    enabled = selectedDownloadKeys.any { it.value },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = NetflixRed,
-                                        disabledContainerColor = NetflixRed.copy(alpha = 0.3f)
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Delete Selected", color = Color.White, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Downloading In Progress Section
-                if (downloadingProgress.isNotEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Downloads In Progress (${downloadingProgress.size})",
-                                color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            downloadingProgress.forEach { (key, progress) ->
-                                val task = downloadTasks[key]
-                                val isPaused = pausedDownloadKeys.contains(key) || task?.status == DownloadTaskStatus.PAUSED
-                                val mediaId = key.substringBefore("_")
-                                val matchedMedia = CatalogData.getById(mediaId)
-                                val epId = if (key.contains("_")) key.substringAfter("_") else null
-                                val matchedEpisode = matchedMedia?.episodes?.find { it.id == epId }
-                                val displayTitle = if (matchedEpisode != null && matchedMedia != null) {
-                                    "${matchedMedia.title} (S1:E${matchedEpisode.episodeNumber} ${matchedEpisode.title})"
-                                } else matchedMedia?.title ?: "Media Title"
-                                val pct = (progress * 100).toInt()
-
-                                val statusSubtext = when {
-                                    isPaused -> "Paused • $pct%"
-                                    task?.status == DownloadTaskStatus.PREPARING -> "Resolving stream... • $pct%"
-                                    task != null && task.speedBytesPerSec > 0 -> {
-                                        val speedStr = task.speedFormatted
-                                        val etaStr = task.etaFormatted
-                                        if (etaStr.isNotEmpty()) "Downloading • $pct% ($speedStr • $etaStr)" else "Downloading • $pct% ($speedStr)"
-                                    }
-                                    else -> "Downloading... $pct%"
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(NetflixDarkGray)
-                                        .border(1.dp, NetflixBorderGray, RoundedCornerShape(12.dp))
-                                        .padding(12.dp)
-                                ) {
-                                    Column {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = displayTitle,
-                                                    color = Color.White,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = statusSubtext,
-                                                    color = if (isPaused) Color(0xFFF59E0B) else Color(0xFF0071EB),
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                // Pause / Resume Button
-                                                IconButton(
-                                                    onClick = {
-                                                        if (isPaused) {
-                                                            onResumeDownload(key)
-                                                        } else {
-                                                            onPauseDownload(key)
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color.White.copy(alpha = 0.12f))
-                                                        .testTag("download_pause_resume_btn_$key")
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                                        contentDescription = if (isPaused) "Resume" else "Pause",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-
-                                                Spacer(modifier = Modifier.width(8.dp))
-
-                                                // Cancel Button
-                                                IconButton(
-                                                    onClick = { onCancelDownload(key) },
-                                                    modifier = Modifier
-                                                        .size(36.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color.White.copy(alpha = 0.12f))
-                                                        .testTag("download_cancel_btn_$key")
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Close,
-                                                        contentDescription = "Cancel Download",
-                                                        tint = NetflixRed,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        LinearProgressIndicator(
-                                            progress = { progress },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(4.dp)
-                                                .clip(RoundedCornerShape(2.dp)),
-                                            color = if (isPaused) Color(0xFFF59E0B) else Color(0xFF0071EB),
-                                            trackColor = Color.White.copy(alpha = 0.2f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ====================================================
-                // 3. DOWNLOADS CONTENT LIST OR EMPTY STATE
-                // ====================================================
-                if (downloads.isEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp, horizontal = 16.dp),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text(
-                                text = if (userSubscription.isGuest) "Never be without Netflix" else "Turn on Downloads for You",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.testTag("downloads_for_you_title")
-                            )
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = if (userSubscription.isGuest)
-                                    "Sign in to download movies and TV shows so you'll always have something to watch on the go."
-                                else
-                                    "We'll download movies and shows just for you, so you'll always have something to watch.",
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                modifier = Modifier.testTag("downloads_for_you_subtitle")
-                            )
-
-                            Spacer(modifier = Modifier.height(28.dp))
-
-                            // Fanned posters container (centered)
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(240.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                // Background circle
-                                Box(
-                                    modifier = Modifier
-                                        .size(210.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF1F1F1F))
-                                )
-
-                                val dynamicPosters = CatalogData.allMedia
-                                    .filter { !it.posterUrl.isNullOrBlank() }
-                                    .take(3)
-                                    .map { it.posterUrl!! }
-
-                                val fallbackPosters = listOf(
-                                    "https://image.tmdb.org/t/p/w500/czgLh7rXNswNfWj0E2w3Kz2eePN.jpg", // Wednesday
-                                    "https://image.tmdb.org/t/p/w500/uu4TgyyW259aOZHN0Ew4TEfjnUG.jpg", // Squid Game
-                                    "https://image.tmdb.org/t/p/w500/reEMJA1uzsc0t396S8v97YvGOcl.jpg"  // Money Heist
-                                )
-
-                                val postersToShow = if (dynamicPosters.size >= 3) dynamicPosters else fallbackPosters
-
-                                if (postersToShow.size >= 3) {
-                                    // Left poster (tilted)
-                                    AsyncImage(
-                                        model = postersToShow[0],
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .width(95.dp)
-                                            .height(142.dp)
-                                            .graphicsLayer {
-                                                rotationZ = -14f
-                                                translationX = -130f
-                                                translationY = 15f
-                                            }
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                    )
-
-                                    // Right poster (tilted)
-                                    AsyncImage(
-                                        model = postersToShow[2],
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .width(95.dp)
-                                            .height(142.dp)
-                                            .graphicsLayer {
-                                                rotationZ = 14f
-                                                translationX = 130f
-                                                translationY = 15f
-                                            }
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                    )
-
-                                    // Center poster (straight, on top)
-                                    AsyncImage(
-                                        model = postersToShow[1],
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .width(110.dp)
-                                            .height(165.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(32.dp))
-
-                            // Action button
-                            if (userSubscription.isGuest) {
-                                Button(
-                                    onClick = onOpenAuth,
-                                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp)
-                                        .testTag("downloads_guest_signin_btn")
-                                ) {
-                                    Text("Sign In to Download", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                }
-                            } else {
-                                Button(
-                                    onClick = { showAllocationDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(44.dp)
-                                        .testTag("downloads_setup_btn")
-                                ) {
-                                    Text("Set Up Storage Space", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Secondary button: Find Something to Download
-                            OutlinedButton(
-                                onClick = onOpenSearch,
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .testTag("downloads_find_more_empty_btn")
-                            ) {
-                                Text(
-                                    text = "Find Something to Download",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // Header for Downloaded Titles
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Downloaded Titles (${downloads.size})",
-                                color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            if (!isEditMode) {
-                                Text(
-                                    text = "Clear All",
-                                    color = NetflixRed,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .clickable { showClearDialog = true }
-                                        .padding(4.dp)
-                                        .testTag("downloads_clear_all_btn")
-                                )
-                            }
-                        }
-                    }
-
-                    // Download Items
-                    items(downloads, key = { it.downloadKey }) { download ->
-                        val matchedMedia = CatalogData.getById(download.mediaId)
-                        var showItemMenu by remember { mutableStateOf(false) }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(NetflixDarkGray)
-                                .border(1.dp, NetflixBorderGray, RoundedCornerShape(12.dp))
-                                .clickable {
-                                    if (isEditMode) {
-                                        val cur = selectedDownloadKeys[download.downloadKey] ?: false
-                                        selectedDownloadKeys[download.downloadKey] = !cur
-                                    } else {
-                                        val mediaToPlay = matchedMedia ?: MediaItem(
-                                            id = download.mediaId,
-                                            title = download.mediaTitle,
-                                            type = if (download.episodeTitle != null) com.example.data.model.MediaType.TV_SHOW else com.example.data.model.MediaType.MOVIE,
-                                            description = download.episodeTitle ?: download.mediaTitle,
-                                            tagline = download.mediaTitle,
-                                            matchPercentage = 98,
-                                            maturityRating = "16+",
-                                            releaseYear = 2026,
-                                            durationOrSeasons = if (download.episodeTitle != null) "1 Season" else "1h 45m",
-                                            genres = listOf("Action", "Drama"),
-                                            cast = listOf("Netflix"),
-                                            director = "Netflix Original"
-                                        )
-                                        val matchedEpisode = mediaToPlay.episodes.find { ep ->
-                                            download.downloadKey == "${mediaToPlay.id}_${ep.id}"
-                                        } ?: if (download.episodeTitle != null) {
-                                            Episode(
-                                                id = download.downloadKey.substringAfter("${download.mediaId}_", "ep_1"),
-                                                episodeNumber = 1,
-                                                title = download.episodeTitle,
-                                                durationMinutes = 45,
-                                                description = download.episodeTitle
-                                            )
-                                        } else null
-
-                                        if (!userSubscription.isActive || userSubscription.maxDownloads <= 0) {
-                                            if (userSubscription.isGuest) {
-                                                onShowToast("Sign in to stream and download titles.")
-                                                onOpenAuth()
-                                            } else {
-                                                onShowToast("Offline playback requires an active plan with downloads support. Upgrade or renew membership.")
-                                                onOpenSubscription()
-                                            }
-                                            return@clickable
-                                        }
-                                        onPlayMedia(mediaToPlay, matchedEpisode)
-                                    }
-                                }
-                                .padding(12.dp)
-                                .testTag("download_row_${download.downloadKey}")
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                if (isEditMode) {
-                                    Checkbox(
-                                        checked = selectedDownloadKeys[download.downloadKey] ?: false,
-                                        onCheckedChange = { checked ->
-                                            selectedDownloadKeys[download.downloadKey] = checked
-                                        },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = NetflixRed,
-                                            uncheckedColor = Color.White.copy(alpha = 0.6f),
-                                            checkmarkColor = Color.White
-                                        ),
-                                        modifier = Modifier.padding(end = 8.dp)
-                                    )
-                                }
-
-                                // Thumbnail with play button overlay
-                                Box(
-                                    modifier = Modifier
-                                        .width(110.dp)
-                                        .height(70.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFF222222)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (matchedMedia?.bannerDrawableRes != null) {
-                                        Image(
-                                            painter = painterResource(id = matchedMedia.bannerDrawableRes),
-                                            contentDescription = download.mediaTitle,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else if (!matchedMedia?.backdropUrl.isNullOrEmpty()) {
-                                        AsyncImage(
-                                            model = matchedMedia?.backdropUrl,
-                                            contentDescription = download.mediaTitle,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else if (!matchedMedia?.posterUrl.isNullOrEmpty()) {
-                                        AsyncImage(
-                                            model = matchedMedia?.posterUrl,
-                                            contentDescription = download.mediaTitle,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-
-                                    // Play icon overlay
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.Black.copy(alpha = 0.65f))
-                                            .border(1.dp, Color.White, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "Play",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                // Title & metadata info
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = download.mediaTitle,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-
-                                    if (!download.episodeTitle.isNullOrEmpty()) {
-                                        Text(
-                                            text = download.episodeTitle,
-                                            color = Color.White.copy(alpha = 0.75f),
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(4.dp))
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(3.dp))
-                                                .background(Color(0xFF0071EB).copy(alpha = 0.2f))
-                                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                                        ) {
-                                            Text(
-                                                text = "HD",
-                                                color = Color(0xFF0071EB),
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-
-                                        Text(
-                                            text = "${download.fileSizeMb} MB",
-                                            color = Color.White.copy(alpha = 0.55f),
-                                            fontSize = 11.sp
-                                        )
-
-                                        Text(
-                                            text = "• Ready offline",
-                                            color = NetflixGreen,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-
-                                // Item action icon
-                                if (!isEditMode) {
-                                    Box {
-                                        IconButton(
-                                            onClick = { showItemMenu = true },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.MoreVert,
-                                                contentDescription = "Options",
-                                                tint = Color.White.copy(alpha = 0.8f),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-
-                                        DropdownMenu(
-                                            expanded = showItemMenu,
-                                            onDismissRequest = { showItemMenu = false },
-                                            modifier = Modifier
-                                                .background(NetflixDarkGray)
-                                                .border(1.dp, NetflixBorderGray, RoundedCornerShape(8.dp))
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text("Play Now", color = Color.White) },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = Icons.Default.PlayArrow,
-                                                        contentDescription = null,
-                                                        tint = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showItemMenu = false
-                                                    if (matchedMedia != null) {
-                                                        if (!userSubscription.isActive || userSubscription.maxDownloads <= 0) {
-                                                            onShowToast("Offline playback requires an active plan with downloads support. Upgrade or renew membership.")
-                                                            onOpenSubscription()
-                                                            return@DropdownMenuItem
-                                                        }
-                                                        val matchedEpisode = matchedMedia.episodes.find { ep ->
-                                                            download.downloadKey == "${matchedMedia.id}_${ep.id}"
-                                                        }
-                                                        onPlayMedia(matchedMedia, matchedEpisode)
-                                                    }
-                                                }
-                                            )
-
-                                            if (matchedMedia != null) {
-                                                DropdownMenuItem(
-                                                    text = { Text("Episodes & Info", color = Color.White) },
-                                                    leadingIcon = {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Info,
-                                                            contentDescription = null,
-                                                            tint = Color.White
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        showItemMenu = false
-                                                        onOpenMediaDetail(matchedMedia)
-                                                    }
-                                                )
-                                            }
-
-                                            DropdownMenuItem(
-                                                text = { Text("Delete Download", color = NetflixRed) },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = Icons.Default.DeleteOutline,
-                                                        contentDescription = null,
-                                                        tint = NetflixRed
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showItemMenu = false
-                                                    onDeleteDownload(download.downloadKey)
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Find More Downloads Button
-                    item {
-                        OutlinedButton(
-                            onClick = onOpenSearch,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp)
-                                .padding(vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color.White
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_netflix_download_custom),
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Find More to Download",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+    if (deleteKeys != null || clearAll) AlertDialog(onDismissRequest = { deleteKeys = null; clearAll = false }, containerColor = Color(0xFF242424), title = { Text("Delete downloads?", color = Color.White) }, text = { Text("Remove ${if (clearAll) "all downloads" else "${deleteKeys?.size ?: 0} selected download(s)"} from this device?", color = Color.LightGray) }, confirmButton = { TextButton(onClick = { if (clearAll) onClearAllDownloads() else deleteKeys.orEmpty().forEach(onDeleteDownload); deleteKeys = null; clearAll = false; selected = emptySet() }) { Text("Delete", color = NetflixRed) } }, dismissButton = { TextButton(onClick = { deleteKeys = null; clearAll = false }) { Text("Cancel", color = Color.White) } })
+}
+
+@Composable
+private fun ReadyDownloadRow(download: DownloadEntity, media: MediaItem, count: Int, editing: Boolean, selected: Boolean, onClick: () -> Unit, onInfo: () -> Unit, onDelete: () -> Unit) {
+    var menu by remember(download.downloadKey) { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).testTag("download_row_${download.downloadKey}"), verticalAlignment = Alignment.CenterVertically) {
+        if (editing) Checkbox(selected, onCheckedChange = { onClick() }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFF0071EB)))
+        Box(Modifier.width(118.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(4.dp)).background(Color(0xFF222222)), contentAlignment = Alignment.Center) {
+            AsyncImage(media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (count == 1) Icon(Icons.Default.PlayCircleOutline, "Play downloaded title", tint = Color.White, modifier = Modifier.size(32.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(download.mediaTitle, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (count == 1 && download.episodeTitle != null) Text(download.episodeTitle, color = Color.LightGray, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("${media.maturityRating} · ${if (count > 1) "$count episodes · " else ""}${download.fileSizeMb} MB", color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        if (!editing) Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Download options", tint = Color.White) }
+            DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Episodes & info") }, onClick = { menu = false; onInfo() })
+                DropdownMenuItem(text = { Text("Delete download") }, onClick = { menu = false; onDelete() })
             }
         }
+    }
+}
 
-        if (showAllocationDialog) {
-            var selectedAllocatedGb by remember { mutableStateOf(allocatedStorageGb) }
-            AlertDialog(
-                onDismissRequest = { showAllocationDialog = false },
-                title = {
-                    Text(
-                        text = "Set Up Downloads for You",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                },
-                text = {
-                    Column {
-                        Text(
-                            text = "Choose how much storage space to manually allocate for automatic offline downloads. Smart Downloads will curatedly pick top movies and TV show seasons for you without exceeding this limit.",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Allocated Storage Space",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "${String.format(java.util.Locale.US, "%.1f", selectedAllocatedGb)} GB",
-                                color = Color(0xFF0071EB),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Slider(
-                            value = selectedAllocatedGb,
-                            onValueChange = { selectedAllocatedGb = it },
-                            valueRange = 0.5f..10.0f,
-                            steps = 18,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFF0071EB),
-                                activeTrackColor = Color(0xFF0071EB),
-                                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(1.0f, 3.0f, 5.0f, 10.0f).forEach { gb ->
-                                val isSelected = kotlin.math.abs(selectedAllocatedGb - gb) < 0.2f
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isSelected) Color(0xFF0071EB) else Color.White.copy(alpha = 0.1f))
-                                        .clickable { selectedAllocatedGb = gb }
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${gb.toInt()} GB",
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showAllocationDialog = false
-                            onSetUpDownloadsForYouWithAllocation(selectedAllocatedGb)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB))
-                    ) {
-                        Text("Turn On & Allocate Space", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAllocationDialog = false }) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
-                    }
-                },
-                containerColor = NetflixDarkGray
-            )
+@Composable
+private fun DownloadPosterFan(catalog: List<MediaItem>, modifier: Modifier = Modifier) {
+    val posters = remember(catalog) { catalog.filter { !it.posterUrl.isNullOrBlank() && !it.isComingSoon }.distinctBy { it.id }.take(3) }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(180.dp).background(Color(0xFF292929), CircleShape))
+        if (posters.isEmpty()) Icon(painterResource(R.drawable.ic_outline_download), null, tint = Color.White, modifier = Modifier.size(64.dp))
+        else if (posters.size == 1) AsyncImage(posters.first().posterUrl, posters.first().title, contentScale = ContentScale.Crop, modifier = Modifier.size(110.dp, 164.dp).clip(RoundedCornerShape(3.dp)))
+        else listOfNotNull(posters.getOrNull(0)?.let { it to -16f }, posters.getOrNull(2)?.let { it to 16f }, posters.getOrNull(1)?.let { it to 0f }).forEach { (poster, angle) ->
+            AsyncImage(poster.posterUrl, poster.title, contentScale = ContentScale.Crop, modifier = Modifier.offset(x = if (angle < 0) (-68).dp else if (angle > 0) 68.dp else 0.dp).size(110.dp, 164.dp).graphicsLayer { rotationZ = angle; shadowElevation = 8.dp.toPx() }.clip(RoundedCornerShape(3.dp)))
         }
+    }
+}
+
+@Composable
+private fun DownloadsForYouSetup(catalog: List<MediaItem>, initial: Float, onBack: () -> Unit, onConfirm: (Float) -> Unit) {
+    var amount by rememberSaveable { mutableFloatStateOf(initial.coerceIn(1f, 10f)) }
+    BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().padding(20.dp).testTag("downloads_setup_screen"), horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onBack, Modifier.align(Alignment.Start)) { Icon(Icons.Default.Close, "Close setup", tint = Color.White) }
+        Text("Let’s get started", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp))
+        Text("Choose how much storage to use for movies and shows selected for this profile. Downloads use Wi-Fi.", color = Color.LightGray, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 12.dp))
+        DownloadPosterFan(catalog, Modifier.fillMaxWidth().height(230.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            IconButton(onClick = { amount = (amount - .5f).coerceAtLeast(1f) }, enabled = amount > 1f) { Icon(Icons.Default.RemoveCircleOutline, "Decrease storage", tint = Color.LightGray) }
+            Text("${String.format(java.util.Locale.US, "%.1f", amount)} GB", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            IconButton(onClick = { amount = (amount + .5f).coerceAtMost(10f) }, enabled = amount < 10f) { Icon(Icons.Default.AddCircleOutline, "Increase storage", tint = Color.LightGray) }
+        }
+        Text("You can change this anytime in Smart Downloads.", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 20.dp))
+        Spacer(Modifier.weight(1f))
+        Button(onClick = { onConfirm(amount) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)), shape = RoundedCornerShape(3.dp), modifier = Modifier.fillMaxWidth().height(48.dp).testTag("downloads_setup_confirm")) { Text("Turn on", fontWeight = FontWeight.Bold) }
     }
 }

@@ -21,7 +21,7 @@ object CatalogData {
         com.example.data.model.GameItem(
             id = "game_squid_unleashed",
             title = "Squid Game: Unleashed",
-            developer = "Netflix Games Studio",
+            developer = "NetflixPro Games Studio",
             category = "Multiplayer Battle Royale",
             maturityRating = "16+",
             sizeDisplay = "1.4 GB",
@@ -40,7 +40,7 @@ object CatalogData {
         ),
         com.example.data.model.GameItem(
             id = "game_hades",
-            title = "Hades (Netflix Edition)",
+            title = "Hades (NetflixPro Edition)",
             developer = "Supergiant Games",
             category = "Roguelike Action RPG",
             maturityRating = "16+",
@@ -55,7 +55,7 @@ object CatalogData {
             category = "Puzzle & Adventure",
             maturityRating = "Everyone",
             sizeDisplay = "520 MB",
-            description = "Embark on an emotional voyage through impossible architecture and geometric wonders in the latest chapter of the award-winning series, only on Netflix.",
+            description = "Embark on an emotional voyage through impossible architecture and geometric wonders in the latest chapter of the award-winning series, only on NetflixPro.",
             bannerRes = R.drawable.img_game_monument_valley_1787646003139
         ),
         com.example.data.model.GameItem(
@@ -101,7 +101,7 @@ object CatalogData {
         com.example.data.model.GameItem(
             id = "game_stranger_things",
             title = "Stranger Things: 1984",
-            developer = "BonusXP / Netflix",
+            developer = "BonusXP / NetflixPro",
             category = "Retro Action Adventure",
             maturityRating = "12+",
             sizeDisplay = "380 MB",

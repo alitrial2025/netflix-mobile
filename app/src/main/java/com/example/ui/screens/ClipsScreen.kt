@@ -388,7 +388,7 @@ private fun TikTokVerticalVideoFeed(
                         action = Intent.ACTION_SEND
                         putExtra(
                             Intent.EXTRA_TEXT,
-                            "Check out '${item.title}' on Netflix Clips! https://www.netflix.com/title/${item.id}"
+                            "Check out '${item.title}' on NetflixPro Clips! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}"
                         )
                         type = "text/plain"
                     }

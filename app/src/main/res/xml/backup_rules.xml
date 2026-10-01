@@ -8,6 +8,8 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="update_gate.xml" />
     <exclude domain="file" path="update-gate/" />
+    <exclude domain="file" path="downloads/" />
+    <exclude domain="database" path="androidx.work.workdb" />
     <exclude domain="external" path="Download/update-gate/" />
     <!--
    <include domain="sharedpref" path="."/>

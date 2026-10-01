@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.theme.netflixProSwitchColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -750,12 +750,7 @@ private fun SettingsToggleRowPainter(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = NetflixBlue,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
-            )
+            colors = netflixProSwitchColors()
         )
     }
 }
@@ -804,12 +799,7 @@ private fun SettingsToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = NetflixBlue,
-                uncheckedThumbColor = Color.White.copy(alpha = 0.7f),
-                uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
-            )
+            colors = netflixProSwitchColors()
         )
     }
 }

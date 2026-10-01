@@ -71,7 +71,7 @@ fun ProfileLoadingOverlay(
         label = "spinner_alpha"
     )
 
-    var statusText by remember { mutableStateOf("Loading ${profile.name}'s Netflix...") }
+    var statusText by remember { mutableStateOf("Loading ${profile.name}'s NetflixPro...") }
 
     LaunchedEffect(profile.id) {
         // Phase 1: Centered avatar + loading spinner

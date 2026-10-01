@@ -50,33 +50,19 @@ data class MediaItem(
     val similarMedia: List<MediaItem> = emptyList()
 ) {
     fun isKidSafe(maxAge: Int = 12): Boolean {
-        val rating = maturityRating.uppercase()
-        // Explicit adult/mature ratings
-        if (rating.contains("18+") || rating.contains("16+") || rating.contains("TV-MA") ||
-            rating.contains("NC-17") || rating.contains("R") || rating.contains("MA") ||
-            rating.contains("14+") || rating.contains("TV-14")) {
-            return false
+        val rating = maturityRating.trim().uppercase()
+        val requiredAge = when (rating) {
+            "TV-Y", "TV-G", "G", "U", "ALL", "EVERYONE" -> 0
+            "TV-Y7" -> 7
+            "PG", "TV-PG" -> 10
+            "PG-13" -> 13
+            "TV-14" -> 14
+            "R" -> 17
+            "TV-MA", "NC-17", "MA" -> 18
+            else -> Regex("(?:^|[^0-9])(\\d{1,2})\\+").find(rating)?.groupValues?.get(1)?.toIntOrNull()
         }
-
-        // Explicit kid-friendly ratings
-        if (rating.contains("TV-Y") || rating.contains("G") || rating.contains("PG") ||
-            rating.contains("TV-G") || rating.contains("TV-PG") || rating.contains("7+") ||
-            rating.contains("10+") || rating.contains("12+") || rating.contains("ALL") ||
-            rating.contains("EVERYONE") || rating.contains("U")) {
-            return true
-        }
-
-        // Genre checks
-        val kidGenres = listOf("Animation", "Family", "Kids", "Children", "Comedy", "Adventure", "Fantasy")
-        val hasKidGenre = genres.any { g -> kidGenres.any { kg -> g.contains(kg, ignoreCase = true) } }
-        val hasMatureGenre = genres.any { g ->
-            g.contains("Horror", ignoreCase = true) ||
-            g.contains("Crime", ignoreCase = true) ||
-            g.contains("Erotic", ignoreCase = true) ||
-            g.contains("War", ignoreCase = true) ||
-            g.contains("Thriller", ignoreCase = true)
-        }
-        return hasKidGenre && !hasMatureGenre
+        // Genre is not a maturity certificate. Unknown ratings stay out of restricted profiles.
+        return requiredAge != null && requiredAge <= maxAge
     }
 
     fun matchesGenre(filter: String?): Boolean {

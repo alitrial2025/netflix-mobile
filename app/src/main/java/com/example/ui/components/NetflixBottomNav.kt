@@ -45,7 +45,7 @@ fun NetflixBottomNav(
             verticalAlignment = Alignment.CenterVertically) {
             listOf(NavigationTab.HOME, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX).forEach { tab ->
                 val selected = selectedTab == tab
-                val title = when (tab) { NavigationTab.HOME -> "Home"; NavigationTab.SEARCH -> "Search"; else -> "My Netflix" }
+                val title = when (tab) { NavigationTab.HOME -> "Home"; NavigationTab.SEARCH -> "Search"; else -> "My NetflixPro" }
                 val tag = when (tab) { NavigationTab.HOME -> "home"; NavigationTab.SEARCH -> "search"; else -> "my_netflix" }
                 Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(30.dp))
                     .background(if (selected) Color.White.copy(alpha = .06f) else Color.Transparent)

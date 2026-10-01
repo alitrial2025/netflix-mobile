@@ -261,7 +261,7 @@ fun GamesScreen(
 
             // 4. Row: Popular on Netflix Games
             GameSectionRow(
-                title = "Popular on Netflix Games",
+                title = "Popular on NetflixPro Games",
                 games = games,
                 onGameClick = onGameClick
             )
@@ -287,7 +287,7 @@ fun GamesScreen(
             // 6. Row: Must-Play Netflix Exclusives
             val exclusiveGames = remember(games) {
                 games.filter {
-                    it.title.contains("Netflix", ignoreCase = true) ||
+                    it.title.contains("NetflixPro", ignoreCase = true) ||
                     it.title.contains("Definitive", ignoreCase = true) ||
                     it.title.contains("Squid", ignoreCase = true) ||
                     it.title.contains("Stranger", ignoreCase = true)
@@ -295,7 +295,7 @@ fun GamesScreen(
             }
             if (exclusiveGames.isNotEmpty()) {
                 GameSectionRow(
-                    title = "Must-Play Netflix Exclusives",
+                    title = "Must-Play NetflixPro Exclusives",
                     games = exclusiveGames,
                     onGameClick = onGameClick
                 )
@@ -1072,7 +1072,7 @@ fun GameDetailSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    FeatureChip(label = "No Ads", sublabel = "Included with Netflix")
+                    FeatureChip(label = "No Ads", sublabel = "Included with NetflixPro")
                     FeatureChip(label = "No In-App Purchases", sublabel = "Unlimited Access")
                     FeatureChip(label = "Cloud Saves", sublabel = "Play anywhere")
                 }

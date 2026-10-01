@@ -71,7 +71,7 @@ fun TvPairScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Open Netflix Pro on your TV and sign in with the same email and password as this phone. Your profiles, My List, and Continue Watching will sync through your account.",
+                text = "Open NetflixPro on your TV and sign in with the same email and password as this phone. Your profiles, My List, and Continue Watching will sync through your account.",
                 color = Color.White.copy(alpha = 0.75f),
                 fontSize = 15.sp,
                 lineHeight = 22.sp,
