@@ -122,7 +122,7 @@ fun MediaSectionRow(
                 ) { index, item ->
                     val isReminded = remember(reminders, item.id) { reminders.any { it.mediaId == item.id } }
                     val isItemComingSoon = item.isComingSoon || isComingSoonRow
-                    val isLocked = isMediaLocked?.invoke(item) ?: false
+                    val isLocked = remember(item.id, isMediaLocked) { isMediaLocked?.invoke(item) ?: false }
                     val onClick = remember(item, onMediaClick, onToggleReminder, isItemComingSoon) {
                         {
                             if (isItemComingSoon && onToggleReminder != null) {
@@ -157,7 +157,7 @@ fun MediaSectionRow(
                 ) { item ->
                     val isReminded = remember(reminders, item.id) { reminders.any { it.mediaId == item.id } }
                     val isItemComingSoon = item.isComingSoon || isComingSoonRow
-                    val isLocked = isMediaLocked?.invoke(item) ?: false
+                    val isLocked = remember(item.id, isMediaLocked) { isMediaLocked?.invoke(item) ?: false }
                     val onClick = remember(item, onMediaClick, onToggleReminder, isItemComingSoon) {
                         {
                             if (isItemComingSoon && onToggleReminder != null) {

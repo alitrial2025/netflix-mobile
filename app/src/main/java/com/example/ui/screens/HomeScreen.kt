@@ -355,11 +355,17 @@ fun HomeScreen(
 
     // Heights change only on layout, not on each scroll frame. Retain the hero's
     // height after lazy disposal so its gradient continues through the first rows.
-    val itemHeights = remember(listState, categoryFilter, selectedGenre) { mutableStateMapOf<String, Int>() }
+    val itemHeights = remember(categoryFilter, selectedGenre) { mutableStateMapOf<String, Int>() }
+    // Guard writes: only mutate state when the height actually changed.
+    // Without this, every onSizeChanged (fired when a row enters viewport)
+    // writes the same value → triggers derivedStateOf → recomposes backdrop → invalidates all visible rows.
+    val setItemHeight = remember(itemHeights) { { key: String, height: Int ->
+        if (itemHeights[key] != height) itemHeights[key] = height
+    } }
     val itemKeys = remember(uiSections, continueWatchingList.isNotEmpty()) {
         listOf("hero") + (if (continueWatchingList.isNotEmpty()) listOf("continue_watching") else emptyList()) + uiSections.map { it.id }
     }
-    val backdropOffset = remember(listState, itemKeys, gradientEndPx, categoryFilter, selectedGenre) {
+    val backdropOffset = remember(itemKeys, gradientEndPx, categoryFilter, selectedGenre) {
         derivedStateOf {
             homeBackdropOffset(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
                 itemKeys, itemHeights, gradientEndPx)
@@ -371,9 +377,9 @@ fun HomeScreen(
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
         HomeBackdrop(currentTopColor, currentBottomColor, gradientEndPx, { backdropOffset.value })
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = 110.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = 110.dp), beyondBoundsItemCount = 2) {
             item(key = "hero", contentType = "hero") {
-            Column(Modifier.onSizeChanged { itemHeights["hero"] = it.height }) {
+            Column(Modifier.onSizeChanged { setItemHeight("hero", it.height) }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
             Spacer(modifier = Modifier.height(136.dp))
@@ -417,7 +423,7 @@ fun HomeScreen(
             // Continue Watching Row (only if present)
             if (continueWatchingList.isNotEmpty()) {
                 item(key = "continue_watching", contentType = "continue_watching") {
-                Column(Modifier.onSizeChanged { itemHeights["continue_watching"] = it.height }) {
+                Column(Modifier.onSizeChanged { setItemHeight("continue_watching", it.height) }) {
                 ContinueWatchingSectionRow(
                     title = "Continue Watching for ${activeProfile.name}",
                     items = continueWatchingList,
@@ -440,7 +446,7 @@ fun HomeScreen(
                     onToggleReminder = onToggleReminder,
                     isMediaLocked = isMediaLocked,
                     onMediaClick = onMediaClick,
-                    modifier = Modifier.onSizeChanged { itemHeights[section.id] = it.height }
+                    modifier = Modifier.onSizeChanged { setItemHeight(section.id, it.height) }
                 )
             }
         }
