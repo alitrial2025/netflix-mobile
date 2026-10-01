@@ -184,6 +184,9 @@ fun VideoPlayerScreen(
     onSetIntroWindow: (com.example.ui.viewmodel.IntroWindow?) -> Unit = {},
     onPersistProgress: () -> Unit = {},
     onPlaybackFailed: () -> Unit = {},
+    spatialAudioEnabled: Boolean = true,
+    maxVideoHeight: Int = Int.MAX_VALUE,
+    streamingAllowed: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val media = playerState.media ?: return
@@ -248,6 +251,19 @@ fun VideoPlayerScreen(
                 .build()
         }
     }
+
+    LaunchedEffect(spatialAudioEnabled) {
+        exoPlayer.setAudioAttributes(androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .setSpatializationBehavior(if (spatialAudioEnabled) C.SPATIALIZATION_BEHAVIOR_AUTO else C.SPATIALIZATION_BEHAVIOR_NEVER)
+            .build(), true)
+    }
+    LaunchedEffect(maxVideoHeight) {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE, maxVideoHeight).build()
+    }
+    val loadingPercentage = com.example.ui.components.rememberPlayerLoadingPercentage(exoPlayer,
+        resolving = playerState.isResolving || playerState.resolvedUrl.isNullOrBlank(), buffering = isBuffering)
 
     fun reportProgress() {
         val state = latestPlayerState
@@ -484,8 +500,8 @@ fun VideoPlayerScreen(
                 .setPreferredTextLanguage(com.example.data.model.playbackLanguageCode(playerState.subtitleLanguage))
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleTrack == "Off").build()
             exoPlayer.setMediaSource(mediaSource)
-            exoPlayer.prepare()
-            if (playerState.isPlaying && playbackActive) {
+            if (streamingAllowed) exoPlayer.prepare()
+            if (playerState.isPlaying && playbackActive && streamingAllowed) {
                 exoPlayer.play()
             } else {
                 exoPlayer.pause()
@@ -504,14 +520,15 @@ fun VideoPlayerScreen(
     }
 
     // Sync Play/Pause
-    LaunchedEffect(playerState.isPlaying, playbackActive) {
-        if (playerState.isPlaying && playbackActive) {
+    LaunchedEffect(playerState.isPlaying, playbackActive, streamingAllowed) {
+        if (playerState.isPlaying && playbackActive && streamingAllowed) {
+            if (exoPlayer.playbackState == Player.STATE_IDLE && exoPlayer.currentMediaItem != null) exoPlayer.prepare()
             if (exoPlayer.playbackState == Player.STATE_ENDED) {
                 exoPlayer.seekTo(0)
             }
             exoPlayer.play()
         } else {
-            exoPlayer.pause()
+            if (!streamingAllowed) exoPlayer.stop() else exoPlayer.pause()
         }
     }
 
@@ -916,7 +933,9 @@ fun VideoPlayerScreen(
     }
 
     val handlePlayPauseToggle: () -> Unit = {
-        if (playerState.isPlaying) {
+        if (!streamingAllowed) {
+            exoPlayer.pause()
+        } else if (playerState.isPlaying) {
             exoPlayer.pause()
         } else {
             if (exoPlayer.playbackState == Player.STATE_ENDED) {
@@ -924,7 +943,7 @@ fun VideoPlayerScreen(
             }
             exoPlayer.play()
         }
-        onTogglePlayPause()
+        if (streamingAllowed) onTogglePlayPause()
     }
     val handleSeek: (Int) -> Unit = { sec ->
         exoPlayer.seekTo(sec * 1000L)
@@ -966,6 +985,7 @@ fun VideoPlayerScreen(
                 PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false
+                    setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     keepScreenOn = true
                     isClickable = false
                     isFocusable = false
@@ -1003,7 +1023,9 @@ fun VideoPlayerScreen(
         )
 
         // Loading state: strictly ONLY the circle spinner on black/translucent canvas (no splash screen, no posters)
-        val visiblePlaybackError = playbackError ?: playerState.resolveError
+        val visiblePlaybackError = if (!streamingAllowed)
+            "Connect to Wi-Fi or change Cellular Data in App Settings to continue playback."
+            else playbackError ?: playerState.resolveError
         if (visiblePlaybackError != null) {
             Column(Modifier.fillMaxSize().background(Color.Black).padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -1016,17 +1038,18 @@ fun VideoPlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .testTag("player_loading_overlay")
                     .background(if (playerState.isResolving) Color.Black else Color.Transparent)
                     .clickable(enabled = false) {},
                 contentAlignment = Alignment.Center
             ) {
-                NetflixSpinner(size = 64.dp)
+                NetflixSpinner(size = 72.dp, percentage = loadingPercentage)
             }
         }
 
         // Controls overlay (Only visible once resolved)
         AnimatedVisibility(
-            visible = visiblePlaybackError == null && !playerState.isResolving && playerState.showControls,
+            visible = visiblePlaybackError == null && !playerState.isResolving && !isBuffering && playerState.showControls,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.fillMaxSize()
@@ -1434,7 +1457,7 @@ fun VideoPlayerScreen(
         }
         if (playerState.nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
             !playerState.isResolving && !watchCredits && (nearEnd || playerState.hasEnded)) {
-            NextEpisodeCard(playerState, autoPlayNext, playbackActive,
+            NextEpisodeCard(playerState, autoPlayNext, playbackActive && streamingAllowed,
                 onNext = { reportProgress(); onPlayNextEpisode() }, onWatchCredits = { watchCredits = true },
                 modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 48.dp))
         }

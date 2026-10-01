@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DownloadTransferPolicyTest {
+    @Test fun transferProgressHasNoTwoPercentFloorOrFakeUnknownLength() {
+        assertEquals(0f, DownloadTransferPolicy.progress(0, 100), 0f)
+        for (percent in 1..99) assertEquals(percent / 100f, DownloadTransferPolicy.progress(percent.toLong(), 100), .00001f)
+        assertEquals(.005f, DownloadTransferPolicy.progress(1, 200), .00001f)
+        assertEquals(0f, DownloadTransferPolicy.progress(100, -1), 0f)
+        assertEquals(.99f, DownloadTransferPolicy.progress(100, 100), 0f)
+    }
     @Test fun fullResponseRestartsInsteadOfAppending() {
         assertEquals(DirectTransferPlan(false, 100), DownloadTransferPolicy.directPlan(200, 20, null, 100))
     }

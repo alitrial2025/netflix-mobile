@@ -173,8 +173,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val isSpatialAudioEnabled by viewModel.isSpatialAudioEnabled.collectAsStateWithLifecycle()
     val cellularDataOption by viewModel.cellularDataOption.collectAsStateWithLifecycle()
     val showDownloadsScreen by viewModel.showDownloadsScreen.collectAsStateWithLifecycle()
+    val openSmartDownloadSettings by viewModel.openSmartDownloadSettings.collectAsStateWithLifecycle()
+    val playbackNetwork by viewModel.playbackNetworkState.collectAsStateWithLifecycle()
     // Home does not subscribe to high-frequency transfer ticks while these destinations are hidden.
-    val observeTransfers = showDownloadsScreen || (selectedMedia != null && !isPlayerVisible)
+    val observeTransfers = showDownloadsScreen || showSettingsDrawer || (selectedMedia != null && !isPlayerVisible)
     val downloadingProgress by if (observeTransfers) viewModel.downloadingProgress.collectAsStateWithLifecycle()
         else remember { mutableStateOf(emptyMap<String, Float>()) }
     val downloadTasks by if (observeTransfers) viewModel.downloadTasks.collectAsStateWithLifecycle()
@@ -367,6 +369,11 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                         NavigationTab.CLIPS -> {
                             ClipsScreen(
+                                streamingAllowed = com.example.data.MobilePlaybackPolicy.permitsStreaming(
+                                    com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet),
+                                maxVideoHeight = com.example.data.MobilePlaybackPolicy.maxVideoHeight(isHighQualityEnabled,
+                                    com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet, userSubscription.planId),
+                                spatialAudioEnabled = isSpatialAudioEnabled && userSubscription.isActive && userSubscription.planId == "plan_premium",
                                 reminders = reminders,
                                 likedMedia = likedMedia,
                                 notifications = notifications,
@@ -477,7 +484,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                             loadState = detailLoadState,
                             onRetryDetails = viewModel::retryMediaDetails,
                             downloadTasks = downloadTasks,
-                            previewEnabled = isAutoPlayPreviewsEnabled && activeProfile.autoplayPreviews,
+                            previewEnabled = isAutoPlayPreviewsEnabled && activeProfile.autoplayPreviews &&
+                                com.example.data.MobilePlaybackPolicy.permitsStreaming(com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet),
                             kidMaxAge = activeProfile.contentMaxAge.takeIf { activeProfile.hasMaturityRestriction },
                             isActive = !isPlayerVisible && !showDownloadsScreen && !showAuthScreen && !showSubscriptionSheet,
                             onOpenDownloads = { viewModel.openDownloadsScreen(true) },
@@ -632,6 +640,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 pausedDownloadKeys = pausedDownloadKeys,
                 smartDownloadsEnabled = isSmartDownloadsEnabled,
                 activeProfile = activeProfile, profiles = profiles,
+                openSmartSettings = openSmartDownloadSettings,
                 downloadsForYouEnabled = downloadsForYouEnabled,
                 profileAllocations = profileDownloadAllocations,
                 onToggleDownloadsForYou = { viewModel.toggleDownloadsForYou(it) },
@@ -711,8 +720,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 smartDownloadsEnabled = isSmartDownloadsEnabled,
                 wifiOnlyEnabled = isWifiOnlyEnabled,
                 highQualityEnabled = isHighQualityEnabled,
-                autoPlayNextEnabled = isAutoPlayNextEnabled,
-                autoPlayPreviewsEnabled = isAutoPlayPreviewsEnabled,
+                autoPlayNextEnabled = isAutoPlayNextEnabled && activeProfile.autoplayNext,
+                autoPlayPreviewsEnabled = isAutoPlayPreviewsEnabled && activeProfile.autoplayPreviews,
                 spatialAudioEnabled = isSpatialAudioEnabled,
                 cellularDataOption = cellularDataOption,
                 diagnosticRunning = diagnosticRunning,
@@ -733,7 +742,12 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 currentEmail = currentUserEmail,
                 userSubscription = userSubscription,
                 onOpenAuth = { viewModel.openAuthScreen(true) },
-                onOpenSubscription = { viewModel.openSubscriptionSheet(true) }
+                onOpenSubscription = { viewModel.openSubscriptionSheet(true) },
+                onEditProfile = { viewModel.openEditProfile(activeProfile) },
+                onOpenSmartDownloads = { viewModel.openDownloadsScreen(true, smartSettings = true) },
+                onSignOut = { viewModel.signOutUser() },
+                onResetPassword = { viewModel.requestPasswordReset() },
+                hasActiveDownloads = downloadTasks.values.any { it.profileId == activeProfile.id }
             )
         }
 
@@ -825,7 +839,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         }
 
         // Elegant full screen TMDB API loader
-        if (isLoadingCatalog && hasCompletedSplash) {
+        if (isLoadingCatalog && hasCompletedSplash && !isPlayerVisible && selectedMedia == null &&
+            !showSettingsDrawer && !showDownloadsScreen && !showAuthScreen && !showProfilePicker && !showEditProfileScreen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -889,6 +904,13 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 @Composable
 private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
+    val highQuality by viewModel.isHighQualityEnabled.collectAsStateWithLifecycle()
+    val spatialAudio by viewModel.isSpatialAudioEnabled.collectAsStateWithLifecycle()
+    val cellularData by viewModel.cellularDataOption.collectAsStateWithLifecycle()
+    val network by viewModel.playbackNetworkState.collectAsStateWithLifecycle()
+    val subscription by viewModel.userSubscription.collectAsStateWithLifecycle()
+    val cellularMode = com.example.data.CellularDataMode.fromLabel(cellularData)
+    val offline = playerState.resolvedUrl?.let { it.startsWith("/") || it.startsWith("file:") } == true
     val safeCatalog by viewModel.displayCatalogMedia.collectAsStateWithLifecycle()
     val recommendations = remember(playerState.media, safeCatalog) {
         playerState.media?.let { com.example.ui.viewmodel.postPlayCandidates(it, safeCatalog) }.orEmpty()
@@ -919,6 +941,10 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
             onShowEpisodesDrawer = { viewModel.showEpisodeDrawer(it) },
             onPlayNextEpisode = { viewModel.playNextEpisode() },
             autoPlayNext = autoPlayNext,
+            spatialAudioEnabled = spatialAudio && subscription.isActive && subscription.planId == "plan_premium",
+            maxVideoHeight = if (offline) Int.MAX_VALUE else com.example.data.MobilePlaybackPolicy.maxVideoHeight(
+                highQuality, cellularMode, network.wifiOrEthernet, subscription.planId),
+            streamingAllowed = offline || com.example.data.MobilePlaybackPolicy.permitsStreaming(cellularMode, network.wifiOrEthernet),
             onContentEnded = viewModel::onContentPlaybackEnded,
             onReplay = viewModel::replayCurrent,
             onRetryNext = { viewModel.prepareNextEpisode(retry = true) },

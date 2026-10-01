@@ -76,6 +76,7 @@ import coil.request.ImageRequest
 import com.example.data.model.MediaItem
 import com.example.data.model.UserProfile
 import com.example.data.model.UserSubscription
+import com.example.data.model.ProfilePin
 import com.example.ui.components.NetflixNLogo
 import com.example.ui.components.NetflixWordmark
 import com.example.ui.components.ProfileAvatar
@@ -187,6 +188,18 @@ fun ProfilePickerSheet(
         if (lockedProfileToUnlock != null) {
             val targetProfile = lockedProfileToUnlock!!
             val focusRequester = remember { FocusRequester() }
+            val unlockProfile = {
+                if (enteredPin.length == 4) {
+                    if (ProfilePin.matches(targetProfile.pin, enteredPin)) {
+                        lockedProfileToUnlock = null
+                        enteredPin = ""
+                        pinError = null
+                        onSelectProfile(targetProfile)
+                    } else {
+                        pinError = "Incorrect PIN. Please try again."
+                    }
+                }
+            }
 
             LaunchedEffect(targetProfile.id) {
                 try {
@@ -298,33 +311,18 @@ fun ProfilePickerSheet(
                                 val digits = input.filter { it.isDigit() }.take(4)
                                 enteredPin = digits
                                 pinError = null
-                                if (digits.length == 4) {
-                                    if (digits == targetProfile.pin) {
-                                        val toSelect = targetProfile
-                                        lockedProfileToUnlock = null
-                                        onSelectProfile(toSelect)
-                                    } else {
-                                        pinError = "Incorrect PIN. Please try again."
-                                    }
-                                }
+                                if (digits.length == 4) unlockProfile()
                             },
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.NumberPassword
                             ),
                             keyboardActions = KeyboardActions(
-                                onDone = {
-                                    if (com.example.data.model.ProfilePin.matches(targetProfile.pin, enteredPin)) {
-                                        val toSelect = targetProfile
-                                        lockedProfileToUnlock = null
-                                        onSelectProfile(toSelect)
-                                    } else {
-                                        pinError = "Incorrect PIN. Please try again."
-                                    }
-                                }
+                                onDone = { unlockProfile() }
                             ),
                             modifier = Modifier
                                 .size(1.dp)
                                 .focusRequester(focusRequester)
+                                .testTag("profile_pin_input")
                         )
 
                         if (pinError != null) {
@@ -357,21 +355,14 @@ fun ProfilePickerSheet(
                             }
 
                             Button(
-                                onClick = {
-                                    if (com.example.data.model.ProfilePin.matches(targetProfile.pin, enteredPin)) {
-                                        val toSelect = targetProfile
-                                        lockedProfileToUnlock = null
-                                        onSelectProfile(toSelect)
-                                    } else {
-                                        pinError = "Incorrect PIN. Please try again."
-                                    }
-                                },
+                                onClick = { unlockProfile() },
+                                enabled = enteredPin.length == 4,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = NetflixRed,
                                     contentColor = Color.White
                                 ),
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).testTag("profile_pin_unlock")
                             ) {
                                 Text(text = "UNLOCK", fontWeight = FontWeight.Bold)
                             }

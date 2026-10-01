@@ -110,13 +110,12 @@ class NetflixDownloadManager(
     private val transferSlots = kotlinx.coroutines.sync.Semaphore(2)
     private val cookieJar = AppCookieJar()
 
-    private val httpClient: OkHttpClient = clientOverride ?: OkHttpClient.Builder()
-        .cookieJar(cookieJar)
+    private val httpClient: OkHttpClient = (clientOverride ?: OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(false)
-        .build()
+        .build()).newBuilder().cookieJar(cookieJar).build()
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val downloadOwners = ConcurrentHashMap<String, String>()
@@ -212,6 +211,22 @@ class NetflixDownloadManager(
             .setConstraints(constraints).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_TAG).build()
         workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, work)
+    }
+
+    /** Reapply network constraints without losing checkpoints or starting paused work. */
+    @Synchronized
+    fun updateWifiOnlyPolicy(wifiOnly: Boolean) {
+        val owner = accountIdProvider() ?: return
+        requests.values.filter { it.accountId == owner && it.wifiOnly != wifiOnly }.forEach { request ->
+            val active = request.task.status in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)
+            val updated = request.copy(token = if (active) UUID.randomUUID().toString() else request.token,
+                wifiOnly = wifiOnly, task = if (active) request.task.copy(status = DownloadTaskStatus.QUEUED, errorMessage = null,
+                    speedFormatted = "Waiting to resume") else request.task)
+            requestStore.put(updated)
+            requests[updated.task.downloadKey] = updated
+            updateTask(updated.task)
+            if (active) enqueue(updated)
+        }
     }
 
     @Synchronized
@@ -321,7 +336,7 @@ class NetflixDownloadManager(
         }
     }
 
-    private suspend fun executeResolvedDownload(
+    internal suspend fun executeResolvedDownload(
         profileId: String, media: MediaItem, episode: Episode?, key: String, episodeTitle: String?,
         isHighQuality: Boolean, resolvedStream: com.example.data.NetMirrorStream
     ) = withContext(Dispatchers.IO) {
@@ -342,6 +357,10 @@ class NetflixDownloadManager(
                 require(partFile.delete()) { "Could not replace partial download" }
             sourceFile.writeText(sourceFingerprint)
         }
+
+        // Caption links may expire during a long video transfer. Fetch them first and
+        // reuse complete local tracks after a pause, process restart or session renewal.
+        val localCaptions = downloadCaptions(key, resolvedStream)
 
         // 2. Perform stream transfer to .part file
         val downloadSuccess = performStreamDownload(
@@ -366,7 +385,6 @@ class NetflixDownloadManager(
                 .filter { it.isFile }.sumOf { it.length() } + partFile.length() else partFile.length()
             // Journal finalization before rename: a crash between the file move and Room save
             // can recover the completed asset without downloading it all over again.
-            val localCaptions = downloadCaptions(key, resolvedStream)
             currentCoroutineContext().ensureActive()
             val request = requests[key] ?: throw CancellationException("Download was canceled")
             check(request.accountId == accountIdProvider() && request.profileId == profileId) { "Download account changed" }
@@ -399,42 +417,30 @@ class NetflixDownloadManager(
     }
 
     /** Keep actual caption files offline; missing optional captions never invalidate the video. */
-    private suspend fun downloadCaptions(key: String, stream: com.example.data.NetMirrorStream): List<com.example.data.Caption> {
-        val saved = mutableListOf<com.example.data.Caption>()
-        val directory = File(downloadsDir, "$key.captions").apply { mkdirs() }
-        for ((index, caption) in stream.captions.filter { it.type in setOf("vtt", "srt") }.take(6).withIndex()) {
-            currentCoroutineContext().ensureActive()
-            try {
-                val file = File(directory, "$index.${caption.type}")
-                val available = kotlinx.coroutines.withTimeoutOrNull(5_000L) {
-                withResponse(downloadRequest(caption.url, stream.headers, stream.url)) { response ->
-                    if (!response.isSuccessful) throw DownloadHttpException(response.code, response.request.header("Cookie")?.contains("t_hash_t=") == true)
-                    val body = response.body ?: throw IOException("Empty subtitles")
-                    val temp = File(directory, "$index.part")
-                    FileOutputStream(temp).use { output ->
-                        body.byteStream().use { input ->
-                            val buffer = ByteArray(8192); var countTotal = 0
-                            while (true) {
-                                currentCoroutineContext().ensureActive()
-                                val count = input.read(buffer); if (count < 0) break
-                                countTotal += count
-                                require(countTotal <= 2 * 1024 * 1024) { "Subtitles exceed supported size" }
-                                output.write(buffer, 0, count)
-                            }
-                        }
-                        output.fd.sync()
+    internal suspend fun downloadCaptions(key: String, stream: com.example.data.NetMirrorStream): List<com.example.data.Caption> {
+        // Simultaneous titles may select different OTT cookies. Their captions must
+        // not overwrite one another's provider session or the video transfer's jar.
+        val captionCookies = AppCookieJar()
+        val captionClient = httpClient.newBuilder().cookieJar(captionCookies).build()
+        return OfflineCaptionDownloader(File(downloadsDir, "$key.captions")) { caption ->
+            withResponse(downloadRequest(caption.url, stream.captionHeaders, stream.url, captionCookies), captionClient) { response ->
+                if (!response.isSuccessful) throw DownloadHttpException(response.code,
+                    response.request.header("Cookie")?.contains("t_hash_t=") == true)
+                val body = response.body ?: throw IOException("Empty subtitles")
+                body.byteStream().use { input ->
+                    val bytes = ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        require(bytes.size() + count <= OfflineCaptionDownloader.MAX_BYTES) { "Subtitles exceed supported size" }
+                        bytes.write(buffer, 0, count)
                     }
-                    val text = temp.readText()
-                    require(if (caption.type == "vtt") text.trimStart().startsWith("WEBVTT") else text.contains("-->")) { "Invalid subtitles" }
-                    check(temp.renameTo(file)) { "Could not save subtitles" }
+                    bytes.toByteArray()
                 }
-                true
-                }
-                if (available == true) saved += caption.copy(url = file.toURI().toString())
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* Video remains playable without an unavailable optional caption. */ }
-        }
-        return saved
+            }
+        }.download(stream.captions)
     }
 
     private suspend fun performStreamDownload(
@@ -455,11 +461,11 @@ class NetflixDownloadManager(
         }
     }
 
-    private fun downloadRequest(url: String, headers: Map<String, String>, sourceUrl: String): Request {
+    private fun downloadRequest(url: String, headers: Map<String, String>, sourceUrl: String, jar: AppCookieJar = cookieJar): Request {
         val origin = (headers.entries.firstOrNull { it.key.equals("Origin", true) }?.value ?: sourceUrl).toHttpUrlOrNull()
         val cookieHeader = headers.entries.firstOrNull { it.key.equals("Cookie", true) }?.value.orEmpty()
         if (origin != null && cookieHeader.isNotBlank()) {
-            cookieJar.saveFromResponse(origin, cookieHeader.split(';').mapNotNull {
+            jar.saveFromResponse(origin, cookieHeader.split(';').mapNotNull {
                 Cookie.parse(origin, "${it.trim()}; Path=/; Secure")
             })
         }
@@ -475,8 +481,8 @@ class NetflixDownloadManager(
         }.build()
     }
 
-    private suspend fun <T> withResponse(request: Request, block: suspend (okhttp3.Response) -> T): T = coroutineScope {
-        val call = httpClient.newCall(request)
+    private suspend fun <T> withResponse(request: Request, client: OkHttpClient = httpClient, block: suspend (okhttp3.Response) -> T): T = coroutineScope {
+        val call = client.newCall(request)
         // Cancel the socket too: coroutine cancellation alone does not interrupt execute()/read().
         val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
@@ -536,8 +542,7 @@ class NetflixDownloadManager(
                         val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastUpdate >= 500L) {
                             val speed = bytesSinceUpdate * 1000L / (now - lastUpdate).coerceAtLeast(1L)
-                            val progress = if (plan.expectedBytes > 0L)
-                                (totalRead.toDouble() / plan.expectedBytes).toFloat().coerceIn(0.02f, 0.99f) else 0.02f
+                            val progress = DownloadTransferPolicy.progress(totalRead, plan.expectedBytes)
                             updateTask(DownloadTaskInfo(
                                 downloadKey = key, mediaId = media.id, mediaTitle = media.title,
                                 episodeTitle = episodeTitle, progress = progress, downloadedBytes = totalRead,
@@ -645,7 +650,7 @@ class NetflixDownloadManager(
                     }
                 }
                 totalBytes += completed.length()
-                val progress = ((index + 1).toFloat() / segments.size).coerceIn(0.02f, 0.99f)
+                val progress = DownloadTransferPolicy.progress((index + 1).toLong(), segments.size.toLong())
                 updateTask(DownloadTaskInfo(key, media.id, media.title, episodeTitle = episodeTitle,
                     progress = progress, downloadedBytes = totalBytes, status = DownloadTaskStatus.DOWNLOADING))
                 _downloadingProgress.update { it + (key to progress) }
@@ -680,7 +685,7 @@ class NetflixDownloadManager(
                     resource.url, headers, streamUrl, store, index)
                 completedCount++
                 totalBytes += completed.length()
-                val progress = (completedCount.toFloat() / totalResources).coerceIn(.02f, .99f)
+                val progress = DownloadTransferPolicy.progress(completedCount.toLong(), totalResources.toLong())
                 updateTask(DownloadTaskInfo(key, media.id, media.title, episodeTitle = episodeTitle,
                     progress = progress, downloadedBytes = totalBytes, status = DownloadTaskStatus.DOWNLOADING))
                 _downloadingProgress.update { it + (key to progress) }

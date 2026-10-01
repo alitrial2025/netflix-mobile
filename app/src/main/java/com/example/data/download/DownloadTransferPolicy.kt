@@ -6,6 +6,10 @@ internal data class DirectTransferPlan(val append: Boolean, val expectedBytes: L
 
 /** Reject responses that would turn partial or unsupported content into a completed download. */
 internal object DownloadTransferPolicy {
+    /** Reserve 100% for finalized assets; unknown lengths have no invented percentage. */
+    fun progress(completed: Long, total: Long): Float = if (total <= 0L) 0f
+        else (completed.toDouble() / total).toFloat().coerceIn(0f, .99f)
+
     fun directPlan(code: Int, existingBytes: Long, contentRange: String?, contentLength: Long): DirectTransferPlan {
         require(existingBytes >= 0L)
         if (code == 200) return DirectTransferPlan(false, contentLength)

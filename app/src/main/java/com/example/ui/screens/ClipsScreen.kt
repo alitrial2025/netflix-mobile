@@ -141,6 +141,9 @@ fun ClipsScreen(
     onOpenCast: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onShowToast: (String) -> Unit = {},
+    streamingAllowed: Boolean = true,
+    maxVideoHeight: Int = Int.MAX_VALUE,
+    spatialAudioEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var clipsMode by remember { mutableStateOf(ClipsMode.VERTICAL_FEED) }
@@ -168,7 +171,10 @@ fun ClipsScreen(
                     onOpenNotifications = onOpenNotifications,
                     unreadNotificationsCount = notifications.count { !it.isRead },
                     onSelectMode = { clipsMode = it },
-                    onShowToast = onShowToast
+                    onShowToast = onShowToast,
+                    streamingAllowed = streamingAllowed,
+                    maxVideoHeight = maxVideoHeight,
+                    spatialAudioEnabled = spatialAudioEnabled
                 )
             }
 
@@ -201,6 +207,11 @@ fun ClipsScreen(
                 )
             }
         }
+        if (!streamingAllowed) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .9f)).clickable {},
+            contentAlignment = Alignment.Center) {
+            Text("Connect to Wi-Fi or change Cellular Data in App Settings to watch Clips.",
+                color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(28.dp))
+        }
     }
 }
 
@@ -220,7 +231,10 @@ private fun TikTokVerticalVideoFeed(
     onOpenNotifications: () -> Unit,
     unreadNotificationsCount: Int,
     onSelectMode: (ClipsMode) -> Unit,
-    onShowToast: (String) -> Unit
+    onShowToast: (String) -> Unit,
+    streamingAllowed: Boolean,
+    maxVideoHeight: Int,
+    spatialAudioEnabled: Boolean
 ) {
     val pagerState = rememberPagerState(pageCount = { items.size })
     val context = LocalContext.current
@@ -238,6 +252,14 @@ private fun TikTokVerticalVideoFeed(
             playWhenReady = true
         }
     }
+    LaunchedEffect(maxVideoHeight, spatialAudioEnabled) {
+        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE, maxVideoHeight).build()
+        exoPlayer.setAudioAttributes(androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA).setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+            .setSpatializationBehavior(if (spatialAudioEnabled) androidx.media3.common.C.SPATIALIZATION_BEHAVIOR_AUTO
+                else androidx.media3.common.C.SPATIALIZATION_BEHAVIOR_NEVER).build(), true)
+    }
 
     DisposableEffect(exoPlayer) {
         onDispose {
@@ -251,6 +273,8 @@ private fun TikTokVerticalVideoFeed(
     var progress by remember { mutableFloatStateOf(0f) }
 
     val currentPage = pagerState.currentPage
+    val latestPage by androidx.compose.runtime.rememberUpdatedState(currentPage)
+    val latestStreamingAllowed by androidx.compose.runtime.rememberUpdatedState(streamingAllowed)
     val isMuted = mutedMap[currentPage] ?: false
 
     LaunchedEffect(isMuted) {
@@ -259,6 +283,7 @@ private fun TikTokVerticalVideoFeed(
 
     // Smart stream loader & preloader function
     fun prepareAndPlay(url: String) {
+        if (!latestStreamingAllowed) return
         resolvedUrl = url
         isResolving = false
 
@@ -291,63 +316,70 @@ private fun TikTokVerticalVideoFeed(
         exoPlayer.play()
     }
 
-    LaunchedEffect(currentPage, items) {
-        if (currentPage in items.indices) {
-            val currentItem = items[currentPage]
-            isResolving = true
-            resolvedUrl = null
-            progress = 0f
+    LaunchedEffect(currentPage, items, streamingAllowed) {
+        val pending = mutableListOf<TrailerResolver>()
+        try {
+            if (!streamingAllowed) { exoPlayer.stop(); isResolving = false; return@LaunchedEffect }
+            if (currentPage in items.indices) {
+                val currentItem = items[currentPage]
+                isResolving = true
+                resolvedUrl = null
+                progress = 0f
 
-            val cachedUrl = urlCache[currentItem.id]
-            if (cachedUrl != null) {
-                prepareAndPlay(cachedUrl)
-            } else {
-                val mediaTypeStr = if (currentItem.type == MediaType.MOVIE) "movie" else "tv"
-                val resolver = TrailerResolver(
-                    context = context,
-                    tmdbId = currentItem.id,
-                    mediaType = mediaTypeStr,
-                    callback = object : TrailerResolverCallback {
-                        override fun onResolved(stream: TrailerStream) {
-                            urlCache[currentItem.id] = stream.url
-                            prepareAndPlay(stream.url)
-                        }
+                val cachedUrl = urlCache[currentItem.id]
+                if (cachedUrl != null) {
+                    prepareAndPlay(cachedUrl)
+                } else {
+                    val mediaTypeStr = if (currentItem.type == MediaType.MOVIE) "movie" else "tv"
+                    val resolver = TrailerResolver(
+                        context = context,
+                        tmdbId = currentItem.id,
+                        mediaType = mediaTypeStr,
+                        callback = object : TrailerResolverCallback {
+                            override fun onResolved(stream: TrailerStream) {
+                                urlCache[currentItem.id] = stream.url
+                                if (latestPage == currentPage && latestStreamingAllowed) prepareAndPlay(stream.url)
+                            }
 
-                        override fun onError(error: String) {
-                            isResolving = false
+                            override fun onError(error: String) {
+                                if (latestPage == currentPage && latestStreamingAllowed) isResolving = false
+                            }
                         }
+                    )
+                    pending += resolver
+                    resolver.start()
+                }
+
+                // Pre-resolve next item stream URL into cache for instant TikTok-style swipe without bloating RAM/WiFi
+                val nextItem = items.getOrNull(currentPage + 1)
+                if (nextItem != null && urlCache[nextItem.id] == null) {
+                    val nextMediaType = if (nextItem.type == MediaType.MOVIE) "movie" else "tv"
+                    val prefetch = TrailerResolver(
+                        context = context,
+                        tmdbId = nextItem.id,
+                        mediaType = nextMediaType,
+                        callback = object : TrailerResolverCallback {
+                            override fun onResolved(stream: TrailerStream) {
+                                urlCache[nextItem.id] = stream.url
+                            }
+                            override fun onError(error: String) {}
+                        }
+                    )
+                    pending += prefetch
+                    prefetch.start()
+                }
+
+                // Smooth timeline progress loop
+                while (true) {
+                    kotlinx.coroutines.delay(200)
+                    val duration = exoPlayer.duration
+                    val current = exoPlayer.currentPosition
+                    if (duration > 0) {
+                        progress = (current.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
                     }
-                )
-                resolver.start()
-            }
-
-            // Pre-resolve next item stream URL into cache for instant TikTok-style swipe without bloating RAM/WiFi
-            val nextItem = items.getOrNull(currentPage + 1)
-            if (nextItem != null && urlCache[nextItem.id] == null) {
-                val nextMediaType = if (nextItem.type == MediaType.MOVIE) "movie" else "tv"
-                TrailerResolver(
-                    context = context,
-                    tmdbId = nextItem.id,
-                    mediaType = nextMediaType,
-                    callback = object : TrailerResolverCallback {
-                        override fun onResolved(stream: TrailerStream) {
-                            urlCache[nextItem.id] = stream.url
-                        }
-                        override fun onError(error: String) {}
-                    }
-                ).start()
-            }
-
-            // Smooth timeline progress loop
-            while (true) {
-                kotlinx.coroutines.delay(200)
-                val duration = exoPlayer.duration
-                val current = exoPlayer.currentPosition
-                if (duration > 0) {
-                    progress = (current.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
                 }
             }
-        }
+        } finally { pending.forEach { it.cancel() } }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

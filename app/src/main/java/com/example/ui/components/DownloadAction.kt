@@ -51,6 +51,10 @@ fun DownloadAction(
             else Icon(painterResource(R.drawable.ic_outline_download), null, Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text(if (completed) "Downloaded · View" else "Download", fontWeight = FontWeight.SemiBold)
+            if (completed) {
+                Spacer(Modifier.weight(1f))
+                Text("100%", fontSize = 12.sp)
+            }
         }
     } else {
         Column(modifier.fillMaxWidth().background(Color(0xFF202020), RoundedCornerShape(8.dp)).padding(12.dp)) {
@@ -61,6 +65,7 @@ fun DownloadAction(
                         isPaused -> "Paused · ${(fraction * 100).toInt()}%"
                         task?.status == DownloadTaskStatus.QUEUED -> "Queued"
                         task?.status == DownloadTaskStatus.PREPARING -> "Preparing download"
+                        task?.totalBytes == 0L && task.downloadedBytes > 0L && fraction == 0f -> "Downloading"
                         else -> "Downloading · ${(fraction * 100).toInt()}%"
                     }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     if (failed || !task?.errorMessage.isNullOrBlank() || task?.speedBytesPerSec?.let { it > 0 } == true) Text(
@@ -76,7 +81,10 @@ fun DownloadAction(
                     Icon(Icons.Default.Close, "Cancel download", tint = Color.White.copy(alpha = .7f))
                 }
             }
-            LinearProgressIndicator(progress = { fraction }, color = if (isPaused) Color.LightGray else NetflixRed,
+            if (task?.totalBytes == 0L && task.downloadedBytes > 0L && fraction == 0f && !isPaused && !failed)
+                LinearProgressIndicator(color = NetflixRed, trackColor = Color.White.copy(alpha = .12f),
+                    modifier = Modifier.fillMaxWidth().height(3.dp))
+            else LinearProgressIndicator(progress = { fraction }, color = if (isPaused) Color.LightGray else NetflixRed,
                 trackColor = Color.White.copy(alpha = .12f), modifier = Modifier.fillMaxWidth().height(3.dp))
         }
     }

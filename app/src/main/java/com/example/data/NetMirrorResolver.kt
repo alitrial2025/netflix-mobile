@@ -44,7 +44,10 @@ data class NetMirrorStream(
     val sourceId: String,
     val expiresAt: Long,
     val title: String,
-    val isRateLimited: Boolean = false
+    val isRateLimited: Boolean = false,
+    // Captions can remain on the provider even when the video source is on a CDN.
+    // Keep this session in memory; download journals persist only local caption URIs.
+    val captionHeaders: Map<String, String> = headers
 )
 
 data class Caption(
@@ -1357,7 +1360,8 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
             captions = playlistResult.second,
             sourceId = "$label [${matchOtt.uppercase()}]",
             expiresAt = mediaExpiry,
-            title = tmdbInfo.title
+            title = tmdbInfo.title,
+            captionHeaders = headers + ("Cookie" to cookie)
         )
         if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
         streamCache[cacheKey] = result

@@ -35,24 +35,31 @@ fun NetflixBottomNav(
     activeProfile: UserProfile,
     onTabSelected: (NavigationTab) -> Unit,
     modifier: Modifier = Modifier,
-    isClipsAllowed: Boolean = true,
+    isClipsAllowed: Boolean = false,
     ambientColorProvider: () -> Color = { Color.Black }
 ) {
     val shape = RoundedCornerShape(40.dp)
     Box(modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
-        Row(Modifier.widthIn(max = 330.dp).fillMaxWidth(.80f).height(70.dp).clip(shape)
+        Row(Modifier.widthIn(max = if (isClipsAllowed) 380.dp else 330.dp)
+            .fillMaxWidth(if (isClipsAllowed) .94f else .80f).height(70.dp).clip(shape)
             .background(Color(0xFF2B2B2B)).border(1.dp, Color.White.copy(alpha = .14f), shape).padding(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            listOf(NavigationTab.HOME, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX).forEach { tab ->
+            val tabs = if (isClipsAllowed) listOf(NavigationTab.HOME, NavigationTab.CLIPS, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX)
+                else listOf(NavigationTab.HOME, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX)
+            tabs.forEach { tab ->
                 val selected = selectedTab == tab
-                val title = when (tab) { NavigationTab.HOME -> "Home"; NavigationTab.SEARCH -> "Search"; else -> "My NetflixPro" }
-                val tag = when (tab) { NavigationTab.HOME -> "home"; NavigationTab.SEARCH -> "search"; else -> "my_netflix" }
+                val title = when (tab) { NavigationTab.HOME -> "Home"; NavigationTab.CLIPS -> "Clips"; NavigationTab.SEARCH -> "Search"; else -> "My NetflixPro" }
+                val tag = when (tab) { NavigationTab.HOME -> "home"; NavigationTab.CLIPS -> "clips"; NavigationTab.SEARCH -> "search"; else -> "my_netflix" }
                 Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(30.dp))
                     .background(if (selected) Color.White.copy(alpha = .06f) else Color.Transparent)
                     .clickable { onTabSelected(tab) }.testTag("nav_tab_$tag"),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     if (tab == NavigationTab.MY_NETFLIX) ProfileAvatar(activeProfile, size = 26.dp)
-                    else Icon(painterResource(if (tab == NavigationTab.HOME) R.drawable.ic_nav_home else R.drawable.ic_nav_search),
+                    else Icon(painterResource(when (tab) {
+                        NavigationTab.HOME -> R.drawable.ic_nav_home
+                        NavigationTab.CLIPS -> R.drawable.ic_nav_clips
+                        else -> R.drawable.ic_nav_search
+                    }),
                         contentDescription = title, tint = if (selected) Color.White else Color(0xFF999999), modifier = Modifier.size(26.dp))
                     Spacer(Modifier.height(3.dp))
                     Text(title, color = if (selected) Color.White else Color(0xFFBBBBBB), fontSize = 10.sp,

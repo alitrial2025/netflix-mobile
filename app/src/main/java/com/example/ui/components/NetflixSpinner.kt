@@ -30,9 +30,9 @@ fun NetflixSpinner(
     val infiniteTransition = rememberInfiniteTransition(label = "netflixSpinner")
     val spinnerRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -360f,
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "rotation"
@@ -63,7 +63,7 @@ fun NetflixSpinner(
         }
 
         if (percentage != null) {
-            val clamped = percentage.coerceIn(1, 100)
+            val clamped = percentage.coerceIn(0, 100)
             val fontSize = when {
                 size >= 100.dp -> 18.sp
                 size >= 80.dp -> 14.sp
