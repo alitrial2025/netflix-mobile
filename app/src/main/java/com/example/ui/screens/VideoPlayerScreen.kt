@@ -183,6 +183,7 @@ fun VideoPlayerScreen(
     onRecommendationClick: (com.example.data.model.MediaItem) -> Unit = {},
     onSetIntroWindow: (com.example.ui.viewmodel.IntroWindow?) -> Unit = {},
     onPersistProgress: () -> Unit = {},
+    onPlaybackFailed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val media = playerState.media ?: return
@@ -195,6 +196,7 @@ fun VideoPlayerScreen(
     val latestTrailerEnded by rememberUpdatedState(onTrailerEnded)
     val latestTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
     val latestNextEpisode by rememberUpdatedState(onPlayNextEpisode)
+    val latestPlaybackFailed by rememberUpdatedState(onPlaybackFailed)
     val latestContentEnded by rememberUpdatedState(onContentEnded)
     val latestPersistProgress by rememberUpdatedState(onPersistProgress)
     val latestSetIntroWindow by rememberUpdatedState(onSetIntroWindow)
@@ -308,6 +310,7 @@ fun VideoPlayerScreen(
                 if (exoPlayer.currentMediaItem?.mediaId != expectedId) return
                 val limited = generateSequence<Throwable>(error) { it.cause }.take(16)
                     .filterIsInstance<com.example.data.PlaybackRateLimitedException>().firstOrNull()
+                latestPlaybackFailed()
                 playbackError = if (limited != null) {
                     "Playback is busy. Please wait ${((limited.retryAfterMs ?: 60_000L) + 999L) / 1_000L} seconds before trying again."
                 } else "This title cannot be played. Try again later."

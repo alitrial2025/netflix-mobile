@@ -25,6 +25,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -129,11 +130,11 @@ class AppCookieJar : CookieJar {
     }
 }
 
-class NetMirrorResolver(private val context: Context) {
+class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClient? = null) {
 
     private val cookieJar = AppCookieJar()
 
-    private val client = OkHttpClient.Builder()
+    private val client = clientOverride ?: OkHttpClient.Builder()
         .cookieJar(cookieJar)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -146,7 +147,6 @@ class NetMirrorResolver(private val context: Context) {
         "net52.cc",
         "netmirror.app",
         "netmirror.gg",
-        "mobidetects.com",
         "mobidetect.art"
     )
 
@@ -163,7 +163,7 @@ class NetMirrorResolver(private val context: Context) {
     private val ACTIVE_DOMAIN_KEY = "netmirror_active_domain"
 
     companion object {
-        private var _session: WarmSession? = null
+        @Volatile private var _session: WarmSession? = null
         private val sessionMutex = Mutex()
         private val resolutionMutex = Mutex()
         private var cachedSourceRevision = PlaybackServiceGate.sourceRevision
@@ -192,24 +192,35 @@ class NetMirrorResolver(private val context: Context) {
     private fun rethrowControlFailure(error: Exception) {
         if (error is CancellationException || error is PlaybackRateLimitedException || error is SessionRejectedException) throw error
     }
-    private suspend fun fetch(request: Request): HttpTextResponse {
+    internal suspend fun fetch(request: Request): HttpTextResponse {
         if (request.url.host == "api.themoviedb.org") return client.fetchText(request)
-        return PlaybackServiceGate.request {
+        val execute: suspend () -> HttpTextResponse = {
+            PlaybackServiceGate.check()
             val response = client.fetchText(request)
             currentCoroutineContext().ensureActive()
             PlaybackServiceGate.checkResponse(response.code, response.body, response.header("Retry-After"), request.url.toString())
             val usesSession = request.header("Cookie")?.contains("t_hash_t=") == true
             if (usesSession && (StreamSessionPolicy.isSessionRejected(response.code, response.body) ||
                 StreamSessionPolicy.isAuthLandingPage(request.url.encodedPath, response.request.url.encodedPath, response.code, response.body))) {
-                _session = null
-                getPrefs().edit().remove(SESSION_STORAGE_KEY).apply()
-                streamCache.clear()
+                val rejectedHash = request.header("Cookie")?.split(';')?.map(String::trim)
+                    ?.firstOrNull { it.startsWith("t_hash_t=") }?.substringAfter('=')
+                if (_session?.tHashTEncoded == rejectedHash) {
+                    _session = null
+                    cookieJar.clear()
+                    val saved = getPrefs().getString(SESSION_STORAGE_KEY, null)
+                    val savedHash = try { saved?.let { JSONObject(it).optString("tHashTEncoded") } } catch (_: org.json.JSONException) { null }
+                    if (savedHash == null || savedHash == rejectedHash)
+                        getPrefs().edit().remove(SESSION_STORAGE_KEY).apply()
+                    streamCache.clear()
+                }
                 throw SessionRejectedException()
             }
             if (usesSession && StreamSessionPolicy.isUnexpectedAuthenticatedHtml(request.url.encodedPath, response.code, response.body))
                 throw java.io.IOException("Playback service is temporarily unavailable")
             response
         }
+        return if (ProviderRequestPolicy.needsPacing(request, getSavedActiveDomain(), DOMAIN_POOL))
+            PlaybackServiceGate.request(block = execute) else execute()
     }
 
     private fun getPrefs(): SharedPreferences {
@@ -351,7 +362,7 @@ class NetMirrorResolver(private val context: Context) {
 
             if (encoded.isNotEmpty()) {
                 raw = URLDecoder.decode(encoded, "UTF-8")
-                Log.d("NetMirror", "✅ addhash from Set-Cookie: ${raw.take(20)}...")
+                Log.d("NetMirror", "addhash received from response")
             } else {
                 // Generalized regex patterns for HTML attributes & script variables
                 val m1 = Regex("""data-hash=["']([^"']+)["']""").find(body)
@@ -364,7 +375,7 @@ class NetMirrorResolver(private val context: Context) {
                 if (m != null) {
                     raw = m.groupValues[1]
                     encoded = encodeURIComponent(raw)
-                    Log.d("NetMirror", "⚠️ addhash from HTML/JS body: ${raw.take(20)}...")
+                    Log.d("NetMirror", "addhash received from provider page")
                 } else {
                     Log.d("NetMirror", "❌ No addhash cookie or HTML attribute found")
                     return@withContext null
@@ -373,7 +384,7 @@ class NetMirrorResolver(private val context: Context) {
 
             val parts = raw.split("::")
             if (parts.size < 3) {
-                Log.d("NetMirror", "❌ addhash only ${parts.size} parts: ${raw.take(30)}")
+                Log.d("NetMirror", "Invalid addhash format (${parts.size} parts)")
                 return@withContext null
             }
 
@@ -415,7 +426,7 @@ class NetMirrorResolver(private val context: Context) {
         val ffr = encodeURIComponent(addhashRaw)
         val t = Math.random().toString()
         val url = "https://$vsiteSubdomain.$domain/?$quryParam=$ffr&a=y&t=$t"
-        Log.d("NetMirror", "📡 Step 2: Triggering $vsiteSubdomain with param $quryParam ($url)...")
+        Log.d("NetMirror", "Triggering provider handshake on $vsiteSubdomain with param $quryParam")
 
         try {
             val req = Request.Builder()
@@ -462,7 +473,7 @@ class NetMirrorResolver(private val context: Context) {
 
                 val res = fetch(req)
                 val bodyText = res.body
-                Log.d("NetMirror", "🔑 $verifyEndpoint #$i: HTTP ${res.code} [${bodyText.take(60)}]")
+                Log.d("NetMirror", "$verifyEndpoint attempt $i: HTTP ${res.code}")
 
                 var tHashT = extractSetCookie(res.headers, "t_hash_t")
                 if (tHashT.isEmpty()) {
@@ -470,7 +481,7 @@ class NetMirrorResolver(private val context: Context) {
                 }
                 if (tHashT.isNotEmpty()) {
                     val raw = URLDecoder.decode(tHashT, "UTF-8")
-                    Log.d("NetMirror", "✅ t_hash_t received on attempt $i: ${raw.take(30)}...")
+                    Log.d("NetMirror", "Session cookie received on attempt $i")
                     return@withContext Pair(tHashT, raw)
                 }
                 if (i < maxAttempts) {
@@ -666,7 +677,8 @@ class NetMirrorResolver(private val context: Context) {
     }
 
     fun restoreSessionFromStorage(): Boolean {
-        if (_session != null && StreamSessionPolicy.isFresh(_session!!.fetchedAt, System.currentTimeMillis())) {
+        val existing = _session
+        if (existing != null && StreamSessionPolicy.isFresh(existing.fetchedAt, System.currentTimeMillis())) {
             return true
         }
         val storedStr = getPrefs().getString(SESSION_STORAGE_KEY, null) ?: return false
@@ -674,7 +686,7 @@ class NetMirrorResolver(private val context: Context) {
             val json = JSONObject(storedStr)
             val fetchedAt = json.getLong("fetchedAt")
             if (StreamSessionPolicy.isFresh(fetchedAt, System.currentTimeMillis())) {
-                _session = WarmSession(
+                val restored = WarmSession(
                     domain = json.getString("domain"),
                     addhashRaw = json.getString("addhashRaw"),
                     addhashEncoded = json.getString("addhashEncoded"),
@@ -682,9 +694,10 @@ class NetMirrorResolver(private val context: Context) {
                     tHashTRaw = json.getString("tHashTRaw"),
                     fetchedAt = fetchedAt
                 )
-                cookieJar.addManualCookie(_session!!.domain, "addhash", _session!!.addhashEncoded)
-                cookieJar.addManualCookie(_session!!.domain, "t_hash_t", _session!!.tHashTEncoded)
-                cookieJar.addManualCookie(_session!!.domain, "lang", "eng")
+                _session = restored
+                cookieJar.addManualCookie(restored.domain, "addhash", restored.addhashEncoded)
+                cookieJar.addManualCookie(restored.domain, "t_hash_t", restored.tHashTEncoded)
+                cookieJar.addManualCookie(restored.domain, "lang", "eng")
                 Log.d("NetMirror", "💾 Restored session from storage")
                 true
             } else {
@@ -700,7 +713,7 @@ class NetMirrorResolver(private val context: Context) {
     }
 
     fun isSessionWarm(): Boolean {
-        return _session != null && StreamSessionPolicy.isFresh(_session!!.fetchedAt, System.currentTimeMillis())
+        return _session?.let { StreamSessionPolicy.isFresh(it.fetchedAt, System.currentTimeMillis()) } == true
     }
 
     suspend fun getSession(): WarmSession? = withContext(Dispatchers.IO) {
@@ -709,9 +722,12 @@ class NetMirrorResolver(private val context: Context) {
         }
 
         sessionMutex.withLock {
-            if (_session != null && StreamSessionPolicy.isFresh(_session!!.fetchedAt, System.currentTimeMillis())) {
+            val existing = _session
+            if (existing != null && StreamSessionPolicy.isFresh(existing.fetchedAt, System.currentTimeMillis())) {
                 return@withContext _session
             }
+            // Discard this instance's older cookies before polling a new handshake.
+            cookieJar.clear()
             val result = warmSession()
             if (result != null) _session = result
             return@withContext result
@@ -1073,6 +1089,7 @@ class NetMirrorResolver(private val context: Context) {
                 val parsed = if (bodyText.trim().startsWith("[")) JSONArray(bodyText).optJSONObject(0) else JSONObject(bodyText)
                 if (parsed == null) continue
 
+                if (!res.isSuccessful) continue
                 var hlsFile = ""
                 val sources = parsed.optJSONArray("sources")
                 if (sources != null && sources.length() > 0) {
@@ -1121,6 +1138,12 @@ class NetMirrorResolver(private val context: Context) {
                     }
                 }
 
+                val source = "https://$domain/".toHttpUrlOrNull()?.resolve(hlsFile)
+                    ?: throw java.io.IOException("Invalid playback source")
+                val value = source.queryParameter("in")
+                if (source.host == domain && value?.startsWith("unknown") == true) {
+                    hlsFile = ProviderMasterRequest.resolve(source.toString(), contentId)
+                }
                 return@withContext Pair(hlsFile, captions)
             } catch (e: Exception) {
                 rethrowControlFailure(e)
@@ -1165,7 +1188,14 @@ class NetMirrorResolver(private val context: Context) {
     }
 
     suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52"): NetMirrorStream = resolutionMutex.withLock {
-        withContext(Dispatchers.IO) {
+        repeat(2) { attempt ->
+            try { return@withLock resolveStreamOnce(tmdbId, type, season, episode, label) }
+            catch (rejected: SessionRejectedException) { if (attempt == 1) throw rejected }
+        }
+        throw java.io.IOException("Playback session could not be renewed")
+    }
+
+    private suspend fun resolveStreamOnce(tmdbId: String, type: String, season: Int, episode: Int, label: String) = withContext(Dispatchers.IO) {
         PlaybackServiceGate.check()
         currentCoroutineContext().ensureActive()
         if (cachedSourceRevision != PlaybackServiceGate.sourceRevision) {
@@ -1293,6 +1323,7 @@ class NetMirrorResolver(private val context: Context) {
             put("Cookie", cookie)
         }
 
+        var mediaExpiry = minOf(System.currentTimeMillis() + 3600000, session.fetchedAt + SESSION_TTL_MS)
         suspend fun validateManifest(url: String, depth: Int = 0) {
             val req = Request.Builder().url(url)
             validationHeaders.filterKeys { it != "Cookie" || java.net.URI(url).host == domain }
@@ -1300,6 +1331,14 @@ class NetMirrorResolver(private val context: Context) {
             val response = fetch(req.build())
             if (!response.isSuccessful || !response.body.trimStart().startsWith("#EXTM3U"))
                 throw java.io.IOException("Playback manifest unavailable (HTTP ${response.code})")
+            CdnRoutePolicy.earliestManifestExpiry(response.body, System.currentTimeMillis())?.let {
+                mediaExpiry = minOf(mediaExpiry, it)
+            }
+            CdnRoutePolicy.token(url)?.let {
+                mediaExpiry = minOf(mediaExpiry, StreamSessionPolicy.tokenIssuedAt(it.timestamp, System.currentTimeMillis()) + SESSION_TTL_MS)
+            }
+            if (mediaExpiry - System.currentTimeMillis() <= StreamSessionPolicy.EXPIRY_MARGIN_MS)
+                throw java.io.IOException("Provider returned an expired playback link")
             if (response.body.contains("#EXT-X-STREAM-INF")) {
                 if (depth >= 2) throw java.io.IOException("Playback playlist nesting is invalid")
                 val lines = response.body.lines()
@@ -1317,13 +1356,12 @@ class NetMirrorResolver(private val context: Context) {
             headers = headers,
             captions = playlistResult.second,
             sourceId = "$label [${matchOtt.uppercase()}]",
-            expiresAt = minOf(System.currentTimeMillis() + 3600000, session.fetchedAt + SESSION_TTL_MS),
+            expiresAt = mediaExpiry,
             title = tmdbInfo.title
         )
         if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
         streamCache[cacheKey] = result
         return@withContext result
-        }
     }
 
     suspend fun resolveNet52(tmdbId: String, type: String, season: Int = 0, episode: Int = 0): NetMirrorStream = withContext(Dispatchers.IO) {
@@ -1331,7 +1369,7 @@ class NetMirrorResolver(private val context: Context) {
         Log.d("NetMirror", "[Stream] ▶️ resolve: TMDB $tmdbId ($type) S${season}E$episode")
         try {
             val result = resolveStream(tmdbId, type, season, episode, "Premium")
-            Log.d("NetMirror", "[Stream] ✅ Total: ${System.currentTimeMillis() - t0}ms | url: ${result.url.take(60)}...")
+            Log.d("NetMirror", "[Stream] ✅ Total: ${System.currentTimeMillis() - t0}ms | source: ${result.sourceId}")
             return@withContext result
         } catch (e: Exception) {
             rethrowControlFailure(e)
