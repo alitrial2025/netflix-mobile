@@ -2,7 +2,7 @@ package com.example.data.download
 
 import java.io.IOException
 
-internal class DownloadHttpException(val code: Int) : IOException("Download server returned HTTP $code")
+internal class DownloadHttpException(val code: Int, val usedProviderSession: Boolean = false) : IOException("Download server returned HTTP $code")
 internal class DownloadStorageException : IOException("Not enough free storage for this download")
 
 internal object DownloadRetryPolicy {
@@ -19,10 +19,10 @@ internal object DownloadRetryPolicy {
     fun userMessage(error: Exception): String = if (isStorageFailure(error)) "Free up device storage, then continue the download." else when (error) {
         is DownloadHttpException -> when (error.code) {
             401, 403 -> "The download link expired. Continue to request a fresh link."
-            404, 410 -> "This download is unavailable from the provider."
+            404, 410 -> "This title cannot be downloaded. Try again later."
             else -> "The server is unavailable. Continue to retry your saved download."
         }
         is IOException -> "The connection was interrupted. Continue to resume your saved download."
-        else -> error.message ?: "This format cannot be downloaded yet."
+        else -> "This title cannot be downloaded. Try again later."
     }
 }

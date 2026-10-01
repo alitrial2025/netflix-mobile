@@ -14,24 +14,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -44,6 +40,8 @@ import com.example.data.model.MediaType
 import com.example.data.model.UserProfile
 import com.example.data.model.UserSubscription
 import com.example.ui.components.ContinueWatchingSectionRow
+import com.example.ui.components.HomeBackdrop
+import com.example.ui.components.homeBackdropOffset
 import com.example.ui.components.HeroBanner
 import com.example.ui.components.MediaSectionRow
 import com.example.ui.components.NetflixSpinner
@@ -355,31 +353,27 @@ fun HomeScreen(
         }
     }
 
-    val maxScrollOffsetPx = remember(density) { with(density) { 134.dp.toPx() } }
-
-    // Brushes depend on artwork, not scroll position: translate a cached shader in the draw phase.
-    val ambientBrush = remember(currentTopColor, currentBottomColor, gradientEndPx) {
-        Brush.verticalGradient(colorStops = arrayOf(
-            0f to currentTopColor, .20f to currentTopColor.copy(alpha = .88f),
-            .38f to currentBottomColor.copy(alpha = .72f), .54f to currentBottomColor.copy(alpha = .50f),
-            .68f to currentBottomColor.copy(alpha = .30f), .80f to currentBottomColor.copy(alpha = .15f),
-            .90f to currentBottomColor.copy(alpha = .05f), .97f to currentBottomColor.copy(alpha = .01f),
-            1f to Color.Black), startY = 0f, endY = gradientEndPx)
+    // Heights change only on layout, not on each scroll frame. Retain the hero's
+    // height after lazy disposal so its gradient continues through the first rows.
+    val itemHeights = remember(listState, categoryFilter, selectedGenre) { mutableStateMapOf<String, Int>() }
+    val itemKeys = remember(uiSections, continueWatchingList.isNotEmpty()) {
+        listOf("hero") + (if (continueWatchingList.isNotEmpty()) listOf("continue_watching") else emptyList()) + uiSections.map { it.id }
     }
-    val edgeBrush = remember { Brush.horizontalGradient(listOf(Color.Black.copy(alpha = .55f), Color.Transparent)) }
-    Box(
-        modifier = modifier.fillMaxSize().background(Color.Black).drawBehind {
-            val scrollY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else gradientEndPx
-            clipRect {
-                withTransform({ translate(0f, -scrollY) }) {
-                    drawRect(ambientBrush, size = Size(size.width, gradientEndPx))
-                }
-            }
-            drawRect(edgeBrush)
+    val backdropOffset = remember(listState, itemKeys, gradientEndPx, categoryFilter, selectedGenre) {
+        derivedStateOf {
+            homeBackdropOffset(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
+                itemKeys, itemHeights, gradientEndPx)
         }
-    ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
+    }
+    val isMediaLocked = remember(userSubscription) {
+        { media: MediaItem -> userSubscription.isMediaLocked(media.id, media.title) }
+    }
+    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+        // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
+        HomeBackdrop(currentTopColor, currentBottomColor, gradientEndPx, { backdropOffset.value })
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = 110.dp)) {
             item(key = "hero", contentType = "hero") {
+            Column(Modifier.onSizeChanged { itemHeights["hero"] = it.height }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
             Spacer(modifier = Modifier.height(136.dp))
@@ -390,9 +384,11 @@ fun HomeScreen(
             val onHeroInfo = remember(heroMedia, onMediaClick) { { onMediaClick(heroMedia) } }
             val isInWatchlist = watchlistIds?.contains(heroMedia.id) ?: isWatchlistContains(heroMedia.id)
             
-            val parallaxOffset = remember {
+            val parallaxOffset = remember(listState) {
                 derivedStateOf {
-                    (listState.firstVisibleItemScrollOffset.toFloat() * 0.35f).coerceAtMost(maxScrollOffsetPx * 0.35f)
+                    if (listState.firstVisibleItemIndex == 0)
+                        (listState.firstVisibleItemScrollOffset * .35f).coerceAtMost(12f)
+                    else 12f
                 }
             }
 
@@ -416,11 +412,12 @@ fun HomeScreen(
                     }
                 )
             }
-
+            }
             }
             // Continue Watching Row (only if present)
             if (continueWatchingList.isNotEmpty()) {
                 item(key = "continue_watching", contentType = "continue_watching") {
+                Column(Modifier.onSizeChanged { itemHeights["continue_watching"] = it.height }) {
                 ContinueWatchingSectionRow(
                     title = "Continue Watching for ${activeProfile.name}",
                     items = continueWatchingList,
@@ -429,6 +426,7 @@ fun HomeScreen(
                     onOptionsClick = onContinueWatchingOptionsClick
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                }
                 }
             }
 
@@ -440,9 +438,9 @@ fun HomeScreen(
                     lazyListState = rowState,
                     reminders = reminders,
                     onToggleReminder = onToggleReminder,
-                    isMediaLocked = { media -> userSubscription.isMediaLocked(media.id, media.title) },
+                    isMediaLocked = isMediaLocked,
                     onMediaClick = onMediaClick,
-                    modifier = Modifier
+                    modifier = Modifier.onSizeChanged { itemHeights[section.id] = it.height }
                 )
             }
         }

@@ -46,6 +46,7 @@ import com.example.data.model.toUserProfile
 import com.example.data.download.NetflixDownloadManager
 import com.example.data.download.DownloadTaskInfo
 import com.example.data.download.DownloadTaskStatus
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.ensureActive
@@ -170,7 +171,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private fun fetchTmdbCatalog() {
         if (catalogRefreshJob?.isActive == true) return
-        catalogRefreshJob = viewModelScope.launch {
+        catalogRefreshJob = viewModelScope.launch(Dispatchers.Default) {
             _isLoadingCatalog.value = true
             try {
                 val cached = withContext(Dispatchers.IO) { catalogCache.read() }
@@ -653,7 +654,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         } else {
             catalog
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Navigation and Categories
     private val _selectedTab = MutableStateFlow(NavigationTab.HOME)
@@ -712,6 +713,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 entries.mapNotNull { byId[it.mediaId] ?: CatalogData.getById(it.mediaId) }
             }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -729,6 +731,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 }.sortedByDescending { it.second.lastWatchedTimestamp }
             }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -1688,6 +1691,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false) {
         if (!titleAllowed(media)) return
+        smartCuratorJob?.cancel() // A background availability probe must yield to an explicit Play tap.
         finishSmartReplacement()
         persistPlayerProgress(_playerState.value)
         progressTracker.reset()
@@ -1831,7 +1835,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         resolveError = if (e is com.example.data.PlaybackRateLimitedException) {
                             val seconds = ((e.retryAfterMs ?: 60_000L) + 999L) / 1_000L
                             "Playback is busy. Please wait $seconds seconds before trying again."
-                        } else e.message ?: "This title could not be played.",
+                        } else "This title cannot be played. Try again later.",
                         resolvedUrl = null,
                         isPlaying = false
                     )

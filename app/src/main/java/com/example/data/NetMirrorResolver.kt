@@ -178,11 +178,13 @@ class NetMirrorResolver(private val context: Context) {
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")
     }
-    /** A rejected download must renew through the normal provider session pipeline. */
-    suspend fun invalidateDownloadSession(tmdbId: String, type: String, season: Int, episode: Int) {
+    /** Renew CDN links without throwing away a still-valid provider handshake. */
+    suspend fun invalidateDownloadSession(tmdbId: String, type: String, season: Int, episode: Int, providerSessionRejected: Boolean = false) {
         sessionMutex.withLock {
-            _session = null
-            getPrefs().edit().remove(SESSION_STORAGE_KEY).apply()
+            if (providerSessionRejected) {
+                _session = null
+                getPrefs().edit().remove(SESSION_STORAGE_KEY).apply()
+            }
             evictCachedStream(tmdbId, type, season, episode)
         }
     }

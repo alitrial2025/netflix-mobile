@@ -67,6 +67,7 @@ class NetflixApplication : Application(), ImageLoaderFactory {
             .components {
                 add(SvgDecoder.Factory())
             }
+            .bitmapFactoryMaxParallelism(2)
             .respectCacheHeaders(false)
             .allowHardware(true)
             .build()

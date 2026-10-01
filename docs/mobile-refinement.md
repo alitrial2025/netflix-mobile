@@ -37,11 +37,11 @@ gradle :app:testDebugUnitTest :app:assembleDebug --max-workers=2
 gradle :app:lintDebug --max-workers=2
 ```
 
-The complete unit/UI suite passed: **86 tests, 0 failures, 0 errors, 10 skipped** (76 passed; skipped tests are opt-in film exports). Android lint passed with no errors. Debug assembly and APK signature verification passed for version **1.3 / code 4**.
+The complete unit/UI suite passed: **95 tests, 0 failures, 0 errors, 10 skipped** (85 passed; skipped tests are opt-in film exports). Android lint passed with no errors. The four Home scroll regressions also passed independently after a category-state capture fix; their paused-looper harness explicitly delivers off-main section results. Debug assembly and APK signature verification passed for version **1.4 / code 5**.
 
 Review captures in `mobile-refinement/` render production Kotlin Composables using native Robolectric graphics and local TMDB artwork fixtures. They are UI reviews, not emulator screenshots, measured device performance or successful live-provider playback. Tests cover durable queued requests, ownership, pause/resume/cancel, a 170-segment transfer failing at segment 165 then resuming with renewed tokens, tamper/partial detection, migration preservation, profile preferences, independent Smart Download switches, Details interaction/lazy episodes and player completion behavior.
 
-Encrypted, fMP4, byte-range, discontinuous or separate-audio HLS downloads remain explicitly unsupported. Android foreground execution, OEM battery policies, force-stop recovery and live-provider session behavior require runtime validation on representative devices. Debug APKs are review builds; release signing and production certification remain separate.
+Encrypted and byte-range HLS remain unsupported. Separate-audio HLS now uses local playlists with video/audio checkpoints, including fMP4 initialization segments and preserved discontinuities; see [Home and download follow-through](mobile-home-performance.md). The older single-file TS path retains its stricter format limits. Android foreground execution, OEM battery policies, force-stop recovery and live-provider session behavior require runtime validation on representative devices. Debug APKs are review builds; release signing and production certification remain separate.
 
 ## Native UI review
 

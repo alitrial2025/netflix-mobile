@@ -310,7 +310,7 @@ fun VideoPlayerScreen(
                     .filterIsInstance<com.example.data.PlaybackRateLimitedException>().firstOrNull()
                 playbackError = if (limited != null) {
                     "Playback is busy. Please wait ${((limited.retryAfterMs ?: 60_000L) + 999L) / 1_000L} seconds before trying again."
-                } else "This title could not be played. Return to the title and try again."
+                } else "This title cannot be played. Try again later."
                 isBuffering = false
                 exoPlayer.stop()
                 exoPlayer.clearMediaItems()

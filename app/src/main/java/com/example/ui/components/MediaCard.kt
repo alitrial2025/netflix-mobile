@@ -42,8 +42,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,10 +50,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.imageLoader
-import coil.request.CachePolicy
-import coil.request.ImageRequest
-import coil.size.Size
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.ui.theme.NetflixCardBg
@@ -84,7 +78,6 @@ fun MediaPosterCard(
     onClick: () -> Unit
 ) {
     val isTallCard = height >= 300.dp
-    val context = LocalContext.current
     val imageModel = media.posterUrl ?: media.bannerDrawableRes
     val cardShape = if (isTallCard) TallCardShape else StandardCardShape
 
@@ -110,13 +103,7 @@ fun MediaPosterCard(
             )
         } else {
             AsyncImage(
-                model = remember(context, imageModel, width, height, androidx.compose.ui.platform.LocalDensity.current.density) {
-                    ImageRequest.Builder(context).data(imageModel)
-                        .size((width.value * context.resources.displayMetrics.density).toInt().coerceAtLeast(1),
-                            (height.value * context.resources.displayMetrics.density).toInt().coerceAtLeast(1))
-                        .crossfade(false)
-                        .memoryCachePolicy(CachePolicy.ENABLED).diskCachePolicy(CachePolicy.ENABLED).build()
-                },
+                model = rememberPosterRequest(imageModel, width, height),
                 contentDescription = media.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
@@ -238,7 +225,6 @@ fun ContinueWatchingCard(
     onOptionsClick: () -> Unit = {}
 ) {
     val episodeTag = remember(episodeTitle, media.type) { formatEpisodeBadge(episodeTitle, media) }
-    val context = LocalContext.current
     val imageModel = media.posterUrl ?: media.bannerDrawableRes ?: media.backdropUrl
 
     val cardShape = RoundedCornerShape(10.dp)
@@ -285,12 +271,7 @@ fun ContinueWatchingCard(
                 }
             } else {
                 AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(imageModel)
-                        .crossfade(true)
-                        .memoryCachePolicy(CachePolicy.ENABLED)
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .build(),
+                    model = rememberPosterRequest(imageModel, width, posterHeight),
                     contentDescription = media.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop

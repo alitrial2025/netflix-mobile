@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -50,11 +51,20 @@ fun HeroBanner(
 ) {
     val colors by rememberPosterColors(media)
     LaunchedEffect(media.id, colors) { onColorsExtracted(colors.first, colors.second) }
-    val shape = RoundedCornerShape(16.dp)
+    val shape = remember { RoundedCornerShape(16.dp) }
     val footerColor = lerp(colors.second, Color.Black, .32f)
-    val rim = Brush.verticalGradient(listOf(
+    val rim = remember { Brush.verticalGradient(listOf(
         Color.White.copy(alpha = .38f), Color.White.copy(alpha = .12f), Color.White.copy(alpha = .24f)
-    ))
+    )) }
+    val heroWidth = (LocalConfiguration.current.screenWidthDp - 52).coerceIn(1, 540).dp
+    val posterRequest = rememberPosterRequest(posterModel(media), heroWidth, cardHeight)
+    val logoRequest = rememberPosterRequest(media.logoUrl, heroWidth * .85f, 62.dp)
+    val footerBrush = remember(footerColor, colors.second) { Brush.verticalGradient(
+        0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
+        .62f to footerColor.copy(alpha = .35f), .72f to footerColor.copy(alpha = .99f),
+        .78f to footerColor, .90f to footerColor, 1f to colors.second
+    ) }
+    val genreLabel = remember(media.genres) { media.genres.take(4).joinToString(" • ") }
     Box(modifier.fillMaxWidth().padding(start = 26.dp, end = 26.dp, top = 12.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier.fillMaxWidth().widthIn(max = 540.dp).height(cardHeight)
@@ -63,30 +73,25 @@ fun HeroBanner(
                 .background(colors.second).clickable(onClick = onInfoClick).testTag("hero_banner_card")
         ) {
             AsyncImage(
-                model = posterModel(media), contentDescription = media.title,
+                model = posterRequest, contentDescription = media.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().graphicsLayer { translationY = parallaxOffsetProvider().coerceIn(-12f, 12f) }
             )
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
-                .62f to footerColor.copy(alpha = .35f), .72f to footerColor.copy(alpha = .99f),
-                .78f to footerColor, .90f to footerColor,
-                1f to colors.second
-            )))
+            Box(Modifier.fillMaxSize().background(footerBrush))
             if (media.isOriginal) NetflixNLogo(size = 27.dp, modifier = Modifier.padding(14.dp).align(Alignment.TopStart))
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (!media.logoUrl.isNullOrBlank()) {
-                    AsyncImage(model = media.logoUrl, contentDescription = media.title,
+                    AsyncImage(model = logoRequest, contentDescription = media.title,
                         contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth(.85f).height(62.dp))
                 } else {
                     Text(media.title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(media.genres.take(4).joinToString(" • "), color = Color.White.copy(alpha = .8f),
+                Text(genreLabel, color = Color.White.copy(alpha = .8f),
                     fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(18.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
