@@ -523,6 +523,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _transitioningProfile = MutableStateFlow<UserProfile?>(null)
     val transitioningProfile: StateFlow<UserProfile?> = _transitioningProfile.asStateFlow()
 
+    init {
+        com.example.data.SubscriptionTime.initialize(application)
+        com.example.data.model.UserSubscription.clock = { com.example.data.SubscriptionTime.now() }
+    }
+
     private var subscriptionExpiryJob: Job? = null
     private val _userSubscription = MutableStateFlow<com.example.data.model.UserSubscription>(loadStoredSubscription())
     val userSubscription: StateFlow<com.example.data.model.UserSubscription> = _userSubscription.asStateFlow()
@@ -560,8 +565,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private fun setUserSubscription(sub: com.example.data.model.UserSubscription) {
         subscriptionExpiryJob?.cancel()
-        val effective = if (sub.status.equals("ACTIVE", true) && !sub.isActive) sub.copy(status = "EXPIRED") else sub
+        val effective = when {
+            (sub.status.equals("ACTIVE", true) || sub.status.equals("GRACE_PERIOD", true)) && !sub.isActive -> sub.copy(status = "EXPIRED")
+            sub.status.equals("ACTIVE", true) && sub.isInRenewalGrace -> sub.copy(status = "GRACE_PERIOD")
+            else -> sub
+        }
         _userSubscription.value = effective
+        com.example.data.SubscriptionReminders.schedule(getApplication(), syncManager.getUserId(), effective.expiresAt, effective.isActive)
         if (!sub.isClipsAllowed && _selectedTab.value == NavigationTab.CLIPS) {
             _selectedTab.value = NavigationTab.HOME
         }
@@ -571,10 +581,20 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         if (!effective.isActive && _playerState.value.media != null && _playerState.value.sourceId != "Trailer") {
             closePlayer()
         }
+        if (!effective.isDownloadsForYouAllowed) smartCuratorJob?.cancel()
         if (effective.isActive) {
             subscriptionExpiryJob = viewModelScope.launch {
                 while (_userSubscription.value == effective && effective.isActive) {
-                    delay((effective.expiresAt - System.currentTimeMillis()).coerceIn(1L, 60_000L))
+                    if (effective.status.equals("ACTIVE", true) && effective.isInRenewalGrace) {
+                        val grace = effective.copy(status = "GRACE_PERIOD")
+                        saveStoredSubscription(grace)
+                        setUserSubscription(grace)
+                        return@launch
+                    }
+                    if (com.example.data.SubscriptionReminders.claimInApp(getApplication(), syncManager.getUserId(), effective.expiresAt, effective.renewalReminderDue))
+                        showToast("Renew your NetflixPro membership today. Your renewal allowance ends tomorrow.")
+                    val boundary = if (effective.status.equals("ACTIVE", true)) effective.expiresAt else effective.accessEndsAt
+                    delay((boundary - com.example.data.SubscriptionTime.now()).coerceIn(1L, 60_000L))
                 }
                 if (_userSubscription.value == effective) {
                     val expired = effective.copy(status = "EXPIRED")
@@ -726,14 +746,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     @OptIn(ExperimentalCoroutinesApi::class)
     val continueWatching: StateFlow<List<Pair<MediaItem, WatchProgressEntity>>> = _activeProfile
         .flatMapLatest { profile ->
-            combine(repository.getAllProgress(profile.id), _catalogMedia) { progress, catalog ->
+            combine(repository.getAllProgress(profile.id), _catalogMedia, syncManager.continueWatchingMedia) { progress, catalog, cloudMedia ->
                 val byId = catalog.associateBy { it.id }
                 progress.groupBy { it.mediaId }.mapNotNull { (mediaId, entries) ->
                     val latest = entries.maxByOrNull { it.lastWatchedTimestamp } ?: return@mapNotNull null
                     if (latest.totalSeconds > 0 && latest.positionSeconds >= latest.totalSeconds * 0.95) {
                         return@mapNotNull null
                     }
-                    val media = byId[mediaId] ?: CatalogData.getById(mediaId)
+                    val remoteMedia = cloudMedia[mediaId]
+                    val media = byId[mediaId]?.takeIf { remoteMedia == null || it.type == remoteMedia.type } ?: remoteMedia ?: CatalogData.getById(mediaId)
                     if (media == null) null else Pair(media, latest)
                 }.sortedByDescending { it.second.lastWatchedTimestamp }
             }
@@ -970,7 +991,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         syncManager.listenToContinueWatching(profileId) { updates, removedIds ->
             viewModelScope.launch(Dispatchers.IO) {
                 if (syncManager.getUserId() != uid || _activeProfile.value.id != profileId) return@launch
-                removedIds.forEach { repository.removeProgress(profileId, it) }
+                removedIds.forEach { repository.deleteLegacyRemoteProgress(profileId, it) }
                 updates.forEach { repository.upsertRemoteProgressIfNewer(it) }
             }
         }
@@ -1887,6 +1908,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val ownerProfile = _activeProfile.value.id
 
         if (!isTrailer && syncManager.isAuthenticated() && progressTracker.shouldSave(currentSec)) {
+            val eventTimestamp = com.example.data.ContinueWatchingEventPolicy.newTimestamp()
             viewModelScope.launch {
                 if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
                 repository.saveProgress(
@@ -1897,7 +1919,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     ep?.id,
                     ep?.title,
                     season = coordinates.first,
-                    episode = coordinates.second
+                    episode = coordinates.second,
+                    watchedAt = eventTimestamp
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -1908,7 +1931,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     episodeTitle = ep?.title,
                     season = coordinates.first,
                     episode = coordinates.second,
-                    lastWatchedTimestamp = System.currentTimeMillis()
+                    lastWatchedTimestamp = eventTimestamp
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
                 syncManager.syncWatchProgressToCloud(progressEntity, media)
@@ -1932,13 +1955,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             if (_downloadsForYouEnabled.value && progressTracker.claimSmartDownload()) runSmartDownloadCurator()
             return
         }
-        if (!_isSmartDownloadsEnabled.value || !progressTracker.claimSmartDownload()) return
+        if (!_isSmartDownloadsEnabled.value || !_userSubscription.value.isSmartNextEpisodeAllowed || !progressTracker.claimSmartDownload()) return
         // Cross-season metadata is ready before replacing the watched download.
         val nextMedia = (state.nextEpisodeMedia ?: media).copy(episodes = listOf(episode) + listOfNotNull(state.nextEpisode))
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
         val replacement = {
-            if (syncManager.getUserId() == ownerUid && _activeProfile.value.id == ownerProfile) {
+            if (syncManager.getUserId() == ownerUid && _activeProfile.value.id == ownerProfile && _userSubscription.value.isSmartNextEpisodeAllowed) {
                 downloadManager.handleEpisodeWatched(ownerProfile, nextMedia, episode, true,
                     true, _isHighQualityEnabled.value, _allocatedStorageGb.value,
                     emptyList(), _userSubscription.value.maxDownloads)
@@ -2100,7 +2123,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val coordinates = episodeCoordinates(current.episode?.id)
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
-        if (current.media != null && current.sourceId != "Trailer" && current.currentPositionSec > 0 && syncManager.isAuthenticated()) {
+        if (current.media != null && current.sourceId != "Trailer" && current.currentPositionSec >= 0 && current.resolvedUrl != null && !current.isResolving && syncManager.isAuthenticated()) {
+            val eventTimestamp = com.example.data.ContinueWatchingEventPolicy.newTimestamp()
             viewModelScope.launch {
                 if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
                 repository.saveProgress(
@@ -2111,7 +2135,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     current.episode?.id,
                     current.episode?.title,
                     season = coordinates.first,
-                    episode = coordinates.second
+                    episode = coordinates.second,
+                    watchedAt = eventTimestamp
                 )
                 val progressEntity = WatchProgressEntity(
                     profileId = ownerProfile,
@@ -2122,7 +2147,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     episodeTitle = current.episode?.title,
                     season = coordinates.first,
                     episode = coordinates.second,
-                    lastWatchedTimestamp = System.currentTimeMillis()
+                    lastWatchedTimestamp = eventTimestamp
                 )
                 if (syncManager.getUserId() != ownerUid) return@launch
                 syncManager.syncWatchProgressToCloud(progressEntity, current.media)
@@ -2229,7 +2254,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
-            showToast("Offline downloads not supported on Mobile Plan. Upgrade to Basic or above.")
+            showToast("Renew your membership to download titles for offline viewing.")
+            _showSubscriptionSheet.value = true
+            return
+        }
+        if (isMovieLocked(media)) {
+            showToast("This title is outside your plan. Upgrade to download it.")
             _showSubscriptionSheet.value = true
             return
         }
@@ -2312,6 +2342,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setupDownloadsForYouWithAllocation(allocatedGb: Float) {
+        if (!_userSubscription.value.isDownloadsForYouAllowed) {
+            showToast("Downloads for You is included with Premium."); _showSubscriptionSheet.value = true; return
+        }
         _allocatedStorageGb.value = allocatedGb
         _downloadsForYouEnabled.value = true
         setProfileDownloadAllocation(_activeProfile.value.id, allocatedGb)
@@ -2336,6 +2369,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleDownloadsForYou(enabled: Boolean) {
+        if (enabled && !_userSubscription.value.isDownloadsForYouAllowed) {
+            showToast("Downloads for You is included with Premium."); _showSubscriptionSheet.value = true; return
+        }
         _downloadsForYouEnabled.value = enabled
         prefs.edit().putBoolean("pref_downloads_for_you", enabled).apply()
         if (enabled) runSmartDownloadCurator() else smartCuratorJob?.cancel()
@@ -2345,7 +2381,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun runSmartDownloadCurator() {
         smartCuratorJob?.cancel()
         val subscription = _userSubscription.value
-        if (!_downloadsForYouEnabled.value || !subscription.isActive || subscription.maxDownloads <= 0) return
+        if (!_downloadsForYouEnabled.value || !subscription.isDownloadsForYouAllowed) return
         smartCuratorJob = viewModelScope.launch {
             val profile = _activeProfile.value
             val pool = if (profile.hasMaturityRestriction) {
@@ -2483,7 +2519,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun openCastDialog(show: Boolean) {
         if (show && _userSubscription.value.isGuest) {
-            showToast("Sign in & subscribe to Standard or Premium to cast to TV.")
+            showToast("Sign in & subscribe to Basic or above to cast to TV.")
             _showAuthScreen.value = true
             return
         }
@@ -2511,6 +2547,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleSmartDownloads(enabled: Boolean) {
+        if (enabled && !_userSubscription.value.isSmartNextEpisodeAllowed) {
+            showToast("Download Next Episode is included with Standard and Premium."); _showSubscriptionSheet.value = true; return
+        }
         _isSmartDownloadsEnabled.value = enabled
         prefs.edit().putBoolean("pref_smart_downloads_enabled", enabled).apply()
         showToast("Smart Downloads ${if (enabled) "turned ON" else "turned OFF"}")

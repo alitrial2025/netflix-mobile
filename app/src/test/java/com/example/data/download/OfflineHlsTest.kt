@@ -34,6 +34,28 @@ import java.util.concurrent.ConcurrentHashMap
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class OfflineHlsTest {
+    @Test fun planQualitySelectsAnAvailableVariantWithoutDroppingItsSeparateAudioGroup() {
+        val master = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="audio.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=12000000,RESOLUTION=3840x2160,AUDIO="sound"
+            uhd.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1920x1080,AUDIO="sound"
+            fullhd.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,AUDIO="sound"
+            hd.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480,AUDIO="sound"
+            sd.m3u8
+        """.trimIndent()
+        for ((height, file) in listOf(480 to "sd.m3u8", 720 to "hd.m3u8", 1080 to "fullhd.m3u8", 2160 to "uhd.m3u8")) {
+            val selected = OfflineHlsPlan.variant(master, "https://fixture.test/master.m3u8", true, height)
+            assertEquals("https://fixture.test/$file", selected.url)
+            assertEquals("https://fixture.test/audio.m3u8", selected.audioUrl)
+        }
+        assertEquals("https://fixture.test/hd.m3u8", OfflineHlsPlan.variant(master, "https://fixture.test/master.m3u8", false, 2160).url)
+        assertEquals("https://fixture.test/sd.m3u8", OfflineHlsPlan.variant(master, "https://fixture.test/master.m3u8", true, 360).url)
+    }
+
     private val app = ApplicationProvider.getApplicationContext<Application>()
     private fun media(id: String = "movie") = MediaItem(id, "A movie", MediaType.MOVIE,
         "", "", 90, "16+", 2026, "2h", genres = emptyList(), cast = emptyList(), director = "")

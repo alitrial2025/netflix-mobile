@@ -97,7 +97,7 @@ fun NetflixSettingsScreen(
             "signout" -> Text("Sign out of NetflixPro on this phone? Your account will remain signed in on other devices.")
             else -> Column {
                 Text(currentEmail.orEmpty(), color = Color.White, fontSize = 14.sp)
-                Text("${userSubscription.planName} • ${if (userSubscription.isActive) "Active" else "No active membership"}",
+                Text("${userSubscription.planName} • ${if (userSubscription.isInRenewalGrace) "Renewal overdue" else if (userSubscription.isActive) "Active" else "No active membership"}",
                     color = Color.LightGray, modifier = Modifier.padding(vertical = 12.dp))
                 TextButton(onClick = { navigate(onOpenSubscription) }) { Text("Manage membership", color = Color.White) }
                 TextButton(onClick = { dialog = null; onResetPassword() }, modifier = Modifier.testTag("settings_reset_password")) {
@@ -133,7 +133,7 @@ fun NetflixSettingsScreen(
                 Icons.Outlined.PersonOutline, "settings_account") {
                 if (currentEmail == null) navigate(onOpenAuth) else dialog = "account"
             }
-            SettingsRow("Membership", if (userSubscription.isActive) "${userSubscription.planName} • Active" else "View plans",
+            SettingsRow("Membership", if (userSubscription.isInRenewalGrace) "Renew today • Two-day renewal allowance" else if (userSubscription.isActive) "${userSubscription.planName} • Active" else "View plans",
                 Icons.Outlined.CreditCard, "settings_membership") { navigate(onOpenSubscription) }
             SettingsRow("Manage Profile", activeProfile.name, Icons.Outlined.Edit, "settings_edit_profile") { navigate(onEditProfile) }
             SettingsRow("Switch Profile", null, Icons.Outlined.SwapHoriz, "settings_switch_profile") { navigate(onSwitchProfile) }
@@ -151,7 +151,9 @@ fun NetflixSettingsScreen(
 
             SettingsSection("Downloads")
             SettingsToggle("Wi-Fi Only Downloads", "Applies to downloads on this phone", wifiOnlyEnabled, onToggleWifiOnly)
-            SettingsToggle("Download Next Episode", "Replace watched episodes on Wi-Fi", smartDownloadsEnabled, onToggleSmartDownloads)
+            SettingsToggle("Download Next Episode", if (userSubscription.isSmartNextEpisodeAllowed) "Replace watched episodes on Wi-Fi"
+                else "Included with Standard and Premium", smartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
+                onToggleSmartDownloads, enabled = userSubscription.isSmartNextEpisodeAllowed)
             SettingsRow("Smart Downloads", "Next episode, Downloads for You and storage", Icons.Outlined.DownloadForOffline,
                 "settings_smart_downloads") { navigate(onOpenSmartDownloads) }
             SettingsRow("Delete All Downloads", "For ${activeProfile.name}", Icons.Outlined.DeleteOutline,

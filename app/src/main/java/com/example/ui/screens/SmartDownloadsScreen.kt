@@ -29,7 +29,8 @@ fun SmartDownloadsScreen(
     profiles: List<UserProfile>, allocations: Map<String, Float>, nextEpisodeEnabled: Boolean,
     forYouEnabled: Boolean, freeBytes: Long?, usedMb: Long, onBack: () -> Unit,
     onNextEpisode: (Boolean) -> Unit, onForYou: (Boolean) -> Unit,
-    onAllocation: (String, Float) -> Unit, onSearch: () -> Unit = {}, onProfile: () -> Unit = {}
+    onAllocation: (String, Float) -> Unit, onSearch: () -> Unit = {}, onProfile: () -> Unit = {},
+    nextEpisodeAllowed: Boolean = true, forYouAllowed: Boolean = true, onUpgrade: () -> Unit = {}
 ) {
     BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().testTag("smart_downloads_screen")) {
@@ -42,11 +43,13 @@ fun SmartDownloadsScreen(
         LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
             item {
                 SmartDownloadsToggle("Download Next Episode", "As you watch a downloaded series, download the next episode and remove the one you’ve finished. Downloads use Wi-Fi.",
-                    nextEpisodeEnabled, Icons.Default.SkipNext, "smart_next_episode", onNextEpisode)
+                    nextEpisodeEnabled && nextEpisodeAllowed, Icons.Default.SkipNext, "smart_next_episode", onNextEpisode,
+                    nextEpisodeAllowed, "Included with Standard and Premium", onUpgrade)
             }
             item {
                 SmartDownloadsToggle("Downloads for You", "Download a selection of movies and shows so you always have something to watch. Downloads use Wi-Fi.",
-                    forYouEnabled, Icons.Default.DownloadDone, "smart_for_you", onForYou)
+                    forYouEnabled && forYouAllowed, Icons.Default.DownloadDone, "smart_for_you", onForYou,
+                    forYouAllowed, "Included with Premium", onUpgrade)
             }
             item {
                 Row(verticalAlignment = Alignment.Top) {
@@ -88,13 +91,15 @@ fun SmartDownloadsScreen(
 
 @Composable
 private fun SmartDownloadsToggle(title: String, description: String, checked: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector, tag: String, onToggle: (Boolean) -> Unit) {
+    icon: androidx.compose.ui.graphics.vector.ImageVector, tag: String, onToggle: (Boolean) -> Unit,
+    allowed: Boolean, upgradeLabel: String, onUpgrade: () -> Unit) {
     Column {
         Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        if (!allowed) TextButton(onClick = onUpgrade) { Text(upgradeLabel, color = Color.White) }
         Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = Color.White, modifier = Modifier.padding(end = 14.dp))
             Text(description, color = Color.LightGray, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
-            Switch(checked, onCheckedChange = onToggle, modifier = Modifier.padding(start = 12.dp).testTag(tag),
+            Switch(checked, onCheckedChange = onToggle, enabled = allowed, modifier = Modifier.padding(start = 12.dp).testTag(tag),
                 colors = netflixProSwitchColors())
         }
     }

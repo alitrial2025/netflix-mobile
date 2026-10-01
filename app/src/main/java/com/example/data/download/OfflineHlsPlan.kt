@@ -13,7 +13,7 @@ internal object OfflineHlsPlan {
     fun attributes(line: String): Map<String, String> = attributes.findAll(line.substringAfter(':'))
         .associate { it.groupValues[1] to it.groupValues[2].removeSurrounding("\"") }
 
-    fun variant(master: String, url: String, highQuality: Boolean): OfflineHlsVariant {
+    fun variant(master: String, url: String, highQuality: Boolean, maxVideoHeight: Int = Int.MAX_VALUE): OfflineHlsVariant {
         val lines = master.lines().map { it.trim() }
         require(lines.firstOrNull() == "#EXTM3U") { "Invalid download playlist" }
         val variants = lines.mapIndexedNotNull { index, line ->
@@ -25,7 +25,12 @@ internal object OfflineHlsPlan {
             }
         }.sortedByDescending { it.first["BANDWIDTH"]?.toLongOrNull() ?: 0L }
         if (variants.isEmpty()) return OfflineHlsVariant(url, 0, null, null, null, null)
-        val (data, video) = variants[if (highQuality) 0 else variants.size / 2]
+        val limit = if (highQuality) maxVideoHeight else minOf(maxVideoHeight, 720)
+        val eligible = variants.filter { (it.first["RESOLUTION"]?.substringAfter('x')?.toIntOrNull() ?: 0) <= limit }
+        // A fixed-resolution provider stream cannot be transcoded here. Preserve playback
+        // using the lowest available variant when the provider offers no smaller source.
+        val choices = eligible.ifEmpty { listOf(variants.last()) }
+        val (data, video) = choices.first()
         val group = data["AUDIO"]
         val audios = lines.filter { it.startsWith("#EXT-X-MEDIA:") }.map(::attributes)
             .filter { it["TYPE"] == "AUDIO" && it["GROUP-ID"] == group }

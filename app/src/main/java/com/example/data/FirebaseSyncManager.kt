@@ -71,7 +71,10 @@ class FirebaseSyncManager(private val context: Context) {
     val pairedTvSessions: StateFlow<List<TvSessionData>> = _pairedTvSessions.asStateFlow()
 
     private var profileListener: ListenerRegistration? = null
+    private val continueWatchingGeneration = java.util.concurrent.atomic.AtomicLong(0L)
     private var continueWatchingListener: ListenerRegistration? = null
+    private val _continueWatchingMedia = MutableStateFlow<Map<String, MediaItem>>(emptyMap())
+    val continueWatchingMedia: StateFlow<Map<String, MediaItem>> = _continueWatchingMedia.asStateFlow()
     private var myListListener: ListenerRegistration? = null
     private var watchHistoryListener: ListenerRegistration? = null
     private var subscriptionListener: ListenerRegistration? = null
@@ -100,6 +103,7 @@ class FirebaseSyncManager(private val context: Context) {
                     observedUid = user?.uid
                     _currentUserEmail.value = user?.email
                     if (user != null) {
+                        if (!user.isAnonymous) ContinueWatchingOutbox.resume(context)
                         _lastSyncStatus.value = "Connected as ${user.email}"
                     } else {
                         cleanupListeners()
@@ -413,6 +417,9 @@ class FirebaseSyncManager(private val context: Context) {
                     }
                     if (snapshot?.metadata?.hasPendingWrites() == true) return@addSnapshotListener
                     if (snapshot != null && snapshot.exists()) {
+                        if (!snapshot.metadata.isFromCache) runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()?.let {
+                            SubscriptionTime.observeServerTimestamp(it)
+                        }
                         val status = snapshot.getString("status") ?: "NONE"
                         val planId = snapshot.getString("planId") ?: "plan_guest"
                         val planName = snapshot.getString("planName") ?: "Guest"
@@ -541,7 +548,7 @@ class FirebaseSyncManager(private val context: Context) {
                     val durMs = progress.totalSeconds * 1000L
                     val isCompleted = progress.totalSeconds > 0 &&
                         progress.positionSeconds >= (progress.totalSeconds * 0.95)
-                    val removeFromContinue = isCompleted && media?.type?.name != "TV_SHOW"
+                    val removeFromContinue = isCompleted && media?.type == com.example.data.model.MediaType.MOVIE
 
                     val data = hashMapOf(
                         "profileId" to progress.profileId,
@@ -573,31 +580,8 @@ class FirebaseSyncManager(private val context: Context) {
                         data["logoUrl"] = media.logoUrl.orEmpty()
                     }
 
-                    // Commit progress and durable history together.
-                    val batch = db.batch()
-                    if (removeFromContinue) {
-                        batch.delete(continueDocRef)
-                        batch.delete(db.collection("users").document(user.uid)
-                            .collection("profiles").document(progress.profileId)
-                            .collection("continue_watching").document(progress.mediaId))
-                        batch.delete(db.collection("users").document(user.uid)
-                            .collection("profiles").document(progress.profileId)
-                            .collection("continueWatching").document(progress.mediaId))
-                    } else {
-                        batch.set(continueDocRef, data, SetOptions.merge())
-                    }
-
-                    // 2. users/{uid}/profiles/{profileId}/watch_history/{mediaId}
-                    val profileHistoryRef = db.collection("users").document(user.uid)
-                        .collection("profiles").document(progress.profileId)
-                        .collection("watch_history").document(progress.mediaId)
-                    batch.set(profileHistoryRef, data, SetOptions.merge())
-
-                    // 3. users/{uid}/watch_history/{docId}
-                    val userHistoryRef = db.collection("users").document(user.uid)
-                        .collection("watch_history").document(docId)
-                    batch.set(userHistoryRef, data, SetOptions.merge())
-                    batch.commit().await()
+                    data["isRemoved"] = removeFromContinue
+                    ContinueWatchingOutbox.enqueue(context, ownerUid, progress.profileId, progress.mediaId, data)
 
                     Log.d("FirebaseSync", "✅ Synced continue watching and watch history for ${progress.mediaId}")
                 }
@@ -615,25 +599,40 @@ class FirebaseSyncManager(private val context: Context) {
         profileId: String,
         onProgressUpdated: (List<WatchProgressEntity>, List<String>) -> Unit
     ) {
+        val generation = continueWatchingGeneration.incrementAndGet()
         val db = firestore
         val user = auth?.currentUser
+        _continueWatchingMedia.value = emptyMap()
         if (db != null && isFirebaseReady && user != null) {
             continueWatchingListener?.remove()
             continueWatchingListener = db.collection("users").document(user.uid)
                 .collection("continue_watching")
                 .whereEqualTo("profileId", profileId)
                 .addSnapshotListener { snapshot, error ->
+                    if (continueWatchingGeneration.get() != generation || auth?.currentUser?.uid != user.uid) return@addSnapshotListener
                     if (error != null) {
                         if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                             Log.d("FirebaseSync", "Continue watching permission notice (using local Room DB)")
                             continueWatchingListener?.remove()
                             continueWatchingListener = null
+                            _continueWatchingMedia.value = emptyMap()
                         } else {
                             Log.w("FirebaseSync", "Continue watching listener notice: ${error.message}")
                         }
                         return@addSnapshotListener
                     }
-                    if (snapshot != null) {
+                    if (snapshot != null && auth?.currentUser?.uid == user.uid) {
+                        _continueWatchingMedia.value = snapshot.documents.filter { it.getBoolean("isRemoved") != true }
+                            .mapNotNull { doc ->
+                                val id = doc.getString("mediaId") ?: return@mapNotNull null
+                                val title = doc.getString("title")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                                val type = if (doc.getString("type").equals("Series", true) || doc.getString("type").equals("TV_SHOW", true))
+                                    com.example.data.model.MediaType.TV_SHOW else com.example.data.model.MediaType.MOVIE
+                                id to MediaItem(id, title, type, doc.getString("description").orEmpty(), "", 0,
+                                    doc.getString("rating") ?: "18+", doc.getString("year")?.toIntOrNull() ?: 0,
+                                    doc.getString("duration").orEmpty(), isOriginal = false, genres = emptyList(), cast = emptyList(), director = "",
+                                    posterUrl = doc.getString("posterUrl"), backdropUrl = doc.getString("backdropUrl"), logoUrl = doc.getString("logoUrl"))
+                            }.toMap()
                         val removed = snapshot.documentChanges
                             .filter { it.type == DocumentChange.Type.REMOVED }
                             .mapNotNull { it.document.getString("mediaId") }
@@ -654,13 +653,14 @@ class FirebaseSyncManager(private val context: Context) {
                                 WatchProgressEntity(
                                     profileId = doc.getString("profileId") ?: profileId,
                                     mediaId = doc.getString("mediaId") ?: return@mapNotNull null,
-                                    positionSeconds = posSec,
-                                    totalSeconds = totalSec,
-                                    episodeId = doc.getString("episodeId") ?: "",
+                                    positionSeconds = if (doc.getBoolean("isRemoved") == true) totalSec.coerceAtLeast(1) else posSec,
+                                    totalSeconds = totalSec.coerceAtLeast(1),
+                                    episodeId = if (doc.getString("episodeId").isNullOrBlank()) "" else
+                                        ContinueWatchingEventPolicy.mobileEpisodeId(doc.getString("mediaId").orEmpty(), seasonVal, epVal),
                                     episodeTitle = epTitle,
                                     season = seasonVal,
                                     episode = epVal,
-                                    lastWatchedTimestamp = doc.getLong("lastWatchedTimestamp") ?: System.currentTimeMillis()
+                                    lastWatchedTimestamp = doc.getLong("lastWatchedTimestamp") ?: 0L
                                 )
                             } catch (e: Exception) {
                                 null
@@ -678,19 +678,11 @@ class FirebaseSyncManager(private val context: Context) {
         val user = auth?.currentUser ?: return false
         val db = firestore ?: return false
         return try {
-            val batch = db.batch()
-            batch.delete(db.collection("users").document(user.uid)
-                .collection("continue_watching").document(profileId + "_" + mediaId))
-            batch.delete(db.collection("users").document(user.uid)
-                .collection("profiles").document(profileId)
-                .collection("continue_watching").document(mediaId))
-            // Watch history is intentionally retained.
-            batch.commit().await()
+            ContinueWatchingOutbox.enqueue(context, user.uid, profileId, mediaId, mapOf(
+                "profileId" to profileId, "mediaId" to mediaId, "isRemoved" to true,
+                "lastWatchedTimestamp" to ContinueWatchingEventPolicy.newTimestamp()))
             true
-        } catch (e: Exception) {
-            Log.w("FirebaseSync", "Continue Watching removal sync failed: " + e.message)
-            false
-        }
+        } catch (_: Exception) { false }
     }
 
     // ==========================================
@@ -899,8 +891,10 @@ class FirebaseSyncManager(private val context: Context) {
     private fun cleanupListeners() {
         profileListener?.remove()
         profileListener = null
+        continueWatchingGeneration.incrementAndGet()
         continueWatchingListener?.remove()
         continueWatchingListener = null
+        _continueWatchingMedia.value = emptyMap()
         myListListener?.remove()
         myListListener = null
         watchHistoryListener?.remove()

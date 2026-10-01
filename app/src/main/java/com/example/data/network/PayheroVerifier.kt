@@ -2,6 +2,7 @@ package com.example.data.network
 
 import android.content.Context
 import android.util.Log
+import com.example.data.billing.PaymentEvidence
 import com.example.data.model.SubscriptionPlan
 import com.example.data.model.SubscriptionPlans
 import com.example.data.model.UserSubscription
@@ -127,11 +128,12 @@ object PayheroVerifier {
             }
 
             val payment = lookupPayment(code, planPrice, paymentReference)
+            com.example.data.SubscriptionTime.synchronize(payment.serverTimeMs)
             currentCoroutineContext().ensureActive()
             if (auth.currentUser?.uid != userId) throw PaymentError("Your account changed. Sign in again to continue.")
 
             // Receipt consumption and all entitlement mirrors commit together.
-            // Retrying the same code cannot add another month, including on two phones.
+            // Retrying the same code cannot add another 30-day period, including on two phones.
             val subscription = db.runTransaction { transaction ->
                 if (auth.currentUser?.uid != userId) throw PaymentError("Your account changed. Sign in again to continue.")
                 val redeemed = transaction.get(receiptRef)
@@ -171,7 +173,7 @@ object PayheroVerifier {
                 }
             }.await()
             if (auth.currentUser?.uid != userId) throw PaymentError("Payment was saved to the original account. Sign in to that account to see it.")
-            VerificationResult.Success(subscription, payment.amount, "Payment verified. Your ${plan.name} membership is active for one month.")
+            VerificationResult.Success(subscription, payment.amount, "Payment verified. Your ${plan.name} membership is active for 30 days.")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -244,15 +246,9 @@ object PayheroVerifier {
         else -> emptyList()
     }
 
-    private fun textField(item: JSONObject, vararg names: String): String = names.asSequence()
-        .map { item.optString(it, "").trim() }.firstOrNull { it.isNotEmpty() && it != "null" }.orEmpty()
-
-    private fun hasReceipt(item: JSONObject, receipt: String): Boolean = textField(item,
-        "provider_reference", "MpesaReceiptNumber", "providerReference", "mpesa_receipt", "third_party_reference"
-    ).uppercase(Locale.ROOT) == receipt
-
-    private fun amount(item: JSONObject): Double? = item.opt("amount")?.toString()?.toDoubleOrNull()
-        ?.takeIf { it.isFinite() && it > 0.0 }
+    private fun textField(item: JSONObject, vararg names: String) = PaymentEvidence.text(item, *names)
+    private fun hasReceipt(item: JSONObject, receipt: String) = PaymentEvidence.hasReceipt(item, receipt)
+    private fun amount(item: JSONObject) = PaymentEvidence.amount(item)
 
     private fun lookupPayment(code: String, price: Int, checkoutReference: String): GatewayPayment {
         // PayHero documents receipt lookup on transaction-status; /payments is
@@ -260,26 +256,14 @@ object PayheroVerifier {
         val response = gatewayGet("transaction-status", mapOf("reference" to code))
         val payment = records(response.json).singleOrNull { hasReceipt(it, code) }
             ?: throw PaymentError("No exact payment found for this M-Pesa code. Confirm the SMS code and retry.")
-        if (!textField(payment, "status", "Status").equals("SUCCESS", true) ||
-            (payment.has("success") && !payment.optBoolean("success"))) {
-            throw PaymentError("This payment is not completed yet. Wait for the M-Pesa confirmation and retry.")
-        }
-        val provider = textField(payment, "provider", "gateway").lowercase(Locale.ROOT)
-        if (provider.isNotEmpty() && provider !in setOf("m-pesa", "mpesa")) throw PaymentError("Only completed M-Pesa payments can activate this plan.")
-        val reference = textField(payment, "payment_reference", "external_reference", "user_reference")
-        if (reference != checkoutReference) throw PaymentError("This payment does not match checkout for this account and plan. Use the code from checkout opened inside this app.")
-        val currency = textField(payment, "currency")
-        if (currency.isNotEmpty() && !currency.equals("KES", true)) throw PaymentError("The payment must be in Kenyan shillings (KES).")
-        val direction = textField(payment, "transaction_type", "type").lowercase(Locale.ROOT)
-        if (direction.contains("withdraw") || direction.contains("charge") || direction.contains("payout")) throw PaymentError("This transaction is not a membership payment.")
-
-        // The legacy status response can omit the amount. Get the exact receipt
-        // from the authenticated merchant's transaction ledger in that case.
+        try { PaymentEvidence.validateTransaction(payment, code, checkoutReference) }
+        catch (error: IllegalArgumentException) { throw PaymentError(error.message ?: "Invalid payment evidence") }
+        // The legacy status response can omit the amount. Confirm it against the
+        // same receipt in the authenticated merchant ledger before activating.
         val paid = amount(payment) ?: lookupReceiptAmount(code)
-        if (paid < price || paid > Int.MAX_VALUE || paid % 1.0 != 0.0) {
-            throw PaymentError("The confirmed amount is insufficient or invalid for this plan (KES $price).")
-        }
-        return GatewayPayment(paid.toInt(), response.serverTimeMs, textField(payment, "reference"))
+        val confirmed = try { PaymentEvidence.validate(payment, code, checkoutReference, price, paid) }
+            catch (error: IllegalArgumentException) { throw PaymentError(error.message ?: "Invalid payment evidence") }
+        return GatewayPayment(confirmed, response.serverTimeMs, textField(payment, "reference"))
     }
 
     private fun lookupReceiptAmount(code: String): Double {
@@ -292,10 +276,13 @@ object PayheroVerifier {
             if (item != null) {
                 val type = textField(item, "transaction_type").lowercase(Locale.ROOT)
                 val currency = textField(item, "currency")
-                if (type.contains("withdraw") || type.contains("charge") || type.contains("payout") ||
+                if (listOf("withdraw", "charge", "payout", "refund", "revers").any { type.contains(it) } ||
                     (currency.isNotEmpty() && !currency.equals("KES", true))) {
                     throw PaymentError("This receipt is not an incoming KES membership payment.")
                 }
+                val ledgerStatus = textField(item, "status", "Status")
+                if (ledgerStatus.isNotBlank() && !ledgerStatus.equals("SUCCESS", true))
+                    throw PaymentError("This receipt is not a completed membership payment.")
                 return amount(item) ?: throw PaymentError("The gateway could not confirm the paid amount.")
             }
             val pagination = (response.json as? JSONObject)?.optJSONObject("pagination")

@@ -1,8 +1,6 @@
 package com.example.data.model
 
 import androidx.compose.runtime.Immutable
-import java.util.Calendar
-import java.util.TimeZone
 
 @Immutable
 data class SubscriptionPlan(
@@ -19,14 +17,29 @@ data class SubscriptionPlan(
     val spatialAudio: Boolean,
     val isPopular: Boolean = false,
     val catalogAccess: String = "Full catalog"
-)
+) {
+    val durationDays: Int get() = 30
+    val maxVideoHeight: Int get() = when (id) {
+        "plan_mobile" -> 480; "plan_basic" -> 720; "plan_standard" -> 1080
+        "plan_premium" -> 2160; else -> 0
+    }
+    val maxDownloads: Int get() = when (id) {
+        "plan_mobile" -> 3; "plan_basic" -> 5; "plan_standard" -> 25
+        "plan_premium" -> 999; else -> 0
+    }
+    val smartNextEpisode: Boolean get() = id == "plan_standard" || id == "plan_premium"
+    val downloadsForYou: Boolean get() = id == "plan_premium"
+    val clips: Boolean get() = id == "plan_premium"
+    val games: Boolean get() = id == "plan_standard" || id == "plan_premium"
+}
+
 
 object SubscriptionPlans {
     val PLANS = listOf(
         SubscriptionPlan(
             id = "plan_mobile",
             name = "Mobile",
-            priceKes = 200,
+            priceKes = 150,
             priceUsd = "$2.00",
             quality = "Good",
             resolution = "480p (SD)",
@@ -41,11 +54,11 @@ object SubscriptionPlans {
         SubscriptionPlan(
             id = "plan_basic",
             name = "Basic",
-            priceKes = 600,
+            priceKes = 550,
             priceUsd = "$6.00",
             quality = "Good",
             resolution = "720p (HD)",
-            supportedDevices = "TV, computer, mobile phone, tablet",
+            supportedDevices = "Android TV, mobile phone, tablet",
             screens = 1,
             maxProfiles = 2,
             downloadDevices = 1,
@@ -56,11 +69,11 @@ object SubscriptionPlans {
         SubscriptionPlan(
             id = "plan_standard",
             name = "Standard",
-            priceKes = 1000,
+            priceKes = 950,
             priceUsd = "$10.00",
             quality = "Great",
             resolution = "1080p (Full HD)",
-            supportedDevices = "TV, computer, mobile phone, tablet",
+            supportedDevices = "Android TV, mobile phone, tablet",
             screens = 2,
             maxProfiles = 4,
             downloadDevices = 2,
@@ -71,11 +84,11 @@ object SubscriptionPlans {
         SubscriptionPlan(
             id = "plan_premium",
             name = "Premium",
-            priceKes = 1400,
+            priceKes = 1350,
             priceUsd = "$14.00",
             quality = "Best",
-            resolution = "4K (Ultra HD) + HDR",
-            supportedDevices = "TV, computer, mobile phone, tablet",
+            resolution = "Up to 4K + HDR",
+            supportedDevices = "Android TV, mobile phone, tablet",
             screens = 4,
             maxProfiles = 5,
             downloadDevices = 6,
@@ -89,14 +102,14 @@ object SubscriptionPlans {
         return PLANS.find { it.id == id } ?: PLANS[2]
     }
 
-    /** Extend from the current expiry on early renewal, or from payment time. */
+    const val PERIOD_MS = 30L * 24 * 60 * 60 * 1000
+
+    /** Every payment adds exactly 30 days; early same-plan renewals retain paid time. */
     fun oneMonthExpiry(paymentTimeMs: Long, currentExpiryMs: Long = 0L): Long {
-        val start = maxOf(paymentTimeMs, currentExpiryMs)
-        return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-            timeInMillis = start
-            add(Calendar.MONTH, 1)
-        }.timeInMillis
+        require(paymentTimeMs > 0 && currentExpiryMs >= 0) { "Invalid membership time" }
+        return Math.addExact(maxOf(paymentTimeMs, currentExpiryMs), PERIOD_MS)
     }
+
 }
 
 @Immutable
@@ -111,13 +124,20 @@ data class UserSubscription(
     val subscribedAt: Long = 0L,
     val expiresAt: Long = 0L
 ) {
+    companion object {
+        @Volatile var clock: () -> Long = { System.currentTimeMillis() }
+    }
+
     val isGuest: Boolean
         get() = planId == "plan_guest"
 
     val isActive: Boolean
         get() = SubscriptionPlans.PLANS.any { it.id == planId } &&
-            status.equals("ACTIVE", ignoreCase = true) &&
-            expiresAt > System.currentTimeMillis()
+            com.example.data.RenewalPolicy.grantsAccess(status, expiresAt, clock())
+
+    val accessEndsAt: Long get() = com.example.data.RenewalPolicy.accessEndsAt(expiresAt)
+    val isInRenewalGrace: Boolean get() = isActive && expiresAt <= clock()
+    val renewalReminderDue: Boolean get() = isActive && com.example.data.RenewalPolicy.reminderDue(expiresAt, clock())
 
     val isTvAllowed: Boolean
         get() = isActive && !planId.equals("plan_mobile", ignoreCase = true)
@@ -139,19 +159,25 @@ data class UserSubscription(
         }
 
     val maxDownloads: Int
-        get() = if (!isActive) 0 else when (planId) {
-            "plan_guest" -> 0
-            "plan_mobile" -> 0
-            "plan_basic" -> 5
-            "plan_standard" -> 25
-            "plan_premium" -> 999
-            else -> 0
-        }
+        get() = if (!isActive) 0 else SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.maxDownloads ?: 0
+
+    val maxVideoHeight: Int
+        get() = if (!isActive) 0 else SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.maxVideoHeight ?: 0
+
+    val isSmartNextEpisodeAllowed: Boolean
+        get() = isActive && SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.smartNextEpisode == true
+
+    val isDownloadsForYouAllowed: Boolean
+        get() = isActive && SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.downloadsForYou == true
+
+    val isSpatialAudioAllowed: Boolean
+        get() = isActive && SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.spatialAudio == true
+
 
     val daysRemaining: Int
         get() = if (isActive) {
-            val remaining = expiresAt - System.currentTimeMillis()
-            ((remaining + 86_399_999L) / 86_400_000L).toInt().coerceAtLeast(1)
+            val remaining = (expiresAt - clock()).coerceAtLeast(0L)
+            ((remaining + 86_399_999L) / 86_400_000L).toInt().coerceAtLeast(0)
         } else 0
 
     /**

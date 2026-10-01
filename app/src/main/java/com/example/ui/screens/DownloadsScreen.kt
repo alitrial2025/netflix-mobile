@@ -97,9 +97,12 @@ fun DownloadsScreen(
         val allocations = profileAllocations + (activeProfile.id to (profileAllocations[activeProfile.id] ?: allocatedStorageGb))
         SmartDownloadsScreen(profiles.sortedByDescending { it.id == activeProfile.id }, allocations, smartDownloadsEnabled,
             downloadsForYouEnabled, storage?.second, ready.filter { it.isForYou }.sumOf { it.fileSizeMb.toLong() },
-            onBack = { settings = false }, onNextEpisode = { if (canDownload) onToggleSmartDownloads(it) else requirePlan() },
-            onForYou = { if (canDownload) onToggleDownloadsForYou(it) else requirePlan() }, onAllocation = onProfileAllocation,
-            onSearch = onOpenSearch, onProfile = onOpenProfiles)
+            onBack = { settings = false }, onNextEpisode = { if (userSubscription.isSmartNextEpisodeAllowed) onToggleSmartDownloads(it) else requirePlan() },
+            onForYou = { if (userSubscription.isDownloadsForYouAllowed) onToggleDownloadsForYou(it) else requirePlan() }, onAllocation = onProfileAllocation,
+            onSearch = onOpenSearch, onProfile = onOpenProfiles,
+            nextEpisodeAllowed = userSubscription.isSmartNextEpisodeAllowed,
+            forYouAllowed = userSubscription.isDownloadsForYouAllowed,
+            onUpgrade = requirePlan)
         return
     }
     if (setup) {
@@ -160,7 +163,7 @@ fun DownloadsScreen(
                         Text("Introducing Downloads for You", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Text("We’ll download a selection of movies and shows so there’s always something to watch on your phone.", color = Color.LightGray, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp))
                         DownloadPosterFan(catalogMedia, Modifier.fillMaxWidth().height(230.dp))
-                        Button(onClick = { if (canDownload) setup = true else requirePlan() }, shape = RoundedCornerShape(3.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)), modifier = Modifier.fillMaxWidth().height(48.dp).testTag("downloads_for_you_setup")) {
+                        Button(onClick = { if (canDownload) if (userSubscription.isDownloadsForYouAllowed) setup = true else requirePlan() else requirePlan() }, shape = RoundedCornerShape(3.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)), modifier = Modifier.fillMaxWidth().height(48.dp).testTag("downloads_for_you_setup")) {
                             Text(if (userSubscription.isGuest) "Sign in to download" else "Set up", fontWeight = FontWeight.Bold)
                         }
                     }

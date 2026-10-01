@@ -10,8 +10,10 @@ import com.example.data.local.WatchlistEntity
 import com.example.data.model.MediaItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.withLock
 
 class NetflixRepository(private val dao: NetflixDao) {
+    private val progressMutex = kotlinx.coroutines.sync.Mutex()
 
     fun getWatchlistEntries(profileId: String): Flow<List<WatchlistEntity>> = dao.getWatchlist(profileId)
 
@@ -79,8 +81,11 @@ class NetflixRepository(private val dao: NetflixDao) {
         episodeId: String?,
         episodeTitle: String?,
         season: Int = 1,
-        episode: Int = 1
-    ) {
+        episode: Int = 1,
+        watchedAt: Long = com.example.data.ContinueWatchingEventPolicy.newTimestamp()
+    ) = progressMutex.withLock {
+        val existing = dao.getProgressOnce(profileId, mediaId)
+        if (!com.example.data.ContinueWatchingEventPolicy.isNewer(watchedAt, existing?.lastWatchedTimestamp)) return@withLock
         dao.saveProgress(
             WatchProgressEntity(
                 profileId = profileId,
@@ -91,18 +96,26 @@ class NetflixRepository(private val dao: NetflixDao) {
                 episodeTitle = episodeTitle,
                 season = season,
                 episode = episode,
-                lastWatchedTimestamp = System.currentTimeMillis()
+                lastWatchedTimestamp = watchedAt
             )
         )
     }
 
-    suspend fun removeProgress(profileId: String, mediaId: String) {
+    suspend fun removeProgress(profileId: String, mediaId: String) = progressMutex.withLock {
+        val existing = dao.getProgressOnce(profileId, mediaId)
+        if (existing != null) dao.saveProgress(existing.copy(
+            positionSeconds = existing.totalSeconds.coerceAtLeast(1),
+            totalSeconds = existing.totalSeconds.coerceAtLeast(1),
+            lastWatchedTimestamp = com.example.data.ContinueWatchingEventPolicy.newTimestamp()))
+    }
+
+    suspend fun deleteLegacyRemoteProgress(profileId: String, mediaId: String) = progressMutex.withLock {
         dao.removeProgress(profileId, mediaId)
     }
 
-    suspend fun upsertRemoteProgressIfNewer(progress: WatchProgressEntity) {
+    suspend fun upsertRemoteProgressIfNewer(progress: WatchProgressEntity) = progressMutex.withLock {
         val existing = dao.getProgressOnce(progress.profileId, progress.mediaId)
-        if (existing == null || progress.lastWatchedTimestamp > existing.lastWatchedTimestamp) {
+        if (com.example.data.ContinueWatchingEventPolicy.isNewer(progress.lastWatchedTimestamp, existing?.lastWatchedTimestamp)) {
             dao.saveProgress(progress)
         }
     }
