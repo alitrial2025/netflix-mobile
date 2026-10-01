@@ -134,6 +134,7 @@ fun AvatarPickerSheet(
 
         // Category Filter Chips
         LazyRow(
+            modifier = Modifier.testTag("avatar_categories"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {

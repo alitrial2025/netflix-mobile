@@ -33,7 +33,9 @@ class AvatarPickerInteractionTest {
         rule.onNodeWithContentDescription("Classic Icons icon 2").performClick()
         assertEquals(listOf(classic.icons[1]), picked)
 
-        rule.onNodeWithTag("avatar_category_wednesday").performScrollTo().performClick().assertIsSelected()
+        rule.onNodeWithTag("avatar_categories").performScrollToIndex(
+            ProfileIconCatalog.categories.indexOf(wednesday) + 1)
+        rule.onNodeWithTag("avatar_category_wednesday").performClick().assertIsSelected()
         rule.onNodeWithContentDescription("Wednesday icon 1").performClick()
         assertEquals(wednesday.icons.first(), picked.last())
         rule.onNodeWithTag("avatar_picker_back_button").performClick()
