@@ -52,6 +52,8 @@ class NetflixRepository(private val dao: NetflixDao) {
 
     fun getProgress(profileId: String, mediaId: String): Flow<WatchProgressEntity?> = dao.getProgress(profileId, mediaId)
 
+    fun getAllRatings(profileId: String): Flow<List<RatingEntity>> = dao.getAllRatings(profileId)
+
     fun getRating(profileId: String, mediaId: String): Flow<RatingEntity?> = dao.getRating(profileId, mediaId)
 
     suspend fun isInWatchlistOnce(profileId: String, mediaId: String): Boolean =

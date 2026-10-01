@@ -37,12 +37,14 @@ class ProfilePreferencesTest {
             db.execSQL("ALTER TABLE downloads_legacy RENAME TO downloads")
             db.version = 7
         }
-        val upgraded = Room.databaseBuilder(app, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_7_8).build()
+        val upgraded = Room.databaseBuilder(app, AppDatabase::class.java, name)
+            .addMigrations(AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9).build()
         try {
             val profile = upgraded.netflixDao().getAllProfilesList().single().toUserProfile()
             assertEquals("Alex", profile.name)
             assertEquals("Original", profile.audioLanguage)
             assertEquals("Off", profile.subtitleLanguage)
+            assertTrue(profile.favoriteGenres.isEmpty())
             val download = upgraded.netflixDao().getAllDownloadsOnce("p1").single()
             assertEquals("/existing/movie.mp4", download.localFilePath)
             assertFalse(download.isForYou)
@@ -59,7 +61,8 @@ class ProfilePreferencesTest {
     }
 
     @Test fun profileLanguagePreferencesRoundTripAndMapToActualTrackLanguageCodes() {
-        val profile = UserProfile("p", "Alex", audioLanguage = "French", subtitleLanguage = "Japanese")
+        val profile = UserProfile("p", "Alex", audioLanguage = "French", subtitleLanguage = "Japanese",
+            favoriteGenres = listOf("Drama", "Mystery"))
         assertEquals(profile, profile.toEntity().toUserProfile())
         assertEquals("fr", playbackLanguageCode(profile.audioLanguage))
         assertEquals("ja", playbackLanguageCode(profile.subtitleLanguage))

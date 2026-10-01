@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import com.example.discovery.recommendationTitle
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -120,7 +122,7 @@ fun MediaSectionRow(
                     key = { _, item -> item.id },
                     contentType = { _, _ -> "top10_media_item" }
                 ) { index, item ->
-                    val isReminded = remember(reminders, item.id) { reminders.any { it.mediaId == item.id } }
+                    val isReminded = remember(reminders, item.id, item.type) { reminders.any { it.mediaId == item.recommendationTitle().key } }
                     val isItemComingSoon = item.isComingSoon || isComingSoonRow
                     val isLocked = remember(item.id, isMediaLocked) { isMediaLocked?.invoke(item) ?: false }
                     val onClick = remember(item, onMediaClick, onToggleReminder, isItemComingSoon) {
@@ -155,7 +157,7 @@ fun MediaSectionRow(
                     key = { it.id },
                     contentType = { "media_item" }
                 ) { item ->
-                    val isReminded = remember(reminders, item.id) { reminders.any { it.mediaId == item.id } }
+                    val isReminded = remember(reminders, item.id, item.type) { reminders.any { it.mediaId == item.recommendationTitle().key } }
                     val isItemComingSoon = item.isComingSoon || isComingSoonRow
                     val isLocked = remember(item.id, isMediaLocked) { isMediaLocked?.invoke(item) ?: false }
                     val onClick = remember(item, onMediaClick, onToggleReminder, isItemComingSoon) {

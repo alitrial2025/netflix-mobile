@@ -40,7 +40,10 @@ data class CloudWatchHistoryItem(
     val posterUrl: String,
     val type: String,
     val lastWatchedTimestamp: Long,
-    val isCompleted: Boolean
+    val isCompleted: Boolean,
+    val positionSeconds: Int = 0,
+    val durationSeconds: Int = 0,
+    val genreIds: List<Int> = emptyList()
 )
 
 data class TvSessionData(
@@ -257,12 +260,14 @@ class FirebaseSyncManager(private val context: Context) {
 
     fun syncProfilesToCloud(profiles: List<UserProfile>, activeProfileId: String? = null) {
         ensureFirebase()
+        // A queued save belongs to the account that initiated it, even after an account switch.
+        val ownerUid = auth?.currentUser?.uid
         scope.launch {
             try {
                 val db = firestore
                 val user = auth?.currentUser
-                if (db != null && isFirebaseReady && user != null) {
-                    val uid = user.uid
+                if (db != null && isFirebaseReady && ownerUid != null && user?.uid == ownerUid) {
+                    val uid = ownerUid
                     val batch = db.batch()
                     profiles.forEach { profile ->
                         val docRef = db.collection("users").document(uid).collection("profiles").document(profile.id)
@@ -272,6 +277,9 @@ class FirebaseSyncManager(private val context: Context) {
                             "avatarUrl" to (profile.avatarUrl ?: ""),
                             "avatarType" to profile.avatarType.name,
                             "isKids" to profile.isKids,
+                            "isKid" to profile.isKids,
+                            "maturityRating" to "${profile.maxAge}+",
+                            "favoriteGenres" to profile.favoriteGenres,
                             "maxAge" to profile.maxAge,
                             "pin" to (ProfilePin.hash(profile.pin) ?: ""),
                             "language" to profile.language,
@@ -288,6 +296,7 @@ class FirebaseSyncManager(private val context: Context) {
                         val userDoc = db.collection("users").document(uid)
                         batch.set(userDoc, mapOf("activeProfileId" to activeProfileId, "lastSync" to System.currentTimeMillis()), SetOptions.merge())
                     }
+                    if (auth?.currentUser?.uid != ownerUid) return@launch
                     batch.commit().await()
                     _lastSyncStatus.value = "Profiles Synced (${profiles.size})"
                     Log.d("FirebaseSync", "✅ Successfully synced ${profiles.size} profiles to Firestore")
@@ -348,15 +357,16 @@ class FirebaseSyncManager(private val context: Context) {
                                     avatarType = try {
                                         AvatarType.valueOf(doc.getString("avatarType") ?: "CUSTOM")
                                     } catch (e: Exception) { AvatarType.CUSTOM },
-                                    isKids = doc.getBoolean("isKids") ?: false,
-                                    maxAge = (doc.getLong("maxAge") ?: 18).toInt(),
+                                    isKids = doc.getBoolean("isKids") ?: doc.getBoolean("isKid") ?: false,
+                                    maxAge = (doc.getLong("maxAge") ?: doc.getString("maturityRating")?.filter(Char::isDigit)?.toLongOrNull() ?: 18).toInt(),
                                     pin = doc.getString("pin")?.takeIf { it.isNotBlank() },
                                     language = doc.getString("language") ?: "English",
                                     audioLanguage = doc.getString("audioLanguage") ?: "Original",
                                     subtitleLanguage = doc.getString("subtitleLanguage") ?: "Off",
                                     autoplayNext = doc.getBoolean("autoplayNext") ?: true,
                                     autoplayPreviews = doc.getBoolean("autoplayPreviews") ?: true,
-                                    gameHandle = doc.getString("gameHandle")?.takeIf { it.isNotBlank() }
+                                    gameHandle = doc.getString("gameHandle")?.takeIf { it.isNotBlank() },
+                                    favoriteGenres = (doc.get("favoriteGenres") as? List<*>)?.filterIsInstance<String>().orEmpty()
                                 )
                             } catch (e: Exception) {
                                 null
@@ -550,7 +560,7 @@ class FirebaseSyncManager(private val context: Context) {
                         progress.positionSeconds >= (progress.totalSeconds * 0.95)
                     val removeFromContinue = isCompleted && media?.type == com.example.data.model.MediaType.MOVIE
 
-                    val data = hashMapOf(
+                    val data = hashMapOf<String, Any>(
                         "profileId" to progress.profileId,
                         "mediaId" to progress.mediaId,
                         "positionSeconds" to progress.positionSeconds,
@@ -573,6 +583,7 @@ class FirebaseSyncManager(private val context: Context) {
                         data["posterUrl"] = media.posterUrl.orEmpty()
                         data["backdropUrl"] = media.backdropUrl.orEmpty()
                         data["description"] = media.description
+                        data["genreIds"] = media.genreIds
                         data["type"] = if (media.type.name == "TV_SHOW") "Series" else "Movie"
                         data["year"] = media.releaseYear.toString()
                         data["rating"] = media.maturityRating
@@ -881,7 +892,10 @@ class FirebaseSyncManager(private val context: Context) {
                         posterUrl = doc.getString("posterUrl").orEmpty(),
                         type = doc.getString("type").orEmpty(),
                         lastWatchedTimestamp = doc.getLong("lastWatchedTimestamp") ?: 0L,
-                        isCompleted = doc.getBoolean("isCompleted") ?: false
+                        isCompleted = doc.getBoolean("isCompleted") ?: false,
+                        positionSeconds = (doc.getLong("positionSeconds") ?: 0L).toInt(),
+                        durationSeconds = (doc.getLong("totalSeconds") ?: doc.getLong("durationSeconds") ?: 0L).toInt(),
+                        genreIds = (doc.get("genreIds") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }.orEmpty()
                     )
                 }.orEmpty()
                 onHistoryLoaded(items)

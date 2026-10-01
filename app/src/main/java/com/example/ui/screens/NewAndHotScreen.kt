@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.discovery.recommendationTitle
+
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -117,7 +119,9 @@ fun NewAndHotScreen(
     onOpenCast: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onShowToast: (String) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    upcomingReleases: List<MediaItem> = emptyList(),
+    recentReleases: List<MediaItem> = emptyList()
 ) {
     var selectedTab by remember { mutableStateOf(NewAndHotTab.COMING_SOON) }
     val context = LocalContext.current
@@ -125,10 +129,10 @@ fun NewAndHotScreen(
     // Local sound mute toggles for trailer previews
     val mutedStates = remember { mutableStateMapOf<String, Boolean>() }
 
-    val comingSoonList = CatalogData.getComingSoon()
-    val everyonesWatchingList = CatalogData.getTrending()
-    val top10TvShows = CatalogData.getTop10TvShows()
-    val top10Movies = CatalogData.getTop10Movies()
+    val comingSoonList = upcomingReleases
+    val everyonesWatchingList = recentReleases
+    val top10TvShows = recentReleases.filter { it.type == com.example.data.model.MediaType.TV_SHOW }.take(10)
+    val top10Movies = recentReleases.filter { it.type == com.example.data.model.MediaType.MOVIE }.take(10)
     val activeGames = if (games.isNotEmpty()) games else CatalogData.gamesList
 
     val unreadNotificationsCount = notifications.count { !it.isRead }
@@ -270,10 +274,10 @@ fun NewAndHotScreen(
                 ) {
                     items(
                         items = comingSoonList,
-                        key = { it.id },
+                        key = { "${it.type}:${it.id}" },
                         contentType = { "coming_soon_card" }
                     ) { item ->
-                        val isReminded = reminders.any { it.mediaId == item.id }
+                        val isReminded = reminders.any { it.mediaId == item.recommendationTitle().key }
                         val isMuted = mutedStates[item.id] ?: true
 
                         ComingSoonFeedCard(
@@ -308,7 +312,7 @@ fun NewAndHotScreen(
                 ) {
                     items(
                         items = everyonesWatchingList,
-                        key = { it.id },
+                        key = { "${it.type}:${it.id}" },
                         contentType = { "everyones_watching_card" }
                     ) { item ->
                         val isMuted = mutedStates[item.id] ?: true
@@ -452,7 +456,7 @@ fun NewAndHotScreen(
 
                     items(
                         items = activeGames,
-                        key = { it.id },
+                        key = { "game:${it.id}" },
                         contentType = { "game_card" }
                     ) { game ->
                         GameFeedCard(

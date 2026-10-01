@@ -37,7 +37,8 @@ data class UserProfile(
     val autoplayPreviews: Boolean = true,
     val gameHandle: String? = null,
     val audioLanguage: String = "Original",
-    val subtitleLanguage: String = "Off"
+    val subtitleLanguage: String = "Off",
+    val favoriteGenres: List<String> = emptyList()
 ) {
     val contentMaxAge: Int get() = if (isKids) maxAge.coerceIn(0, 12) else maxAge.coerceIn(0, 18)
     val hasMaturityRestriction: Boolean get() = contentMaxAge < 18
@@ -63,7 +64,8 @@ fun UserProfile.toEntity(): com.example.data.local.ProfileEntity {
         autoplayPreviews = autoplayPreviews,
         gameHandle = gameHandle,
         audioLanguage = audioLanguage,
-        subtitleLanguage = subtitleLanguage
+        subtitleLanguage = subtitleLanguage,
+        favoriteGenresJson = org.json.JSONArray(favoriteGenres).toString()
     )
 }
 
@@ -85,6 +87,9 @@ fun com.example.data.local.ProfileEntity.toUserProfile(): UserProfile {
         autoplayPreviews = autoplayPreviews,
         gameHandle = gameHandle,
         audioLanguage = audioLanguage,
-        subtitleLanguage = subtitleLanguage
+        subtitleLanguage = subtitleLanguage,
+        favoriteGenres = try { org.json.JSONArray(favoriteGenresJson).let { array ->
+            (0 until array.length()).map { array.getString(it) }
+        } } catch (_: Exception) { emptyList() }
     )
 }

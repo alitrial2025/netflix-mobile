@@ -85,7 +85,8 @@ data class ProfileEntity(
     val gameHandle: String? = null,
     val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "'Original'") val audioLanguage: String = "Original",
-    @ColumnInfo(defaultValue = "'Off'") val subtitleLanguage: String = "Off"
+    @ColumnInfo(defaultValue = "'Off'") val subtitleLanguage: String = "Off",
+    @ColumnInfo(defaultValue = "'[]'") val favoriteGenresJson: String = "[]"
 )
 
 @Dao
@@ -173,6 +174,8 @@ interface NetflixDao {
     suspend fun clearAllGlobalDownloads()
 
     // Ratings
+    @Query("SELECT * FROM ratings WHERE profileId = :profileId")
+    fun getAllRatings(profileId: String): Flow<List<RatingEntity>>
     @Query("SELECT * FROM ratings WHERE profileId = :profileId AND mediaId = :mediaId")
     fun getRating(profileId: String, mediaId: String): Flow<RatingEntity?>
 

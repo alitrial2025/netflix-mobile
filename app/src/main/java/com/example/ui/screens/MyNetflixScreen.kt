@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.discovery.recommendationTitle
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -130,7 +132,8 @@ fun MyNetflixScreen(
     onOpenClips: () -> Unit = {},
     userSubscription: com.example.data.model.UserSubscription = com.example.data.model.UserSubscription(),
     onOpenAuth: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    reminderMedia: List<MediaItem> = emptyList()
 ) {
     val scrollState = rememberScrollState()
     var showClearDialog by remember { mutableStateOf(false) }
@@ -989,7 +992,7 @@ fun MyNetflixScreen(
                 ) {
                     items(watchedTrailers, key = { it.id }) { trailer ->
                         val inWatchlist = watchlist.any { it.id == trailer.media.id }
-                        val isReminded = reminders.any { it.mediaId == trailer.media.id }
+                        val isReminded = reminders.any { it.mediaId == trailer.media.recommendationTitle().key }
                         TrailerCard(
                             trailer = trailer,
                             isInWatchlist = inWatchlist,
@@ -1011,7 +1014,10 @@ fun MyNetflixScreen(
         // 7. "REMINDERS SET" SECTION
         // =========================================================================
         if (reminders.isNotEmpty()) {
-            val remindedMediaItems = reminders.mapNotNull { CatalogData.getById(it.mediaId) }
+            val remindedMediaItems = remember(reminders, reminderMedia) {
+                val byKey = reminderMedia.associateBy { it.recommendationTitle().key }
+                reminders.mapNotNull { byKey[it.mediaId] }
+            }
             if (remindedMediaItems.isNotEmpty()) {
                 Column(
                     modifier = Modifier

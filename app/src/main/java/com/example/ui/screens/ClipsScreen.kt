@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.discovery.recommendationTitle
+
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -992,7 +994,7 @@ private fun ComingSoonListMode(
             modifier = Modifier.fillMaxSize()
         ) {
             items(items, key = { it.id }) { item ->
-                val isReminded = reminders.any { it.mediaId == item.id }
+                val isReminded = reminders.any { it.mediaId == item.recommendationTitle().key }
                 ComingSoonFeedCard(
                     item = item,
                     isReminded = isReminded,
