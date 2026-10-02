@@ -116,7 +116,7 @@ class OfflineHlsTest {
             assertNull(counts["/audio/0.aac:new"])
             assertEquals(1, counts["/audio/1.aac:new"])
             assertEquals(8, output.walkTopDown().count { it.extension in setOf("mp4", "m4s", "aac") }) // init + 3 video + 4 audio
-        } finally { manager.close(); db.close(); server.shutdown() }
+        } finally { manager.cancelAndJoinTransfers(); manager.close(); db.close(); server.shutdown() }
     }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
