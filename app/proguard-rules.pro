@@ -14,3 +14,5 @@
 -keep class com.example.data.model.MediaType { *; }
 -keep class com.example.data.download.SavedDownloadRequest { *; }
 -keep class com.example.data.download.DownloadTaskInfo { *; }
+
+-keep class com.example.data.download.DownloadTaskStatus { *; }

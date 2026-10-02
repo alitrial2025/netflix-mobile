@@ -651,9 +651,19 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _membershipPrompt.value = null
         playTrailer(media, "Trailer: ${media.title}")
     }
+    private var subscribeAfterAuthentication = false
     fun subscribeFromPrompt() {
         _membershipPrompt.value = null
-        if (syncManager.isAuthenticated()) openSubscriptionSheet(true) else openAuthScreen(true)
+        if (syncManager.isAuthenticated()) openSubscriptionSheet(true) else {
+            subscribeAfterAuthentication = true
+            openAuthScreen(true)
+        }
+    }
+    private fun finishSubscriptionNavigation() {
+        if (subscribeAfterAuthentication && syncManager.isAuthenticated()) {
+            subscribeAfterAuthentication = false
+            openSubscriptionSheet(true)
+        }
     }
     private val _showSubscriptionSheet = MutableStateFlow(false)
     val showSubscriptionSheet: StateFlow<Boolean> = _showSubscriptionSheet.asStateFlow()
@@ -1103,6 +1113,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setGuestMode() {
+        subscribeAfterAuthentication = false
         sharedReleaseReminders.close()
         syncManager.signOutUser()
         accountResetJob = viewModelScope.launch(Dispatchers.IO) {
@@ -1249,6 +1260,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signOutUser() {
+        subscribeAfterAuthentication = false
         pendingSmartReplacement = null
         profileWriteJob?.cancel()
         smartCuratorJob?.cancel()
@@ -1357,6 +1369,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _activeProfile.value = profile
         _allocatedStorageGb.value = _profileDownloadAllocations.value[profile.id] ?: 0f
         _showProfilePicker.value = false
+        finishSubscriptionNavigation()
         _transitioningProfile.value = profile
         syncManager.syncProfilesToCloud(_profiles.value, profile.id)
         connectCloudDataForActiveProfile()
@@ -1460,6 +1473,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     _activeProfile.value = safeProfile
                     _showProfileWalkthrough.value = false
                     _showProfilePicker.value = false
+                    finishSubscriptionNavigation()
                     connectCloudDataForActiveProfile()
                 }
                 _showEditProfileScreen.value = false; _editingProfile.value = null
@@ -1878,26 +1892,29 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         val downloadKey = if (episode != null) "${media.id}_${episode.id}" else if (media.type == MediaType.TV_SHOW && targetEpisode != null) "${media.id}_${targetEpisode.id}" else media.id
         val existingDownload = downloads.value.find { it.downloadKey == downloadKey && it.isComplete }
+        val useConfirmedOfflineDownload = !playbackNetwork(getApplication()).online &&
+            existingDownload?.localFilePath?.let { java.io.File(it).let { file -> file.exists() && file.length() > 0 } } == true
+        syncManager.stopActiveStreamHeartbeat(devId)
 
         resolveJob?.cancel()
         val playbackUid = syncManager.getUserId()
         resolveJob = viewModelScope.launch {
             try {
-                com.example.data.DeviceAccessGuard.confirm(getApplication(), tv = false)
+                if (!useConfirmedOfflineDownload) com.example.data.DeviceAccessGuard.confirm(getApplication(), tv = false)
                 if (syncManager.getUserId() != playbackUid || requestGeneration != playbackRequestGeneration) return@launch
                 if (isMovieLocked(media)) {
                     _playerState.update { it.copy(isResolving = false, isPlaying = false, resolveError = "Your membership changed. Choose a plan to continue.") }
                     _membershipPrompt.value = media
                     return@launch
                 }
-                com.example.data.ScreenLease.acquire(getApplication(), tv = false)
+                if (!useConfirmedOfflineDownload) com.example.data.ScreenLease.acquire(getApplication(), tv = false)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 if (requestGeneration == playbackRequestGeneration) _playerState.update { it.copy(isResolving = false, isPlaying = false,
                     resolveError = error.message ?: "Membership could not be verified. Reconnect and try again.") }
                 return@launch
             }
-        syncManager.startActiveStreamHeartbeat(
+        if (!useConfirmedOfflineDownload) syncManager.startActiveStreamHeartbeat(
             deviceId = devId,
             deviceName = "Android Phone",
             mediaTitle = media.title,
@@ -1910,7 +1927,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             }
         )
             val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
-            if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
+            if (requestGeneration != playbackRequestGeneration) return@launch
+                if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
+                    _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
+                        resolveError = "Your membership changed. Choose a plan to continue.") }
+                    syncManager.stopActiveStreamHeartbeat(devId)
+                    _membershipPrompt.value = media
+                    return@launch
+                }
             if (progressEntity != null) {
                 if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
                     episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
@@ -1972,7 +1996,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     netMirrorResolver.resolveNet52(tmdbId, type, season, epNum)
                 } ?: throw java.io.IOException("Playback took too long. Please try again.")
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
+                if (requestGeneration != playbackRequestGeneration) return@launch
+                if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
+                    _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
+                        resolveError = "Your membership changed. Choose a plan to continue.") }
+                    syncManager.stopActiveStreamHeartbeat(devId)
+                    _membershipPrompt.value = media
+                    return@launch
+                }
 
                 _playerState.update {
                     it.copy(
@@ -1987,7 +2018,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
+                if (requestGeneration != playbackRequestGeneration) return@launch
+                if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
+                    _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
+                        resolveError = "Your membership changed. Choose a plan to continue.") }
+                    syncManager.stopActiveStreamHeartbeat(devId)
+                    _membershipPrompt.value = media
+                    return@launch
+                }
                 _playerState.update {
                     it.copy(
                         isResolving = false,

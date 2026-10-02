@@ -145,7 +145,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         .followSslRedirects(true)
         .build()
 
-    private val publicPlayback = PublicPlaybackResolver(client)
+    private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context))
 
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
