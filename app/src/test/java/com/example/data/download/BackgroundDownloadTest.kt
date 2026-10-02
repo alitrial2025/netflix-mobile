@@ -65,8 +65,8 @@ class BackgroundDownloadTest {
                 restored.cancelDownload(item.id)
                 assertTrue(store.all().none { it.task.downloadKey == item.id })
                 assertTrue(wm.getWorkInfosForUniqueWork(name).get().all { it.state == WorkInfo.State.CANCELLED })
-            } finally { restored.close() }
-        } finally { manager.close(); database.close(); wm.cancelAllWork().result.get(); store.remove(item.id) }
+            } finally { runBlocking { restored.cancelAndJoinTransfers() }; restored.close() }
+        } finally { runBlocking { manager.cancelAndJoinTransfers() }; manager.close(); database.close(); wm.cancelAllWork().result.get(); store.remove(item.id) }
     }
 
     @Test fun segment165FailureResumesWithRenewedTokensWithoutRestartOrDuplicateBytes() = runBlocking {
@@ -105,7 +105,7 @@ class BackgroundDownloadTest {
             assertTrue((0 until 164).all { counts[it] == 1 })
             assertEquals(2, counts[164])
             assertArrayEquals(packet().let { bytes -> ByteArray(bytes.size * 170) { bytes[it % bytes.size] } }, partial.readBytes())
-        } finally { manager.close(); database.close(); server.shutdown(); directory.deleteRecursively() }
+        } finally { runBlocking { manager.cancelAndJoinTransfers() }; manager.close(); database.close(); server.shutdown(); directory.deleteRecursively() }
     }
 
     @Test fun requestMetadataAndPauseStateRestoreWithoutStoringStreamCredentials() {
@@ -147,6 +147,6 @@ class BackgroundDownloadTest {
             assertTrue(manager.resumeSavedDownload(item.id, "profile"))
             assertEquals(NetworkType.UNMETERED, work.getWorkInfosForUniqueWork(name).get().last { it.state == WorkInfo.State.ENQUEUED }
                 .constraints.requiredNetworkType)
-        } finally { manager.close(); database.close(); work.cancelAllWork().result.get(); store.remove(item.id) }
+        } finally { runBlocking { manager.cancelAndJoinTransfers() }; manager.close(); database.close(); work.cancelAllWork().result.get(); store.remove(item.id) }
     }
 }

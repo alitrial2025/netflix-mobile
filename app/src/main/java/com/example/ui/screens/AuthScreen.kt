@@ -61,7 +61,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -69,6 +68,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -100,6 +100,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.components.NetflixSpinner
 import com.example.ui.components.NetflixNLogo
 import com.example.ui.theme.NetflixBlack
 import com.example.ui.theme.NetflixBorderGray
@@ -118,8 +119,8 @@ data class OnboardingPageData(
 @Composable
 fun AuthScreen(
     currentEmail: String?,
-    onSignIn: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
-    onSignUp: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
+    onSignIn: (email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
+    onSignUp: (email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
     onSignOut: () -> Unit,
     onClose: () -> Unit,
     onOpenTvPair: () -> Unit
@@ -158,12 +159,16 @@ fun AuthScreen(
 
     // Modals & Bottom Sheets State
     var showAuthModal by remember { mutableStateOf(false) }
+    var authRequestRunning by remember { mutableStateOf(false) }
     var authModalInitialTab by remember { mutableIntStateOf(0) } // 0 = Sign In, 1 = Sign Up / Get Started
     var showPrivacySheet by remember { mutableStateOf(false) }
     var showFaqSheet by remember { mutableStateOf(false) }
     var showHelpSheet by remember { mutableStateOf(false) }
 
-    val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val bottomSheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { !authRequestRunning || it != SheetValue.Hidden }
+    )
 
     Box(
         modifier = Modifier
@@ -520,7 +525,7 @@ fun AuthScreen(
     // ==========================================
     if (showAuthModal) {
         ModalBottomSheet(
-            onDismissRequest = { showAuthModal = false },
+            onDismissRequest = { if (!authRequestRunning) showAuthModal = false },
             sheetState = bottomSheetState,
             containerColor = Color(0xFF141414),
             contentColor = Color.White,
@@ -537,6 +542,7 @@ fun AuthScreen(
         ) {
             AuthModalContent(
                 initialTab = authModalInitialTab,
+                onLoadingChanged = { authRequestRunning = it },
                 currentEmail = currentEmail,
                 onSignIn = onSignIn,
                 onSignUp = onSignUp,
@@ -613,9 +619,10 @@ fun AuthScreen(
 @Composable
 private fun AuthModalContent(
     initialTab: Int,
+    onLoadingChanged: (Boolean) -> Unit,
     currentEmail: String?,
-    onSignIn: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
-    onSignUp: (email: String, pass: String, onError: (String) -> Unit) -> Unit,
+    onSignIn: (email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
+    onSignUp: (email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) -> Unit,
     onSignOut: () -> Unit,
     onClose: () -> Unit,
     onOpenTvPair: () -> Unit
@@ -656,7 +663,7 @@ private fun AuthModalContent(
                 )
             }
 
-            IconButton(onClick = onClose) {
+            IconButton(onClick = onClose, enabled = !isLoading) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Close",
@@ -680,7 +687,7 @@ private fun AuthModalContent(
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (selectedTab == 0) NetflixRed else Color.Transparent)
-                    .clickable {
+                    .clickable(enabled = !isLoading) {
                         selectedTab = 0
                         errorMessage = null
                     }
@@ -700,7 +707,7 @@ private fun AuthModalContent(
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (selectedTab == 1) NetflixRed else Color.Transparent)
-                    .clickable {
+                    .clickable(enabled = !isLoading) {
                         selectedTab = 1
                         errorMessage = null
                     }
@@ -745,6 +752,7 @@ private fun AuthModalContent(
 
         // Email Field
         OutlinedTextField(
+            enabled = !isLoading,
             value = emailInput,
             onValueChange = {
                 emailInput = it
@@ -782,6 +790,7 @@ private fun AuthModalContent(
 
         // Password Field
         OutlinedTextField(
+            enabled = !isLoading,
             value = passwordInput,
             onValueChange = {
                 passwordInput = it
@@ -832,6 +841,7 @@ private fun AuthModalContent(
         if (selectedTab == 1) {
             Spacer(modifier = Modifier.height(14.dp))
             OutlinedTextField(
+                enabled = !isLoading,
                 value = confirmPasswordInput,
                 onValueChange = {
                     confirmPasswordInput = it
@@ -874,6 +884,7 @@ private fun AuthModalContent(
 
         // Submit Button
         Button(
+            enabled = !isLoading,
             onClick = {
                 focusManager.clearFocus()
                 if (emailInput.isBlank() || !emailInput.contains("@")) {
@@ -889,19 +900,24 @@ private fun AuthModalContent(
                     return@Button
                 }
 
+                if (isLoading) return@Button
                 isLoading = true
+                onLoadingChanged(true)
                 errorMessage = null
 
+                val onSuccess = {
+                    isLoading = false
+                    onLoadingChanged(false)
+                }
+                val onError: (String) -> Unit = { err ->
+                    isLoading = false
+                    onLoadingChanged(false)
+                    errorMessage = err
+                }
                 if (selectedTab == 0) {
-                    onSignIn(emailInput, passwordInput) { err ->
-                        isLoading = false
-                        errorMessage = err
-                    }
+                    onSignIn(emailInput.trim(), passwordInput, onSuccess, onError)
                 } else {
-                    onSignUp(emailInput, passwordInput) { err ->
-                        isLoading = false
-                        errorMessage = err
-                    }
+                    onSignUp(emailInput.trim(), passwordInput, onSuccess, onError)
                 }
             },
             colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
@@ -912,11 +928,7 @@ private fun AuthModalContent(
                 .testTag("auth_submit_button")
         ) {
             if (isLoading) {
-                CircularProgressIndicator(
-                    color = Color.White,
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp
-                )
+                NetflixSpinner(size = 24.dp, color = Color.White)
             } else {
                 Text(
                     text = if (selectedTab == 0) "Sign In" else "Get Started",
@@ -935,7 +947,7 @@ private fun AuthModalContent(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .background(Color(0xFF222222))
-                .clickable { onOpenTvPair() }
+                .clickable(enabled = !isLoading) { onOpenTvPair() }
                 .padding(vertical = 12.dp, horizontal = 16.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -966,7 +978,7 @@ private fun AuthModalContent(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .clickable { onClose() }
+                .clickable(enabled = !isLoading) { onClose() }
                 .padding(vertical = 6.dp, horizontal = 10.dp)
         )
     }

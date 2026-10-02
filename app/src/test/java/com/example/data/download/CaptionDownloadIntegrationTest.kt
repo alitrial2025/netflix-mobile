@@ -102,7 +102,7 @@ class CaptionDownloadIntegrationTest {
             server.shutdown()
             assertEquals(2, manager.downloadCaptions(key, stream).size)
         } finally {
-            manager.close(); database.close()
+            manager.cancelAndJoinTransfers(); manager.close(); database.close()
             WorkManager.getInstance(app).cancelAllWork().result.get()
             store.remove(key)
             File(app.filesDir, "downloads/$key.captions").deleteRecursively()
