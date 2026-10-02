@@ -2,6 +2,7 @@ package com.example.data
 
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import okhttp3.Cookie
+import okhttp3.CookieJar
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -13,6 +14,7 @@ internal object ScopedPlaybackHttp {
     private val client = OkHttpClient.Builder().cookieJar(jar)
         .connectTimeout(30, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .followSslRedirects(false).build()
+    private val publicClient = client.newBuilder().cookieJar(CookieJar.NO_COOKIES).build()
 
     fun factory(headers: Map<String, String>, sourceUrl: String): OkHttpDataSource.Factory {
         val origin = (headers["Origin"] ?: sourceUrl).toHttpUrlOrNull()
@@ -25,6 +27,7 @@ internal object ScopedPlaybackHttp {
         }
         val properties = headers.filterKeys { !it.equals("Cookie", true) }.toMutableMap()
         properties.putIfAbsent("User-Agent", "Mozilla/5.0 (Linux; Android 16; Mobile)")
-        return OkHttpDataSource.Factory(client).setDefaultRequestProperties(properties)
+        val authenticated = headers.entries.any { it.key.equals("Cookie", true) && it.value.isNotBlank() }
+        return OkHttpDataSource.Factory(if (authenticated) client else publicClient).setDefaultRequestProperties(properties)
     }
 }
