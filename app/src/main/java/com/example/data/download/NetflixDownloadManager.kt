@@ -116,7 +116,7 @@ class NetflixDownloadManager(
         .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(false)
-        .build()).newBuilder().cookieJar(cookieJar).build()
+        .build()).newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val downloadOwners = ConcurrentHashMap<String, String>()
@@ -463,7 +463,7 @@ class NetflixDownloadManager(
         // Simultaneous titles may select different OTT cookies. Their captions must
         // not overwrite one another's provider session or the video transfer's jar.
         val captionCookies = AppCookieJar()
-        val captionClient = httpClient.newBuilder().cookieJar(captionCookies).build()
+        val captionClient = httpClient.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
         return OfflineCaptionDownloader(File(downloadsDir, "$key.captions")) { caption ->
             withResponse(downloadRequest(caption.url, stream.captionHeaders, stream.url, captionCookies), captionClient) { response ->
                 if (!response.isSuccessful) throw DownloadHttpException(response.code,
@@ -505,17 +505,10 @@ class NetflixDownloadManager(
     }
 
     private fun downloadRequest(url: String, headers: Map<String, String>, sourceUrl: String, jar: AppCookieJar = cookieJar): Request {
-        val origin = (headers.entries.firstOrNull { it.key.equals("Origin", true) }?.value ?: sourceUrl).toHttpUrlOrNull()
-        val cookieHeader = headers.entries.firstOrNull { it.key.equals("Cookie", true) }?.value.orEmpty()
-        if (origin != null && cookieHeader.isNotBlank()) {
-            jar.saveFromResponse(origin, cookieHeader.split(';').mapNotNull {
-                Cookie.parse(origin, "${it.trim()}; Path=/; Secure")
-            })
-        }
         return Request.Builder().url(url).apply {
             headers.forEach { (name, value) ->
                 val allowed = !name.equals("Cookie", true) &&
-                    (!name.equals("Authorization", true) || url.toHttpUrlOrNull()?.host == sourceUrl.toHttpUrlOrNull()?.host)
+                    !name.equals("Authorization", true)
                 if (allowed) {
                     header(name, value)
                 }
