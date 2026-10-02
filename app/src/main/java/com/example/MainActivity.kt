@@ -797,11 +797,11 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         ) {
             AuthScreen(
                 currentEmail = currentUserEmail,
-                onSignIn = { email, pass, onError ->
-                    viewModel.signInUser(email, pass, onSuccess = {}, onError = onError)
+                onSignIn = { email, pass, onSuccess, onError ->
+                    viewModel.signInUser(email, pass, onSuccess = onSuccess, onError = onError)
                 },
-                onSignUp = { email, pass, onError ->
-                    viewModel.signUpUser(email, pass, onSuccess = {}, onError = onError)
+                onSignUp = { email, pass, onSuccess, onError ->
+                    viewModel.signUpUser(email, pass, onSuccess = onSuccess, onError = onError)
                 },
                 onSignOut = { viewModel.signOutUser() },
                 onClose = { viewModel.openAuthScreen(false) },

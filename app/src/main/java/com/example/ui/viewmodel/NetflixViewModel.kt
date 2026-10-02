@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import com.example.MainActivity
 import com.example.R
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import androidx.compose.ui.graphics.Color
 import com.example.data.CatalogData
@@ -1089,7 +1090,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _showAuthScreen = MutableStateFlow(syncManager.currentUserEmail.value == null)
     val showAuthScreen: StateFlow<Boolean> = _showAuthScreen.asStateFlow()
 
+    private var authenticationInProgress = false
+
     fun openAuthScreen(open: Boolean) {
+        if (!open && authenticationInProgress) return
         _showAuthScreen.value = open
         if (!open && syncManager.currentUserEmail.value == null) {
             setGuestMode()
@@ -1129,71 +1133,47 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         saveProfilesLocally(_profiles.value)
     }
 
-    fun signInUser(
-        email: String,
-        pass: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            startupCacheJob?.join()
-            accountResetJob?.join()
-            syncManager.signInWithEmail(
-                email = email,
-                pass = pass,
-                onSuccess = { userEmail ->
-                    viewModelScope.launch {
-                        withContext(Dispatchers.IO) { ensureLocalAccountOwnership() }
-                    showToast("Signed in as $userEmail")
-                    syncManager.listenToSubscription { remoteSub ->
-                        setUserSubscription(remoteSub)
-                        saveStoredSubscription(remoteSub)
-                    }
-                    syncManager.listenToProfiles { remoteProfiles ->
-                        if (remoteProfiles.isNotEmpty()) {
-                            _profiles.value = remoteProfiles
-                            if (_profiles.value.none { it.id == _activeProfile.value.id }) {
-                                _activeProfile.value = _profiles.value.first()
-                            }
-                            saveProfilesLocally(remoteProfiles)
-                            connectCloudDataForActiveProfile()
-                            viewModelScope.launch(Dispatchers.IO) {
-                                try {
-                                    repository.insertProfiles(remoteProfiles.map { it.toEntity() })
-                                } catch (e: Exception) {
-                                    android.util.Log.e("NetflixViewModel", "Error saving profiles to Room: ${e.message}")
-                                }
-                            }
-                        }
-                    }
-                    _showAuthScreen.value = false
-                    _showProfilePicker.value = true
-                    onSuccess()
-                    }
-                },
-                onError = { err ->
-                    showToast(err)
-                    onError(err)
-                }
-            )
-        }
-    }
+    fun signInUser(email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) =
+        authenticateUser(email, pass, createAccount = false, onSuccess, onError)
 
-    fun signUpUser(
+    fun signUpUser(email: String, pass: String, onSuccess: () -> Unit, onError: (String) -> Unit) =
+        authenticateUser(email, pass, createAccount = true, onSuccess, onError)
+
+    private fun authenticateUser(
         email: String,
         pass: String,
+        createAccount: Boolean,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
+        // UI calls are on the main thread. Acquire before launch so repeated taps cannot race.
+        if (authenticationInProgress) {
+            onError("A sign-in request is already running. Please wait.")
+            return
+        }
+        authenticationInProgress = true
         viewModelScope.launch {
-            startupCacheJob?.join()
-            accountResetJob?.join()
-            syncManager.signUpWithEmail(
-                email = email,
-                pass = pass,
-                onSuccess = { userEmail ->
-                    viewModelScope.launch {
-                        withContext(Dispatchers.IO) { ensureLocalAccountOwnership() }
+            try {
+                startupCacheJob?.join()
+                accountResetJob?.join()
+                var authenticatedEmail: String? = null
+                var failure: String? = null
+                if (createAccount) {
+                    syncManager.signUpWithEmail(email.trim(), pass,
+                        onSuccess = { authenticatedEmail = it }, onError = { failure = it })
+                } else {
+                    syncManager.signInWithEmail(email.trim(), pass,
+                        onSuccess = { authenticatedEmail = it }, onError = { failure = it })
+                }
+                val userEmail = authenticatedEmail
+                if (userEmail == null) {
+                    val message = failure ?: "Unable to authenticate. Please try again."
+                    showToast(message)
+                    onError(message)
+                    return@launch
+                }
+                withContext(Dispatchers.IO) { ensureLocalAccountOwnership() }
+                if (createAccount) {
                     showToast("Welcome to NetflixPro! Account created.")
                     syncManager.listenToSubscription { remoteSub ->
                         setUserSubscription(remoteSub)
@@ -1231,14 +1211,43 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     }
                     _showAuthScreen.value = false
                     openProfileWalkthrough(primary)
-                    onSuccess()
+                } else {
+                    showToast("Signed in as $userEmail")
+                    syncManager.listenToSubscription { remoteSub ->
+                        setUserSubscription(remoteSub)
+                        saveStoredSubscription(remoteSub)
                     }
-                },
-                onError = { err ->
-                    showToast(err)
-                    onError(err)
+                    syncManager.listenToProfiles { remoteProfiles ->
+                        if (remoteProfiles.isNotEmpty()) {
+                            _profiles.value = remoteProfiles
+                            if (_profiles.value.none { it.id == _activeProfile.value.id }) {
+                                _activeProfile.value = _profiles.value.first()
+                            }
+                            saveProfilesLocally(remoteProfiles)
+                            connectCloudDataForActiveProfile()
+                            viewModelScope.launch(Dispatchers.IO) {
+                                try {
+                                    repository.insertProfiles(remoteProfiles.map { it.toEntity() })
+                                } catch (e: Exception) {
+                                    android.util.Log.e("NetflixViewModel", "Error saving profiles to Room: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                    _showAuthScreen.value = false
+                    _showProfilePicker.value = true
                 }
-            )
+                onSuccess()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                android.util.Log.e("NetflixViewModel", "Account setup failed", error)
+                val message = "Unable to finish account setup. Please try again."
+                showToast(message)
+                onError(message)
+            } finally {
+                authenticationInProgress = false
+            }
         }
     }
 
@@ -1339,7 +1348,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openProfilePicker(show: Boolean) {
-        if (show && _userSubscription.value.isGuest) {
+        if (show && !syncManager.isAuthenticated()) {
             showToast("Sign in to create and manage profiles.")
             _showAuthScreen.value = true
             return
@@ -1366,7 +1375,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun openEditProfile(profile: UserProfile? = null) {
         _profileSaveError.value = null
-        if (_userSubscription.value.isGuest) {
+        if (!syncManager.isAuthenticated()) {
             showToast("Sign in to create or edit profiles.")
             _showAuthScreen.value = true
             return

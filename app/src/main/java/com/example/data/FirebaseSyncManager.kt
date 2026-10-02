@@ -18,6 +18,7 @@ import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.DocumentChange
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -161,8 +162,8 @@ class FirebaseSyncManager(private val context: Context) {
             val a = auth
             if (a != null && isFirebaseReady) {
                 val result = a.signInWithEmailAndPassword(email.trim(), pass).await()
-                val user = result.user
-                val userEmail = user?.email ?: email
+                val user = result.user ?: error("Authentication returned no user. Please try again.")
+                val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
                 _lastSyncStatus.value = "Signed in as $userEmail"
 
@@ -179,7 +180,9 @@ class FirebaseSyncManager(private val context: Context) {
                                     "lastSignInAt" to System.currentTimeMillis()
                                 ),
                                 SetOptions.merge()
-                            ).await()
+                            ).addOnFailureListener { error ->
+                                Log.w("FirebaseSync", "User document sync deferred", error)
+                            }
                         } catch (docErr: Exception) {
                             Log.w("FirebaseSync", "User doc sync on sign-in: ${docErr.message}")
                         }
@@ -190,6 +193,8 @@ class FirebaseSyncManager(private val context: Context) {
             } else {
                 onError("Sign in is unavailable. Check your connection and try again.")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("FirebaseSync", "Sign in error: ${e.message}")
             onError(e.message ?: "Sign in failed. Check email and password.")
@@ -207,8 +212,8 @@ class FirebaseSyncManager(private val context: Context) {
             val a = auth
             if (a != null && isFirebaseReady) {
                 val result = a.createUserWithEmailAndPassword(email.trim(), pass).await()
-                val user = result.user
-                val userEmail = user?.email ?: email
+                val user = result.user ?: error("Authentication returned no user. Please try again.")
+                val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
 
                 // Initialize default documents for new user
@@ -225,11 +230,13 @@ class FirebaseSyncManager(private val context: Context) {
                                 "updatedAt" to System.currentTimeMillis(),
                                 "subscriptionPlanId" to "plan_guest",
                                 "subscriptionStatus" to "NONE"
-                            ), SetOptions.merge()).await()
+                            ), SetOptions.merge()).addOnFailureListener { error ->
+                                Log.w("FirebaseSync", "New account document sync deferred", error)
+                            }
 
                             // Subscription entitlement is issued only after payment verification.
                             // Account creation must never grant an active paid plan.
-                            Log.d("FirebaseSync", "✅ Successfully created user & subscription documents in Firestore for ${user.uid}")
+                            Log.d("FirebaseSync", "New account document write queued")
                         } catch (e: Exception) {
                             Log.e("FirebaseSync", "Failed to initialize user documents in Firestore: ${e.message}", e)
                         }
@@ -241,6 +248,8 @@ class FirebaseSyncManager(private val context: Context) {
             } else {
                 onError("Account creation is unavailable. Check your connection and try again.")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("FirebaseSync", "Sign up error: ${e.message}", e)
             onError(e.message ?: "Sign up failed. Try again.")
