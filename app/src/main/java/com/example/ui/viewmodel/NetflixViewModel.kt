@@ -1914,27 +1914,29 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     resolveError = error.message ?: "Membership could not be verified. Reconnect and try again.") }
                 return@launch
             }
-        if (!useConfirmedOfflineDownload) syncManager.startActiveStreamHeartbeat(
-            deviceId = devId,
-            deviceName = "Android Phone",
-            mediaTitle = media.title,
-            maxAllowedScreens = maxScreens,
-            onLimitExceeded = { active, max ->
-                viewModelScope.launch(Dispatchers.Main) {
-                    if (_playerState.value.sourceId != "Trailer") closePlayer()
-                    showToast("Screen limit reached ($active/$max active streams). Upgrade your plan to watch simultaneously.")
-                }
+            if (!useConfirmedOfflineDownload) {
+                syncManager.startActiveStreamHeartbeat(
+                    deviceId = devId,
+                    deviceName = "Android Phone",
+                    mediaTitle = media.title,
+                    maxAllowedScreens = maxScreens,
+                    onLimitExceeded = { active, max ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            if (_playerState.value.sourceId != "Trailer") closePlayer()
+                            showToast("Screen limit reached ($active/$max active streams). Upgrade your plan to watch simultaneously.")
+                        }
+                    }
+                )
             }
-        )
             val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
             if (requestGeneration != playbackRequestGeneration) return@launch
-                if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
-                    _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
-                        resolveError = "Your membership changed. Choose a plan to continue.") }
-                    syncManager.stopActiveStreamHeartbeat(devId)
-                    _membershipPrompt.value = media
-                    return@launch
-                }
+            if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
+                _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
+                    resolveError = "Your membership changed. Choose a plan to continue.") }
+                syncManager.stopActiveStreamHeartbeat(devId)
+                _membershipPrompt.value = media
+                return@launch
+            }
             if (progressEntity != null) {
                 if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
                     episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
