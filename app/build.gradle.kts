@@ -16,6 +16,13 @@ val releaseSigningProperties = Properties().apply {
   if (signingFile.exists()) signingFile.inputStream().use { load(it) }
 }
 
+val clientPaymentProperties = Properties().apply {
+  val envFile = rootProject.file(".env")
+  if (envFile.isFile) envFile.inputStream().use { load(it) }
+}
+val clientPaymentAuth = (System.getenv("PAYHERO_API_AUTH") ?: clientPaymentProperties.getProperty("PAYHERO_API_AUTH", ""))
+  .replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
   namespace = "com.example"
   compileSdk = 35
@@ -28,6 +35,7 @@ android {
     versionName = "1.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("String", "PAYHERO_API_AUTH", "\"$clientPaymentAuth\"")
   }
 
   signingConfigs {
@@ -76,6 +84,7 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.add("PAYHERO_API_AUTH")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
