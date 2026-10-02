@@ -24,8 +24,8 @@ android {
     applicationId = "com.netflixpro.apk"
     minSdk = 24
     targetSdk = 35
-    versionCode = 7
-    versionName = "1.6"
+    versionCode = 8
+    versionName = "1.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -44,7 +44,8 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+            isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }

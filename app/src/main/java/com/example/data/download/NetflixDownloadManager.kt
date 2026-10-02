@@ -331,7 +331,14 @@ class NetflixDownloadManager(
         if (plan == null || !com.example.data.RenewalPolicy.grantsAccess(snapshot.getString("status").orEmpty(),
             snapshot.getLong("expiresAt") ?: 0L, com.example.data.SubscriptionTime.now()))
             throw DownloadMembershipException("Renew your membership to continue this download.")
-        return plan
+        val checked = try { com.example.data.DeviceAccessGuard.confirm(application, tv = false) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { throw DownloadMembershipException(error.message ?: "This device is not authorized for downloads.") }
+        val confirmedPlan = com.example.data.model.SubscriptionPlans.PLANS.firstOrNull { it.id == checked.getString("planId") }
+        if (confirmedPlan == null || !com.example.data.RenewalPolicy.grantsAccess(checked.getString("status").orEmpty(),
+            checked.getLong("expiresAt") ?: 0L, com.example.data.SubscriptionTime.now()))
+            throw DownloadMembershipException("Renew your membership to continue this download.")
+        return confirmedPlan
     }
 
     private suspend fun executeDownloadPipeline(

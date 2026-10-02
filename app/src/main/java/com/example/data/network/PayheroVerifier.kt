@@ -43,7 +43,7 @@ object PayheroVerifier {
     // The Lipwa URL identifies a merchant account, not a payment channel ID.
     const val LIPWA_ACCOUNT_ID = "7976"
     const val LIPWA_URL = "https://lipwa.link/7976"
-    private const val PAYHERO_API_AUTH = "Basic N0pkNTVCTTI5U3Znbk5hUHdBaEE6QWR3eGczallpVnBWdXV6N0VKaVNoYVU0V0R3T2dPUWI2QkpHUktRdw=="
+    private val PAYHERO_API_AUTH get() = com.example.BuildConfig.PAYHERO_API_AUTH
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)

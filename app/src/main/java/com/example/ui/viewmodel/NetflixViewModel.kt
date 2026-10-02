@@ -638,10 +638,23 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun isMovieLocked(media: MediaItem): Boolean {
-        if (_userSubscription.value.isGuest) return true
-        return _userSubscription.value.isMediaLocked(media.id, media.title)
+        val sub = _userSubscription.value
+        if (!syncManager.isAuthenticated() || !com.example.data.DeviceAccessGuard.isConfirmed(syncManager.getUserId(), sub.planId, sub.expiresAt, sub.status)) return true
+        return sub.isMediaLocked(media.id, media.title)
     }
 
+    private val _membershipPrompt = MutableStateFlow<MediaItem?>(null)
+    val membershipPrompt: StateFlow<MediaItem?> = _membershipPrompt.asStateFlow()
+    fun dismissMembershipPrompt() { _membershipPrompt.value = null }
+    fun watchPromptTrailer() {
+        val media = _membershipPrompt.value ?: return
+        _membershipPrompt.value = null
+        playTrailer(media, "Trailer: ${media.title}")
+    }
+    fun subscribeFromPrompt() {
+        _membershipPrompt.value = null
+        if (syncManager.isAuthenticated()) openSubscriptionSheet(true) else openAuthScreen(true)
+    }
     private val _showSubscriptionSheet = MutableStateFlow(false)
     val showSubscriptionSheet: StateFlow<Boolean> = _showSubscriptionSheet.asStateFlow()
 
@@ -1825,13 +1838,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         progressTracker.reset()
         val requestGeneration = ++playbackRequestGeneration
         if (isMovieLocked(media)) {
-            if (_userSubscription.value.isGuest) {
-                showToast("Sign in & subscribe to stream full movies. Playing trailer preview...")
-            } else {
-                showToast("Playing Trailer Preview. Upgrade plan to stream full movie.")
-                _showSubscriptionSheet.value = true
-            }
-            playTrailer(media, "Trailer: ${media.title}")
+            resolveJob?.cancel()
+            _membershipPrompt.value = media
             return
         }
 
@@ -1860,12 +1868,35 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             showSkipIntro = false
         )
 
-        val devId = "phone_${syncManager.getUserId()}"
+        val devId = com.example.data.DeviceAccessGuard.deviceId(getApplication())
         val maxScreens = when (_userSubscription.value.planId) {
             "plan_premium" -> 4
             "plan_standard" -> 2
             else -> 1
         }
+
+
+        val downloadKey = if (episode != null) "${media.id}_${episode.id}" else if (media.type == MediaType.TV_SHOW && targetEpisode != null) "${media.id}_${targetEpisode.id}" else media.id
+        val existingDownload = downloads.value.find { it.downloadKey == downloadKey && it.isComplete }
+
+        resolveJob?.cancel()
+        val playbackUid = syncManager.getUserId()
+        resolveJob = viewModelScope.launch {
+            try {
+                com.example.data.DeviceAccessGuard.confirm(getApplication(), tv = false)
+                if (syncManager.getUserId() != playbackUid || requestGeneration != playbackRequestGeneration) return@launch
+                if (isMovieLocked(media)) {
+                    _playerState.update { it.copy(isResolving = false, isPlaying = false, resolveError = "Your membership changed. Choose a plan to continue.") }
+                    _membershipPrompt.value = media
+                    return@launch
+                }
+                com.example.data.ScreenLease.acquire(getApplication(), tv = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (requestGeneration == playbackRequestGeneration) _playerState.update { it.copy(isResolving = false, isPlaying = false,
+                    resolveError = error.message ?: "Membership could not be verified. Reconnect and try again.") }
+                return@launch
+            }
         syncManager.startActiveStreamHeartbeat(
             deviceId = devId,
             deviceName = "Android Phone",
@@ -1878,14 +1909,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         )
-
-        val downloadKey = if (episode != null) "${media.id}_${episode.id}" else if (media.type == MediaType.TV_SHOW && targetEpisode != null) "${media.id}_${targetEpisode.id}" else media.id
-        val existingDownload = downloads.value.find { it.downloadKey == downloadKey && it.isComplete }
-
-        resolveJob?.cancel()
-        resolveJob = viewModelScope.launch {
             val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
-            if (requestGeneration != playbackRequestGeneration) return@launch
+            if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
             if (progressEntity != null) {
                 if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
                     episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
@@ -1947,7 +1972,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     netMirrorResolver.resolveNet52(tmdbId, type, season, epNum)
                 } ?: throw java.io.IOException("Playback took too long. Please try again.")
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (requestGeneration != playbackRequestGeneration) return@launch
+                if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
 
                 _playerState.update {
                     it.copy(
@@ -1962,7 +1987,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                if (requestGeneration != playbackRequestGeneration) return@launch
+                if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid || isMovieLocked(media)) return@launch
                 _playerState.update {
                     it.copy(
                         isResolving = false,
@@ -2214,7 +2239,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         resolveJob?.cancel()
         val current = _playerState.value
         persistPlayerProgress(current)
-        val devId = "phone_${syncManager.getUserId()}"
+        val devId = com.example.data.DeviceAccessGuard.deviceId(getApplication())
         syncManager.stopActiveStreamHeartbeat(devId)
         _playerState.value = PlayerState(media = null)
     }

@@ -1202,7 +1202,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
             val key = "${type}_${tmdbId}_${season}_${episode}"
             streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withLock it }
             val info = getTmdbInfo(tmdbId, type)
-            val source = publicPlayback.resolve(info.title, info.year, type, season, episode)
+            val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
             val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}]", source.expiresAt, info.title)
             if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
             streamCache[key] = stream

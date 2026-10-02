@@ -163,6 +163,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.signInWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
+                DeviceAccessGuard.confirm(context, tv = false)
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
                 _lastSyncStatus.value = "Signed in as $userEmail"
@@ -196,7 +197,8 @@ class FirebaseSyncManager(private val context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e("FirebaseSync", "Sign in error: ${e.message}")
+            if (e is DeviceAccessException || e is MembershipCheckException) signOutUser()
+            Log.w("FirebaseSync", "Sign in failed (${e.javaClass.simpleName})")
             onError(e.message ?: "Sign in failed. Check email and password.")
         }
     }
@@ -213,6 +215,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.createUserWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
+                DeviceAccessGuard.confirm(context, tv = false)
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
 
@@ -251,12 +254,14 @@ class FirebaseSyncManager(private val context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e("FirebaseSync", "Sign up error: ${e.message}", e)
+            if (e is DeviceAccessException || e is MembershipCheckException) signOutUser()
+            Log.w("FirebaseSync", "Sign up failed (${e.javaClass.simpleName})")
             onError(e.message ?: "Sign up failed. Try again.")
         }
     }
 
     fun signOutUser() {
+        DeviceAccessGuard.clear()
         cleanupListeners()
         auth?.signOut()
         _currentUserEmail.value = null
@@ -434,7 +439,7 @@ class FirebaseSyncManager(private val context: Context) {
                         }
                         return@addSnapshotListener
                     }
-                    if (snapshot?.metadata?.hasPendingWrites() == true) return@addSnapshotListener
+                    if (snapshot?.metadata?.hasPendingWrites() == true || snapshot?.metadata?.isFromCache == true) return@addSnapshotListener
                     if (snapshot != null && snapshot.exists()) {
                         if (!snapshot.metadata.isFromCache) runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()?.let {
                             SubscriptionTime.observeServerTimestamp(it)
@@ -455,7 +460,20 @@ class FirebaseSyncManager(private val context: Context) {
                             subscribedAt = snapshot.getLong("subscribedAt") ?: 0L,
                             expiresAt = expiresAt
                         )
-                        onSubscriptionLoaded(sub)
+                        scope.launch {
+                            try {
+                                val checked = DeviceAccessGuard.confirm(context, tv = false)
+                                if (auth?.currentUser?.uid != user.uid || checked.getString("planId") != sub.planId ||
+                                    checked.getLong("expiresAt") != sub.expiresAt || checked.getString("status") != sub.status) return@launch
+                                onSubscriptionLoaded(sub)
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (blocked: DeviceAccessException) {
+                                signOutUser()
+                                onSubscriptionLoaded(com.example.data.model.UserSubscription())
+                            } catch (_: Exception) {
+                                if (auth?.currentUser?.uid == user.uid) onSubscriptionLoaded(com.example.data.model.UserSubscription())
+                            }
+                        }
                     } else if (user != null) {
                         onSubscriptionLoaded(com.example.data.model.UserSubscription())
                     }
@@ -825,33 +843,16 @@ class FirebaseSyncManager(private val context: Context) {
     private var streamHeartbeatJob: kotlinx.coroutines.Job? = null
 
     fun startActiveStreamHeartbeat(deviceId: String, deviceName: String, mediaTitle: String, maxAllowedScreens: Int, onLimitExceeded: (Int, Int) -> Unit) {
-        val user = auth?.currentUser ?: return
-        val db = firestore ?: return
+        val owner = auth?.currentUser?.takeUnless { it.isAnonymous }?.uid ?: return
         streamHeartbeatJob?.cancel()
-
         streamHeartbeatJob = scope.launch {
-            while (this.isActive) {
-                try {
-                    val streamData = hashMapOf(
-                        "deviceId" to deviceId,
-                        "deviceName" to deviceName,
-                        "mediaTitle" to mediaTitle,
-                        "lastHeartbeat" to System.currentTimeMillis()
-                    )
-                    db.collection("users").document(user.uid).collection("active_streams").document(deviceId)
-                        .set(streamData, SetOptions.merge()).await()
-
-                    val activeCutoff = System.currentTimeMillis() - 45_000L
-                    val snapshot = db.collection("users").document(user.uid).collection("active_streams")
-                        .whereGreaterThan("lastHeartbeat", activeCutoff)
-                        .get().await()
-
-                    val activeCount = snapshot.size()
-                    if (activeCount > maxAllowedScreens) {
-                        onLimitExceeded(activeCount, maxAllowedScreens)
-                    }
-                } catch (e: Exception) {
-                    Log.d("FirebaseSync", "Heartbeat notice: ${e.message}")
+            while (isActive && auth?.currentUser?.uid == owner) {
+                try { ScreenLease.acquire(context, tv = false) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    onLimitExceeded(maxAllowedScreens, maxAllowedScreens)
+                    ScreenLease.release()
+                    return@launch
                 }
                 kotlinx.coroutines.delay(20_000L)
             }
@@ -860,13 +861,7 @@ class FirebaseSyncManager(private val context: Context) {
 
     fun stopActiveStreamHeartbeat(deviceId: String) {
         streamHeartbeatJob?.cancel()
-        val user = auth?.currentUser ?: return
-        val db = firestore ?: return
-        scope.launch {
-            try {
-                db.collection("users").document(user.uid).collection("active_streams").document(deviceId).delete()
-            } catch (_: Exception) {}
-        }
+        ScreenLease.releaseIn(scope)
     }
 
     fun sendRemoteCommandToTv(sessionCode: String, command: String, extraMs: Long = 0L) {
