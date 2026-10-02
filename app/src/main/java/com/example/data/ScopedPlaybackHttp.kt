@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 internal object ScopedPlaybackHttp {
     private val jar = AppCookieJar()
     private val client = OkHttpClient.Builder().cookieJar(jar)
-        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS)
         .followSslRedirects(false).build()
 
     fun factory(headers: Map<String, String>, sourceUrl: String): OkHttpDataSource.Factory {

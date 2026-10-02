@@ -145,24 +145,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     val isLoadingCatalog: StateFlow<Boolean> = _isLoadingCatalog.asStateFlow()
 
     private fun startNetMirrorWarmup() {
-        viewModelScope.launch {
-            if (!hasCatalogNetwork()) { _isWarmupFinished.value = true; return@launch }
-            android.util.Log.d("NetMirror", "🚀 starting NetMirror background session warmup...")
-            val restored = netMirrorResolver.restoreSessionFromStorage()
-            if (restored && netMirrorResolver.isSessionWarm()) {
-                android.util.Log.d("NetMirror", "🚀 session restored successfully, warm-up skipped!")
-                _isWarmupFinished.value = true
-                return@launch
-            }
-            try {
-                netMirrorResolver.warmNetMirrorSession()
-                android.util.Log.d("NetMirror", "🚀 NetMirror background session warmup finished!")
-            } catch (e: Exception) {
-                android.util.Log.e("NetMirror", "🚀 NetMirror background session warmup failed with exception", e)
-            } finally {
-                _isWarmupFinished.value = true
-            }
-        }
+        // Public playback needs no provider handshake before browsing or Play.
+        _isWarmupFinished.value = true
     }
 
     private val catalogCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "catalog-cache.json"))
