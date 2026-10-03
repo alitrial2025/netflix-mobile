@@ -145,6 +145,8 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         .followSslRedirects(true)
         .build()
 
+    private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context))
+
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
         "net52.cc",
@@ -1190,14 +1192,25 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         return parts.joinToString("; ")
     }
 
-    suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52"): NetMirrorStream = resolutionMutex.withLock {
-        repeat(2) { attempt ->
-            try { return@withLock resolveStreamOnce(tmdbId, type, season, episode, label) }
-            catch (rejected: SessionRejectedException) { if (attempt == 1) throw rejected }
+    suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52"): NetMirrorStream = kotlinx.coroutines.withTimeout(45_000L) {
+        resolutionMutex.withLock {
+            PlaybackServiceGate.check()
+            if (cachedSourceRevision != PlaybackServiceGate.sourceRevision) {
+                streamCache.clear()
+                cachedSourceRevision = PlaybackServiceGate.sourceRevision
+            }
+            val key = "${type}_${tmdbId}_${season}_${episode}"
+            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withLock it }
+            val info = getTmdbInfo(tmdbId, type)
+            val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
+            val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}]", source.expiresAt, info.title)
+            if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
+            streamCache[key] = stream
+            stream
         }
-        throw java.io.IOException("Playback session could not be renewed")
     }
 
+    // Legacy session implementation retained for migration diagnostics; playback uses publicPlayback.
     private suspend fun resolveStreamOnce(tmdbId: String, type: String, season: Int, episode: Int, label: String) = withContext(Dispatchers.IO) {
         PlaybackServiceGate.check()
         currentCoroutineContext().ensureActive()

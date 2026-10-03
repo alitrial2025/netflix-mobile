@@ -36,7 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class CaptionDownloadIntegrationTest {
-    @Test fun providerCaptionCookiesAreScopedAndLocalTracksAreCommittedBeforeOfflinePlayback() = runBlocking {
+    @Test fun publicCaptionRequestsDropLegacyCookiesAndCommitTracksForOfflinePlayback() = runBlocking {
         val app = ApplicationProvider.getApplicationContext<Application>()
         WorkManagerTestInitHelper.initializeTestWorkManager(app, Configuration.Builder()
             .setExecutor(SynchronousExecutor()).setTaskExecutor(SynchronousExecutor()).build())
@@ -53,16 +53,11 @@ class CaptionDownloadIntegrationTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
                 paths += path
-                if (path == "/provider.vtt") {
-                    if (!request.getHeader("Cookie").orEmpty().contains("t_hash_t=fixture-cookie")) {
-                        failures += "Missing provider caption session"
-                        return MockResponse().setResponseCode(403)
-                    }
-                } else if (request.getHeader("Cookie") != null) {
-                    failures += "Provider cookie leaked to CDN"
+                if (request.getHeader("Cookie") != null) {
+                    failures += "Playback cookie was sent"
                     return MockResponse().setResponseCode(403)
                 }
-                return MockResponse().setBody(if (path.endsWith(".vtt")) caption else "fixture-video-bytes")
+                return MockResponse().addHeader("Set-Cookie", "t_hash_t=must-not-replay; Path=/; Secure").setBody(if (path.endsWith(".vtt")) caption else "fixture-video-bytes")
             }
         }
         server.start()

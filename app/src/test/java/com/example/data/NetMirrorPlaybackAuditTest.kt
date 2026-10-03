@@ -25,7 +25,7 @@ class NetMirrorPlaybackAuditTest {
     @Test fun unsignedMasterPlaceholderDoesNotRevokeCookie() {
         assertFalse(StreamSessionPolicy.isSessionRejected(200, """{"sources":[{"file":"/mobile/hls/id.m3u8?in=unknown::future-mode"}]}"""))
         assertTrue(StreamSessionPolicy.isSessionRejected(200, "#EXTM3U\nvideo.m3u8?in=unknown"))
-        val result = ProviderMasterRequest.resolve("https://provider.invalid/mobile/pv/hls/id.m3u8?in=unknown::future-mode&lang=eng", "id")
+        val result = ProviderMasterRequest.resolve("https://provider.invalid/mobile/pv/hls/id.m3u8?in=unknown::future-mode&lang=eng", "id", "https://provider.invalid")
         assertFalse(result.contains("unknown")); assertTrue(result.contains("lang=eng"))
     }
 
@@ -40,57 +40,30 @@ class NetMirrorPlaybackAuditTest {
         } finally { release.complete(Unit); queued.join() }
     }
 
-    @Test fun providerRejectionRetriesOnceWithReplacementSessionAndCdnRejectionKeepsIt() = runBlocking {
-        NetMirrorResolver(context).invalidateDownloadSession("renewal-fixture", "movie", 0, 0, true)
+    @Test fun movieAndProviderCaptionsResolveWithoutRestoringSavedCookies() = runBlocking {
+        val tmdbId = "public-caption-fixture"
+        NetMirrorResolver(context).evictCachedStream(tmdbId, "movie")
         prefs.edit().clear().putString("netmirror_session", session("old-cookie")).commit()
         val seen = CopyOnWriteArrayList<Request>()
-        var rejected = false
-        val client = OkHttpClient.Builder().addInterceptor { c ->
-            val req = c.request(); seen += req
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val req = chain.request(); seen += req
+            assertNull(req.header("Cookie"))
             when (req.url.encodedPath) {
-                "/3/movie/renewal-fixture" -> response(req, """{"title":"Renewal Fixture","release_date":"2001-01-01"}""")
-                "/mobile/search.php" -> {
-                    if (!rejected) {
-                        rejected = true
-                        // A replacement is ready on disk while the old request finishes.
-                        prefs.edit().putString("netmirror_session", session("new-cookie")).commit()
-                        response(req, "", 403)
-                    } else {
-                        assertTrue(req.header("Cookie").orEmpty().contains("new-cookie"))
-                        response(req, """{"searchResult":[{"id":"fixture-movie","t":"Renewal Fixture","y":"2001"}]}""")
-                    }
-                }
-                "/mobile/playlist.php" -> response(req, """{"sources":[{"file":"https://cdn.invalid/exact/video.m3u8?in=issued-signature"}],"tracks":[]}""")
-                "/exact/video.m3u8" -> { assertNull(req.header("Cookie")); response(req, "#EXTM3U\n#EXTINF:1,\ns.jpg") }
-                else -> throw AssertionError("Unexpected request ${req.url.encodedPath}")
+                "/3/movie/$tmdbId" -> response(req, """{"title":"Caption Fixture","release_date":"2001-01-01"}""")
+                "/search.php" -> response(req, """{"searchResult":[{"id":"caption-movie","t":"Caption Fixture","y":"2001"}]}""")
+                "/mobile/playlist.php" -> response(req, """{"sources":[{"file":"https://cdn.invalid/caption-video.m3u8?in=issued-signature"}],"tracks":[{"file":"/captions/english.vtt","kind":"subtitles","label":"English","srclang":"en"}]}""")
+                "/caption-video.m3u8" -> response(req, "#EXTM3U\n#EXTINF:1,\ns.jpg")
+                else -> throw AssertionError("Unexpected handshake ${req.url.encodedPath}")
             }
         }.build()
         val resolver = NetMirrorResolver(context, client)
-        // A late rejection must not delete the newer persisted cookie.
-        val result = resolver.resolveStream("renewal-fixture", "movie")
-        assertEquals("https://cdn.invalid/exact/video.m3u8?in=issued-signature", result.url)
-        assertEquals(2, seen.count { it.url.encodedPath == "/mobile/search.php" })
-        assertTrue(resolver.isSessionWarm())
-        assertTrue(prefs.getString("netmirror_session", "")!!.contains("new-cookie"))
-    }
-
-    @Test fun providerCaptionsKeepTheirOwnSessionWhenTheVideoIsOnACdn() = runBlocking {
-        NetMirrorResolver(context).invalidateDownloadSession("caption-fixture", "movie", 0, 0, true)
-        prefs.edit().clear().putString("netmirror_session", session("caption-cookie")).commit()
-        val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val request = chain.request()
-            when (request.url.encodedPath) {
-                "/3/movie/caption-fixture" -> response(request, """{"title":"Caption Fixture","release_date":"2001-01-01"}""")
-                "/mobile/search.php" -> response(request, """{"searchResult":[{"id":"caption-movie","t":"Caption Fixture","y":"2001"}]}""")
-                "/mobile/playlist.php" -> response(request, """{"sources":[{"file":"https://cdn.invalid/caption-video.m3u8"}],"tracks":[{"file":"/captions/english.vtt","kind":"subtitles","label":"English","srclang":"en"}]}""")
-                "/caption-video.m3u8" -> { assertNull(request.header("Cookie")); response(request, "#EXTM3U\n#EXTINF:1,\ns.jpg") }
-                else -> throw AssertionError("Unexpected request ${request.url.encodedPath}")
-            }
-        }.build()
-        val result = NetMirrorResolver(context, client).resolveStream("caption-fixture", "movie")
-        assertNull(result.headers["Cookie"])
-        assertTrue(result.captionHeaders["Cookie"].orEmpty().contains("caption-cookie"))
-        assertEquals("https://provider.invalid/captions/english.vtt", result.captions.single().url)
+        val result = resolver.resolveStream(tmdbId, "movie")
+        assertEquals("https://cdn.invalid/caption-video.m3u8?in=issued-signature", result.url)
+        assertNull(result.headers["Cookie"]); assertNull(result.captionHeaders["Cookie"])
+        assertEquals("https://net52.cc/captions/english.vtt", result.captions.single().url)
+        val count = seen.size
+        assertEquals(result, resolver.resolveStream(tmdbId, "movie"))
+        assertEquals(count, seen.size)
     }
 
     private fun response(req: Request, body: String, code: Int = 200) = Response.Builder().request(req)

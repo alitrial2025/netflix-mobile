@@ -883,6 +883,17 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             )
         }
 
+        val membershipPrompt by viewModel.membershipPrompt.collectAsStateWithLifecycle()
+        membershipPrompt?.let { media ->
+            com.example.ui.components.MembershipDialog(
+                title = media.title,
+                message = "Subscribe to a plan that includes this title to watch the full movie or show.",
+                onSubscribe = viewModel::subscribeFromPrompt,
+                onTrailer = viewModel::watchPromptTrailer,
+                onDismiss = viewModel::dismissMembershipPrompt
+            )
+        }
+
         // Trailer End → Sign In / Sign Up Prompt (Guest)
         val showTrailerEndPrompt by viewModel.showTrailerEndPrompt.collectAsStateWithLifecycle()
         if (showTrailerEndPrompt) {

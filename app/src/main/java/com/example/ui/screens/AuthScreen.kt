@@ -1041,8 +1041,8 @@ private fun PrivacySheetContent(onClose: () -> Unit) {
 
         PrivacyBulletItem(
             icon = Icons.Default.Lock,
-            title = "End-to-End Encryption",
-            description = "Your credentials, watch progress, and payment credentials are encrypted using industry-standard TLS protocols."
+            title = "Encrypted connections",
+            description = "Your sign-in and account requests use encrypted HTTPS connections."
         )
 
         PrivacyBulletItem(
@@ -1060,7 +1060,7 @@ private fun PrivacySheetContent(onClose: () -> Unit) {
         PrivacyBulletItem(
             icon = Icons.Default.Devices,
             title = "Authorized TV Streaming",
-            description = "You have full visibility and control over all connected Android TV devices with instant unpair capability."
+            description = "Mobile is tied to one phone or tablet. Basic is tied to one device. Standard and Premium support more simultaneous screens."
         )
 
         Spacer(modifier = Modifier.height(24.dp))
