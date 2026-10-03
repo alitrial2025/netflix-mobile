@@ -1994,8 +1994,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 showToast("Loading video...")
                 // A rapid tap sequence settles before contacting the playback provider.
                 kotlinx.coroutines.delay(250L)
-                val streamResult = kotlinx.coroutines.withTimeoutOrNull(58_000L) {
-                    netMirrorResolver.resolveNet52(tmdbId, type, season, epNum)
+                val streamResult = kotlinx.coroutines.withTimeoutOrNull(35_000L) {
+                    netMirrorResolver.resolveNet52(tmdbId, type, season, epNum, media.title, media.releaseYear.toString())
                 } ?: throw java.io.IOException("Playback took too long. Please try again.")
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (requestGeneration != playbackRequestGeneration) return@launch
