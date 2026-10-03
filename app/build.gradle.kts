@@ -31,8 +31,8 @@ android {
     applicationId = "com.netflixpro.apk"
     minSdk = 24
     targetSdk = 35
-    versionCode = 11
-    versionName = "1.10"
+    versionCode = 13
+    versionName = "1.12"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "PAYHERO_API_AUTH", "\"$clientPaymentAuth\"")
