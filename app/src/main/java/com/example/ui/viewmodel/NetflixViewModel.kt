@@ -1900,14 +1900,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val playbackUid = syncManager.getUserId()
         resolveJob = viewModelScope.launch {
             try {
-                if (!useConfirmedOfflineDownload) com.example.data.DeviceAccessGuard.confirm(getApplication(), tv = false)
                 if (syncManager.getUserId() != playbackUid || requestGeneration != playbackRequestGeneration) return@launch
                 if (isMovieLocked(media)) {
                     _playerState.update { it.copy(isResolving = false, isPlaying = false, resolveError = "Your membership changed. Choose a plan to continue.") }
                     _membershipPrompt.value = media
                     return@launch
                 }
-                if (!useConfirmedOfflineDownload) com.example.data.ScreenLease.acquire(getApplication(), tv = false)
+                // This transaction validates live membership, device binding and concurrent screens.
+                if (!useConfirmedOfflineDownload) kotlinx.coroutines.withTimeoutOrNull(15_000L) {
+                    com.example.data.ScreenLease.acquire(getApplication(), tv = false)
+                    true
+                } ?: throw com.example.data.MembershipCheckException()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 if (requestGeneration == playbackRequestGeneration) _playerState.update { it.copy(isResolving = false, isPlaying = false,

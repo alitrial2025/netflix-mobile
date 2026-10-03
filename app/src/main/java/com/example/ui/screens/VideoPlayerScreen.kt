@@ -208,6 +208,15 @@ fun VideoPlayerScreen(
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
     var playbackError by remember { mutableStateOf<String?>(null) }
+    var slowLookup by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
+    LaunchedEffect(media.id, playerState.episode?.id, playerState.isResolving) {
+        slowLookup = false
+        if (playerState.isResolving) {
+            kotlinx.coroutines.delay(15_000L)
+            slowLookup = true
+        }
+    }
+
 
     var thumbnailCues by remember(media.id, playerState.episode?.id) { mutableStateOf<List<SeekThumbnail>>(emptyList()) }
     var scrubPosition by remember(media.id, playerState.episode?.id) { mutableStateOf<Int?>(null) }
@@ -242,7 +251,12 @@ fun VideoPlayerScreen(
 
     // Initialize ExoPlayer
     val exoPlayer = remember(context) {
-        ExoPlayer.Builder(context).build().apply {
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(3_000, 15_000, 900, 1_500)
+            .setTargetBufferBytes(16 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+        ExoPlayer.Builder(context).setLoadControl(loadControl).build().apply {
             repeatMode = Player.REPEAT_MODE_OFF
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
@@ -263,7 +277,8 @@ fun VideoPlayerScreen(
             .setMaxVideoSize(Int.MAX_VALUE, maxVideoHeight).build()
     }
     val loadingPercentage = com.example.ui.components.rememberPlayerLoadingPercentage(exoPlayer,
-        resolving = playerState.isResolving || playerState.resolvedUrl.isNullOrBlank(), buffering = isBuffering)
+        resolving = playerState.isResolving || playerState.resolvedUrl.isNullOrBlank(), buffering = isBuffering,
+        startupBufferMs = 900, rebufferMs = 1_500)
 
     fun reportProgress() {
         val state = latestPlayerState
@@ -1043,7 +1058,13 @@ fun VideoPlayerScreen(
                     .clickable(enabled = false) {},
                 contentAlignment = Alignment.Center
             ) {
-                NetflixSpinner(size = 72.dp, percentage = loadingPercentage)
+                Column(horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    NetflixSpinner(size = 72.dp, percentage = loadingPercentage)
+                    if (slowLookup && playerState.isResolving) {
+                        Text("Still finding your video…", color = Color.White)
+                    }
+                }
             }
         }
 
