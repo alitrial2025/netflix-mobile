@@ -145,7 +145,12 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         .followSslRedirects(true)
         .build()
 
-    private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context))
+    private val metadataClient = client.newBuilder()
+        .cookieJar(okhttp3.CookieJar.NO_COOKIES)
+        .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(3, TimeUnit.SECONDS).build()
+    private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context),
+        backgroundCatalogRefresh = clientOverride == null)
 
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
@@ -170,7 +175,6 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
     companion object {
         @Volatile private var _session: WarmSession? = null
         private val sessionMutex = Mutex()
-        private val resolutionMutex = Mutex()
         private var cachedSourceRevision = PlaybackServiceGate.sourceRevision
         private val postCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
         private val episodeCache = ConcurrentHashMap<String, Pair<Long, JSONArray>>()
@@ -739,17 +743,19 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         }
     }
 
-    private suspend fun getTmdbInfo(tmdbId: String, type: String): TmdbInfo = withContext(Dispatchers.IO) {
+    private suspend fun getTmdbInfo(tmdbId: String, type: String, cardTitle: String = "", cardYear: String = ""): TmdbInfo = withContext(Dispatchers.IO) {
         val cacheKey = "${type}_$tmdbId"
         val cached = tmdbInfoCache[cacheKey]
         if (cached != null) {
             return@withContext cached
         }
+        if (cardTitle.isNotBlank() && cardYear.matches(Regex("[0-9]{4}")) && cardTitle.any { it in 'A'..'Z' || it in 'a'..'z' }) {
+            return@withContext TmdbInfo(cardTitle, cardYear)
+        }
         try {
             val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$TMDB_API_KEY"
             val req = Request.Builder().url(url).build()
-            val res = fetch(req)
-            val body = res.body
+            val body = metadataClient.fetchText(req).body
             val json = JSONObject(body)
             val title = json.optString("title").takeIf { it.isNotEmpty() } ?: json.optString("name")
             val dateStr = json.optString("release_date").takeIf { it.isNotEmpty() } ?: json.optString("first_air_date")
@@ -1192,16 +1198,16 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         return parts.joinToString("; ")
     }
 
-    suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52"): NetMirrorStream = kotlinx.coroutines.withTimeout(45_000L) {
-        resolutionMutex.withLock {
+    suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52", cardTitle: String = "", cardYear: String = ""): NetMirrorStream = kotlinx.coroutines.withTimeout(34_000L) {
+        withContext(Dispatchers.IO) {
             PlaybackServiceGate.check()
             if (cachedSourceRevision != PlaybackServiceGate.sourceRevision) {
                 streamCache.clear()
                 cachedSourceRevision = PlaybackServiceGate.sourceRevision
             }
             val key = "${type}_${tmdbId}_${season}_${episode}"
-            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withLock it }
-            val info = getTmdbInfo(tmdbId, type)
+            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withContext it }
+            val info = getTmdbInfo(tmdbId, type, cardTitle, cardYear)
             val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
             val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}]", source.expiresAt, info.title)
             if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
@@ -1381,11 +1387,11 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         return@withContext result
     }
 
-    suspend fun resolveNet52(tmdbId: String, type: String, season: Int = 0, episode: Int = 0): NetMirrorStream = withContext(Dispatchers.IO) {
+    suspend fun resolveNet52(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, cardTitle: String = "", cardYear: String = ""): NetMirrorStream = withContext(Dispatchers.IO) {
         val t0 = System.currentTimeMillis()
         Log.d("NetMirror", "[Stream] ▶️ resolve: TMDB $tmdbId ($type) S${season}E$episode")
         try {
-            val result = resolveStream(tmdbId, type, season, episode, "Premium")
+            val result = resolveStream(tmdbId, type, season, episode, "Premium", cardTitle, cardYear)
             Log.d("NetMirror", "[Stream] ✅ Total: ${System.currentTimeMillis() - t0}ms | source: ${result.sourceId}")
             return@withContext result
         } catch (e: Exception) {
