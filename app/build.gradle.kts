@@ -16,13 +16,6 @@ val releaseSigningProperties = Properties().apply {
   if (signingFile.exists()) signingFile.inputStream().use { load(it) }
 }
 
-val clientPaymentProperties = Properties().apply {
-  val envFile = rootProject.file(".env")
-  if (envFile.isFile) envFile.inputStream().use { load(it) }
-}
-val clientPaymentAuth = (System.getenv("PAYHERO_API_AUTH") ?: clientPaymentProperties.getProperty("PAYHERO_API_AUTH", ""))
-  .replace("\\", "\\\\").replace("\"", "\\\"")
-
 android {
   namespace = "com.example"
   compileSdk = 35
@@ -31,11 +24,10 @@ android {
     applicationId = "com.netflixpro.apk"
     minSdk = 24
     targetSdk = 35
-    versionCode = 13
-    versionName = "1.12"
+    versionCode = 14
+    versionName = "1.13"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    buildConfigField("String", "PAYHERO_API_AUTH", "\"$clientPaymentAuth\"")
   }
 
   signingConfigs {

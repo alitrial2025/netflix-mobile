@@ -133,7 +133,9 @@ fun MyNetflixScreen(
     userSubscription: com.example.data.model.UserSubscription = com.example.data.model.UserSubscription(),
     onOpenAuth: () -> Unit = {},
     modifier: Modifier = Modifier,
-    reminderMedia: List<MediaItem> = emptyList()
+    reminderMedia: List<MediaItem> = emptyList(),
+    isAuthenticated: Boolean = !userSubscription.isGuest,
+    onOpenSubscription: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     var showClearDialog by remember { mutableStateOf(false) }
@@ -199,7 +201,7 @@ fun MyNetflixScreen(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable {
-                        if (userSubscription.isGuest) {
+                        if (!isAuthenticated) {
                             onShowToast("Sign in to create and manage profiles.")
                             onOpenAuth()
                         } else {
@@ -294,7 +296,8 @@ fun MyNetflixScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        if (userSubscription.isGuest) {
+        if (!isAuthenticated || userSubscription.isGuest) {
+            val membershipAction = if (isAuthenticated) onOpenSubscription else onOpenAuth
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -309,7 +312,7 @@ fun MyNetflixScreen(
                         )
                     )
                     .border(1.dp, NetflixRed.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                    .clickable { onOpenAuth() }
+                    .clickable { membershipAction() }
                     .padding(14.dp)
                     .testTag("my_netflix_guest_banner")
             ) {
@@ -320,7 +323,7 @@ fun MyNetflixScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Sign In to NetflixPro",
+                            text = if (isAuthenticated) "Choose your NetflixPro plan" else "Sign In to NetflixPro",
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
@@ -334,12 +337,12 @@ fun MyNetflixScreen(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Button(
-                        onClick = onOpenAuth,
+                        onClick = membershipAction,
                         colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
                         shape = RoundedCornerShape(6.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        Text("Sign In", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(if (isAuthenticated) "View Plans" else "Sign In", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -433,7 +436,7 @@ fun MyNetflixScreen(
                 )
                 .border(1.dp, NetflixBlue.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                 .clickable {
-                    if (userSubscription.isGuest) {
+                    if (!isAuthenticated) {
                         onShowToast("Sign in to sync with your TV.")
                         onOpenAuth()
                     } else {

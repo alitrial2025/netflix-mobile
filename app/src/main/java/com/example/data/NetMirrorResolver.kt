@@ -173,6 +173,10 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
     private val ACTIVE_DOMAIN_KEY = "netmirror_active_domain"
 
     companion object {
+        @Volatile private var applicationResolver: NetMirrorResolver? = null
+        fun getInstance(context: Context): NetMirrorResolver = applicationResolver ?: synchronized(this) {
+            applicationResolver ?: NetMirrorResolver(context.applicationContext).also { applicationResolver = it }
+        }
         @Volatile private var _session: WarmSession? = null
         private val sessionMutex = Mutex()
         private var cachedSourceRevision = PlaybackServiceGate.sourceRevision
@@ -185,6 +189,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
 
     fun playbackCooldownMillis(): Long = PlaybackServiceGate.remainingMs()
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
+        publicPlayback.evict(tmdbId, type, season, episode)
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")
     }
     /** Renew CDN links without throwing away a still-valid provider handshake. */
