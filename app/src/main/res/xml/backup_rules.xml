@@ -7,6 +7,8 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="update_gate.xml" />
+        <exclude domain="sharedpref" path="offline_device_access.xml" />
+        <exclude domain="sharedpref" path="device_access.xml" />
     <exclude domain="file" path="update-gate/" />
     <exclude domain="file" path="downloads/" />
     <exclude domain="database" path="androidx.work.workdb" />

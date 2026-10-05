@@ -15,7 +15,13 @@ import java.util.UUID
 class DeviceAccessException(message: String) : java.io.IOException(message)
 class MembershipCheckException : java.io.IOException("We couldn't verify your membership and device. Reconnect and try again.")
 
+internal enum class DeviceConfirmationPurpose { ACCOUNT, PLAYBACK }
+
 internal object DeviceAccessPolicy {
+    fun canConfirm(purpose: DeviceConfirmationPurpose, devicePermitted: Boolean): Boolean =
+        purpose == DeviceConfirmationPurpose.ACCOUNT || devicePermitted
+    fun shouldClaimDevice(plan: String, active: Boolean, bindingExists: Boolean, purpose: DeviceConfirmationPurpose): Boolean =
+        active && isSingleDevice(plan) && !bindingExists && purpose == DeviceConfirmationPurpose.PLAYBACK
     fun isSingleDevice(planId: String) = planId == "plan_mobile" || planId == "plan_basic"
     fun permits(planId: String, active: Boolean, tv: Boolean, boundDevice: String?, device: String): Boolean =
         !active || (!(tv && planId == "plan_mobile") &&
@@ -33,7 +39,7 @@ internal object DeviceAccessPolicy {
 
 /** Login-device binding is separate from concurrent playback slots. Sign-out does not release a binding. */
 object DeviceAccessGuard {
-    private data class Confirmation(val uid: String, val plan: String, val expiry: Long, val status: String)
+    private data class Confirmation(val uid: String, val plan: String, val expiry: Long, val status: String, val deviceClaimed: Boolean = true)
     @Volatile private var confirmed: Confirmation? = null
 
     fun deviceId(context: Context): String {
@@ -49,14 +55,38 @@ object DeviceAccessGuard {
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
-    fun clear() { confirmed = null }
+    fun clear(context: Context? = null) {
+        confirmed = null
+        context?.let { OfflineAccessProof(it).clear() }
+    }
+    fun restoreOffline(context: Context, uid: String, plan: String, expiry: Long, status: String): Boolean {
+        if (!OfflineAccessProof(context).matches(uid, deviceId(context), plan, expiry, status)) return false
+        confirmed = Confirmation(uid, plan, expiry, status)
+        return true
+    }
     fun isConfirmed(uid: String, plan: String, expiry: Long, status: String): Boolean {
         val proof = confirmed ?: return false
         return uid.isNotBlank() && proof.uid == uid && proof.plan == plan && proof.expiry == expiry &&
             DeviceAccessPolicy.confirmationStatusMatches(proof.status, status, expiry, SubscriptionTime.now())
     }
 
-    suspend fun confirm(context: Context, tv: Boolean): com.google.firebase.firestore.DocumentSnapshot {
+    /** Account management can read a paid membership without claiming its playback device. */
+    suspend fun confirmAccount(context: Context): com.google.firebase.firestore.DocumentSnapshot =
+        confirm(context, tv = false, purpose = DeviceConfirmationPurpose.ACCOUNT)
+
+    suspend fun confirm(context: Context, tv: Boolean): com.google.firebase.firestore.DocumentSnapshot =
+        confirm(context, tv, DeviceConfirmationPurpose.PLAYBACK)
+
+    private fun isPlaybackDeviceConfirmed(uid: String): Boolean = confirmed?.let {
+        it.uid == uid && it.deviceClaimed && RenewalPolicy.grantsAccess(it.status, it.expiry, SubscriptionTime.now())
+    } == true
+
+    internal suspend fun claimForPlayback(context: Context, tv: Boolean, uid: String) {
+        if (!isPlaybackDeviceConfirmed(uid)) confirm(context, tv)
+        if (FirebaseAuth.getInstance().currentUser?.uid != uid) throw MembershipCheckException()
+    }
+
+    private suspend fun confirm(context: Context, tv: Boolean, purpose: DeviceConfirmationPurpose): com.google.firebase.firestore.DocumentSnapshot {
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser?.takeUnless { it.isAnonymous } ?: throw MembershipCheckException()
         val db = FirebaseFirestore.getInstance()
@@ -65,31 +95,41 @@ object DeviceAccessGuard {
         val device = deviceId(context)
         try {
             // Server transaction serializes two first-device logins, including Mobile -> Basic changes.
-            val snapshot = kotlinx.coroutines.withTimeoutOrNull(15_000L) { db.runTransaction { tx ->
+            val (snapshot, devicePermitted, deviceClaimed) = kotlinx.coroutines.withTimeoutOrNull(15_000L) { db.runTransaction { tx ->
                 val sub = tx.get(subRef)
                 val plan = sub.getString("planId").orEmpty()
                 val active = DeviceAccessPolicy.screenCount(plan) > 0 && RenewalPolicy.grantsAccess(
                     sub.getString("status").orEmpty(), sub.getLong("expiresAt") ?: 0L, SubscriptionTime.now())
                 val binding = if (active && DeviceAccessPolicy.isSingleDevice(plan)) tx.get(bindingRef) else null
-                if (!DeviceAccessPolicy.permits(plan, active, tv, binding?.getString("deviceId"), device)) {
+                val devicePermitted = DeviceAccessPolicy.permits(plan, active, tv, binding?.getString("deviceId"), device)
+                if (!DeviceAccessPolicy.canConfirm(purpose, devicePermitted)) {
                     throw DeviceAccessException(if (tv && plan == "plan_mobile")
                         "The Mobile plan works on one phone or tablet. Choose Basic, Standard or Premium for TV."
                     else "This plan is tied to another device. Use that device, upgrade your plan, or contact support to change devices.")
                 }
-                if (active && DeviceAccessPolicy.isSingleDevice(plan) && binding?.exists() != true) {
+                val claimDevice = DeviceAccessPolicy.shouldClaimDevice(plan, active, binding?.exists() == true, purpose)
+                if (claimDevice) {
                     tx.set(bindingRef, mapOf("deviceId" to device, "deviceType" to if (tv) "tv" else "mobile",
                         "boundAt" to FieldValue.serverTimestamp()))
                 }
-                sub
+                Triple(sub, devicePermitted, active && (!DeviceAccessPolicy.isSingleDevice(plan) ||
+                    binding?.getString("deviceId") == device || claimDevice))
             }.await() } ?: throw MembershipCheckException()
             if (auth.currentUser?.uid != user.uid) throw MembershipCheckException()
-            confirmed = Confirmation(user.uid, snapshot.getString("planId").orEmpty(), snapshot.getLong("expiresAt") ?: 0L, snapshot.getString("status").orEmpty())
+            confirmed = if (devicePermitted) Confirmation(user.uid, snapshot.getString("planId").orEmpty(),
+                snapshot.getLong("expiresAt") ?: 0L, snapshot.getString("status").orEmpty(), deviceClaimed) else null
+            if (devicePermitted && deviceClaimed) OfflineAccessProof(context).save(user.uid, device, snapshot.getString("planId").orEmpty(),
+                snapshot.getLong("expiresAt") ?: 0L, snapshot.getString("status").orEmpty())
+            else OfflineAccessProof(context).clear()
             return snapshot
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
             confirmed = null
             val restriction = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<DeviceAccessException>().firstOrNull()
-            if (restriction != null) throw restriction
+            if (restriction != null) {
+                OfflineAccessProof(context).clear()
+                throw restriction
+            }
             throw MembershipCheckException()
         }
     }
@@ -108,6 +148,7 @@ object ScreenLease {
     suspend fun acquire(context: Context, tv: Boolean) {
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser?.takeUnless { it.isAnonymous } ?: throw MembershipCheckException()
+        DeviceAccessGuard.claimForPlayback(context, tv, user.uid)
         val device = DeviceAccessGuard.deviceId(context)
         val db = FirebaseFirestore.getInstance()
         val account = db.collection("users").document(user.uid)

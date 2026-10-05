@@ -119,7 +119,8 @@ data class PlayerState(
     val hasEnded: Boolean = false,
     val audioLanguage: String = "Original",
     val subtitleLanguage: String = "Off",
-    val captions: List<com.example.data.Caption> = emptyList()
+    val captions: List<com.example.data.Caption> = emptyList(),
+    val startupStartedAtMs: Long = 0L
 )
 
 class NetflixViewModel(application: Application) : AndroidViewModel(application) {
@@ -547,7 +548,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val planId = prefs.getString("user_plan_id", "plan_guest") ?: "plan_guest"
         val planName = prefs.getString("user_plan_name", "Guest") ?: "Guest"
         val status = prefs.getString("user_plan_status", "NONE") ?: "NONE"
-        return com.example.data.model.UserSubscription(
+        val stored = com.example.data.model.UserSubscription(
             status = status,
             planId = planId,
             planName = planName,
@@ -558,6 +559,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             subscribedAt = prefs.getLong("user_plan_subscribed_at", 0L),
             expiresAt = prefs.getLong("user_plan_expires_at", 0L)
         )
+        if (!playbackNetwork(getApplication()).online) {
+            com.example.data.DeviceAccessGuard.restoreOffline(getApplication(), syncManager.getUserId(),
+                stored.planId, stored.expiresAt, stored.status)
+        }
+        return stored
     }
 
     private fun setUserSubscription(sub: com.example.data.model.UserSubscription) {
@@ -613,7 +619,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     setUserSubscription(confirmed)
                     saveStoredSubscription(confirmed)
                 } else {
-                    showToast("Membership could not be confirmed. Retry your payment code; do not pay again.")
+                    showToast("Payment was verified. Reconnect to refresh your membership; do not pay again.")
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -1841,6 +1847,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false) {
+        val startupStartedAtMs = android.os.SystemClock.elapsedRealtime()
         if (!offlineOnly && !com.example.discovery.ReleasePolicy.isPlayableDate(media.releaseDate)) {
             showToast("This title hasn't been released yet. Add a reminder in Coming Soon.")
             return
@@ -1864,6 +1871,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         _playerState.value = PlayerState(
             media = media,
+            startupStartedAtMs = startupStartedAtMs,
             episode = targetEpisode,
             nextEpisode = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) },
             nextEpisodeChecked = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) != null } == true,
@@ -1892,8 +1900,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         val downloadKey = if (episode != null) "${media.id}_${episode.id}" else if (media.type == MediaType.TV_SHOW && targetEpisode != null) "${media.id}_${targetEpisode.id}" else media.id
         val existingDownload = downloads.value.find { it.downloadKey == downloadKey && it.isComplete }
-        val useConfirmedOfflineDownload = !playbackNetwork(getApplication()).online &&
-            existingDownload?.localFilePath?.let { java.io.File(it).let { file -> file.exists() && file.length() > 0 } } == true
+        val useConfirmedOfflineDownload = existingDownload?.localFilePath?.let {
+            java.io.File(it).let { file -> file.isFile && file.length() > 0 }
+        } == true
         syncManager.stopActiveStreamHeartbeat(devId)
 
         resolveJob?.cancel()
@@ -1907,7 +1916,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
                 // This transaction validates live membership, device binding and concurrent screens.
-                if (!useConfirmedOfflineDownload) kotlinx.coroutines.withTimeoutOrNull(15_000L) {
+                if (!useConfirmedOfflineDownload && !offlineOnly) kotlinx.coroutines.withTimeoutOrNull(15_000L) {
                     com.example.data.ScreenLease.acquire(getApplication(), tv = false)
                     true
                 } ?: throw com.example.data.MembershipCheckException()
@@ -1917,7 +1926,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     resolveError = error.message ?: "Membership could not be verified. Reconnect and try again.") }
                 return@launch
             }
-            if (!useConfirmedOfflineDownload) {
+            if (!useConfirmedOfflineDownload && !offlineOnly) {
                 syncManager.startActiveStreamHeartbeat(
                     deviceId = devId,
                     deviceName = "Android Phone",
@@ -2428,7 +2437,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         if (isMovieLocked(media)) {
-            showToast("This title is outside your plan. Upgrade to download it.")
+            showToast("Your membership must be verified on this plan’s playback device before downloading. Use the linked device or upgrade.")
             _showSubscriptionSheet.value = true
             return
         }
@@ -2437,7 +2446,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             showToast("Already downloaded. Open Downloads to watch or delete this title.")
             return
         }
-        if (key !in downloadTasks.value && downloads.value.size + downloadTasks.value.size >= _userSubscription.value.maxDownloads) {
+        if (!com.example.data.download.DownloadQuotaPolicy.canQueue(key,
+                downloads.value.map { it.downloadKey }, downloadManager.downloadTasks.value.values,
+                _activeProfile.value.id, _userSubscription.value.maxDownloads)) {
             showToast("Download limit reached (${_userSubscription.value.maxDownloads} titles on ${_userSubscription.value.planName}). Upgrade plan to download more.")
             _showSubscriptionSheet.value = true
             return
@@ -2475,6 +2486,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
             showToast("An active download plan is required to continue.")
             if (_userSubscription.value.isGuest) _showAuthScreen.value = true else _showSubscriptionSheet.value = true
+            return
+        }
+        if (!com.example.data.download.DownloadQuotaPolicy.canQueue(key,
+                downloads.value.map { it.downloadKey }, downloadManager.downloadTasks.value.values,
+                _activeProfile.value.id, _userSubscription.value.maxDownloads)) {
+            showToast("Download limit reached. Delete a saved title to retry this download.")
             return
         }
         if (downloadManager.resumeSavedDownload(key, _activeProfile.value.id)) return

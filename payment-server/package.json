@@ -1,0 +1,20 @@
+{
+  "name": "netflixpro-membership-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "test:integration": "firebase emulators:exec --config ../firebase.test.json --project demo-netflixpro-billing --only firestore \"node --test integration/*.test.mjs\"",
+    "check": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "jose": "6.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.76.0",
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.32.1"
+  }
+}

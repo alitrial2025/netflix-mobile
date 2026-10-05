@@ -35,4 +35,25 @@ class DeviceAccessGuardTest {
         assertEquals(1, ScreenLease.availableSlot(listOf("a", "b"),listOf(100_000,100_000),listOf(false,true),"c",110_000))
         assertEquals(listOf(1,1,2,4,0),listOf("plan_mobile","plan_basic","plan_standard","plan_premium","unknown").map(DeviceAccessPolicy::screenCount))
     }
+    @org.junit.Test fun advertisedScreensMatchTheLeasePolicyForEveryPaidPlan() {
+        for (plan in com.example.data.model.SubscriptionPlans.PLANS) {
+            org.junit.Assert.assertEquals(plan.screens, DeviceAccessPolicy.screenCount(plan.id))
+            org.junit.Assert.assertEquals(plan.id in setOf("plan_mobile", "plan_basic"), DeviceAccessPolicy.isSingleDevice(plan.id))
+        }
+    }
+
+    @Test fun billingDoesNotClaimBasicOnThePhoneOrRejectAnAccountLinkedToTv() {
+        val permitted = DeviceAccessPolicy.permits("plan_basic", true, false, "tv-device", "phone-device")
+        assertFalse(permitted)
+        assertTrue(DeviceAccessPolicy.canConfirm(DeviceConfirmationPurpose.ACCOUNT, permitted))
+        assertFalse(DeviceAccessPolicy.canConfirm(DeviceConfirmationPurpose.PLAYBACK, permitted))
+        for (plan in listOf("plan_mobile", "plan_basic")) {
+            assertFalse(DeviceAccessPolicy.shouldClaimDevice(plan, true, false, DeviceConfirmationPurpose.ACCOUNT))
+            assertTrue(DeviceAccessPolicy.shouldClaimDevice(plan, true, false, DeviceConfirmationPurpose.PLAYBACK))
+            assertFalse(DeviceAccessPolicy.shouldClaimDevice(plan, true, true, DeviceConfirmationPurpose.PLAYBACK))
+            assertFalse(DeviceAccessPolicy.shouldClaimDevice(plan, false, false, DeviceConfirmationPurpose.PLAYBACK))
+        }
+        assertFalse(DeviceAccessPolicy.shouldClaimDevice("plan_premium", true, false, DeviceConfirmationPurpose.PLAYBACK))
+    }
+
 }

@@ -8,7 +8,9 @@ internal object UpdateGatePolicy {
         data class Required(val release: UpdateRelease, val compatible: Boolean) : Decision
     }
 
-    fun decide(installedVersion: Long, sdk: Int, latest: UpdateRelease?, cached: UpdateRelease?): Decision {
+    fun decide(installedVersion: Long, sdk: Int, latest: UpdateRelease?, cached: UpdateRelease?, online: Boolean = true): Decision {
+        // Updates resume on reconnect; local downloads must remain accessible without Internet.
+        if (!online) return Decision.Current
         val required = listOfNotNull(latest, cached)
             .filter { it.versionCode > installedVersion }.maxByOrNull { it.versionCode }
         if (required != null) return Decision.Required(required, required.minSdk <= sdk)

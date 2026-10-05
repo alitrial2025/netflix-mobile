@@ -179,6 +179,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         private val postCache = ConcurrentHashMap<String, Pair<Long, JSONObject>>()
         private val episodeCache = ConcurrentHashMap<String, Pair<Long, JSONArray>>()
         private val streamCache = ConcurrentHashMap<String, NetMirrorStream>()
+        private val streamRequests = KeyedRequestGate()
         private val tmdbInfoCache = ConcurrentHashMap<String, TmdbInfo>()
         private val searchResultCache = ConcurrentHashMap<String, SearchResult>()
     }
@@ -1200,19 +1201,21 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
 
     suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52", cardTitle: String = "", cardYear: String = ""): NetMirrorStream = kotlinx.coroutines.withTimeout(34_000L) {
         withContext(Dispatchers.IO) {
+          streamRequests.withKey("${type}_${tmdbId}_${season}_${episode}") {
             PlaybackServiceGate.check()
             if (cachedSourceRevision != PlaybackServiceGate.sourceRevision) {
                 streamCache.clear()
                 cachedSourceRevision = PlaybackServiceGate.sourceRevision
             }
             val key = "${type}_${tmdbId}_${season}_${episode}"
-            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withContext it }
+            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withKey it }
             val info = getTmdbInfo(tmdbId, type, cardTitle, cardYear)
             val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
             val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}]", source.expiresAt, info.title)
             if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
             streamCache[key] = stream
             stream
+          }
         }
     }
 

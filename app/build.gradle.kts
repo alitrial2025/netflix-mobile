@@ -16,11 +16,13 @@ val releaseSigningProperties = Properties().apply {
   if (signingFile.exists()) signingFile.inputStream().use { load(it) }
 }
 
-val clientPaymentProperties = Properties().apply {
+val billingProperties = Properties().apply {
+  val defaultsFile = rootProject.file(".env.example")
+  if (defaultsFile.isFile) defaultsFile.inputStream().use { load(it) }
   val envFile = rootProject.file(".env")
   if (envFile.isFile) envFile.inputStream().use { load(it) }
 }
-val clientPaymentAuth = (System.getenv("PAYHERO_API_AUTH") ?: clientPaymentProperties.getProperty("PAYHERO_API_AUTH", ""))
+val paymentApiUrl = (System.getenv("PAYMENT_API_URL") ?: billingProperties.getProperty("PAYMENT_API_URL", ""))
   .replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
@@ -35,14 +37,14 @@ android {
     versionName = "1.10"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    buildConfigField("String", "PAYHERO_API_AUTH", "\"$clientPaymentAuth\"")
+    buildConfigField("String", "PAYMENT_API_URL", "\"$paymentApiUrl\"")
   }
 
   signingConfigs {
     create("release") {
       storeFile = file("release.jks")
       storePassword = releaseSigningProperties.getProperty("storePassword")
-      keyAlias = "netflixpro"
+      keyAlias = releaseSigningProperties.getProperty("keyAlias", "netflixpro")
       keyPassword = releaseSigningProperties.getProperty("keyPassword")
       enableV1Signing = true
       enableV2Signing = true
@@ -84,7 +86,8 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
-  ignoreList.add("PAYHERO_API_AUTH")
+  ignoreList.add("PAYHERO_API_AUTH") // Merchant secret belongs only in the Worker.
+  ignoreList.add("PAYMENT_API_URL")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }

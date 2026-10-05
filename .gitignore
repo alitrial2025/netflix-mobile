@@ -22,3 +22,8 @@ debug.keystore
 *.keystore
 **/release-signing.properties
 **/build/
+
+# Local Firebase verification runtime
+.firebase/
+firebase-debug.log
+firestore-debug.log
