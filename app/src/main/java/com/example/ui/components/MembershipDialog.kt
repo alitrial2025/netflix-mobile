@@ -32,3 +32,22 @@ fun MembershipDialog(title: String, message: String, onSubscribe: () -> Unit, on
         dismissButton = { TextButton(onClick = onTrailer) { Text("Continue watching trailer", color = Color.White) } }
     )
 }
+
+
+@Composable
+fun DownloadMembershipDialog(onSubscribe: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color(0xFF191919),
+        titleContentColor = Color.White,
+        textContentColor = Color(0xFFCCCCCC),
+        icon = { Icon(Icons.Default.Lock, null, tint = Color(0xFFE50914)) },
+        title = { Text("Upgrade to download", fontWeight = FontWeight.Bold) },
+        text = { Text("Choose an active plan that includes this title to download movies and episodes for offline viewing.") },
+        confirmButton = { Button(onClick = onSubscribe, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE50914))) {
+            Text("View plans")
+        } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now", color = Color.White) } }
+    )
+}

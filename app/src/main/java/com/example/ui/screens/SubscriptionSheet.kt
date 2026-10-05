@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,17 +111,26 @@ fun SubscriptionSheet(
     var selectedPlanId by remember(userId) { mutableStateOf(initialPlanId) }
     val selectedPlan = remember(selectedPlanId) { SubscriptionPlans.getById(selectedPlanId) }
     val signedInUser = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
-    val canPay = userId.isNotBlank() && signedInUser?.uid == userId && signedInUser?.isAnonymous == false
-    var paymentReference by remember(userId, selectedPlanId) {
-        mutableStateOf(if (canPay) PayheroVerifier.checkoutReference(context, userId, selectedPlanId) else "")
+    val signedIn = userId.isNotBlank() && signedInUser?.uid == userId && signedInUser?.isAnonymous == false
+    var billingNotice by remember(userId) { mutableStateOf<String?>("Checking payment availability…") }
+    var availabilityAttempt by remember(userId) { mutableStateOf(0) }
+    LaunchedEffect(userId, signedIn, availabilityAttempt) {
+        if (signedIn) {
+            billingNotice = "Checking payment availability…"
+            billingNotice = PayheroVerifier.billingAvailability(userId)
+        }
+    }
+    val canPay = signedIn && billingNotice == null
+    var paymentReference by remember(userId, selectedPlanId, signedIn) {
+        mutableStateOf(if (signedIn) PayheroVerifier.checkoutReference(context, userId, selectedPlanId) else "")
     }
 
-    var mpesaCodeInput by remember { mutableStateOf("") }
-    var isVerifying by remember { mutableStateOf(false) }
-    var verificationError by remember { mutableStateOf<String?>(null) }
-    var showSuccessBanner by remember { mutableStateOf(false) }
-    var successMessage by remember { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
-    var showPaySubWebView by remember { mutableStateOf(false) }
+    var mpesaCodeInput by remember(userId) { mutableStateOf("") }
+    var isVerifying by remember(userId) { mutableStateOf(false) }
+    var verificationError by remember(userId) { mutableStateOf<String?>(null) }
+    var showSuccessBanner by remember(userId) { mutableStateOf(false) }
+    var successMessage by remember(userId) { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
+    var showPaySubWebView by remember(userId) { mutableStateOf(false) }
 
     Surface(
         modifier = modifier
@@ -302,8 +312,12 @@ fun SubscriptionSheet(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (!canPay) {
-                        Text("Sign in to your account on this phone before paying or activating a membership.",
+                        Text(if (!signedIn) "Sign in to your account on this phone before paying or activating a membership."
+                            else billingNotice.orEmpty(),
                             color = Color.White, fontSize = 13.sp)
+                        if (signedIn && billingNotice != "Checking payment availability…") {
+                            Button(onClick = { availabilityAttempt++ }) { Text("Retry connection") }
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
@@ -723,6 +737,9 @@ private fun PlanCard(
             Spacer(modifier = Modifier.height(10.dp))
             Text("${plan.maxDownloads} offline titles per profile • ${plan.catalogAccess}",
                 color = Color.LightGray, fontSize = 12.sp)
+            Text("${plan.screens} simultaneous screen${if (plan.screens > 1) "s" else ""}" +
+                if (plan.id in setOf("plan_mobile", "plan_basic")) " • first playback device" else " • use across your devices",
+                color = Color.LightGray, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             val extras = buildList {
                 if (plan.smartNextEpisode) add("Download Next Episode")
                 if (plan.downloadsForYou) add("Downloads for You")

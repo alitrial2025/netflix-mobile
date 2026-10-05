@@ -323,7 +323,18 @@ fun VideoPlayerScreen(
     }
 
     DisposableEffect(exoPlayer) {
+        var reportedStartup = 0L
         val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                val state = latestPlayerState
+                val startedAt = state.startupStartedAtMs
+                if (state.isResolving || startedAt <= 0L || startedAt == reportedStartup ||
+                    exoPlayer.currentMediaItem?.mediaId != "${state.media?.id}:${state.episode?.id.orEmpty()}") return
+                reportedStartup = startedAt
+                if (com.example.BuildConfig.DEBUG) android.util.Log.d("PlaybackTiming",
+                    "play_to_first_frame_ms=${android.os.SystemClock.elapsedRealtime() - startedAt}")
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 val state = latestPlayerState
                 if (exoPlayer.currentMediaItem?.mediaId != "${state.media?.id}:${state.episode?.id.orEmpty()}") return
@@ -471,7 +482,7 @@ fun VideoPlayerScreen(
                 .setUpstreamDataSourceFactory(defaultDataSourceFactory)
                 .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory))
+            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory, manifestHeaders = headers))
                 .setLoadErrorHandlingPolicy(com.example.data.PlaybackLoadErrorPolicy())
             val uri = if (url.startsWith("/")) {
                 android.net.Uri.fromFile(java.io.File(url))

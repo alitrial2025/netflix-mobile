@@ -86,6 +86,8 @@ class FirebaseSyncManager(private val context: Context) {
 
     private val _currentUserEmail = MutableStateFlow<String?>(null)
     val currentUserEmail: StateFlow<String?> = _currentUserEmail.asStateFlow()
+    private val _isAccountAuthenticated = MutableStateFlow(false)
+    val isAccountAuthenticated: StateFlow<Boolean> = _isAccountAuthenticated.asStateFlow()
 
     init {
         ensureFirebase()
@@ -106,6 +108,7 @@ class FirebaseSyncManager(private val context: Context) {
                     if (observedUid != user?.uid) cleanupListeners()
                     observedUid = user?.uid
                     _currentUserEmail.value = user?.email
+                    _isAccountAuthenticated.value = user?.isAnonymous == false
                     if (user != null) {
                         if (!user.isAnonymous) ContinueWatchingOutbox.resume(context)
                         _lastSyncStatus.value = "Connected as ${user.email}"
@@ -117,6 +120,7 @@ class FirebaseSyncManager(private val context: Context) {
             }
             isFirebaseReady = true
             _currentUserEmail.value = auth?.currentUser?.email
+            _isAccountAuthenticated.value = auth?.currentUser?.isAnonymous == false
             _isCloudSyncEnabled.value = true
             _lastSyncStatus.value = if (auth?.currentUser != null) {
                 "Connected as ${auth?.currentUser?.email}"
@@ -163,7 +167,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.signInWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
-                DeviceAccessGuard.confirm(context, tv = false)
+                DeviceAccessGuard.confirmAccount(context)
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
                 _lastSyncStatus.value = "Signed in as $userEmail"
@@ -215,7 +219,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.createUserWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
-                DeviceAccessGuard.confirm(context, tv = false)
+                DeviceAccessGuard.confirmAccount(context)
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
 
@@ -261,10 +265,11 @@ class FirebaseSyncManager(private val context: Context) {
     }
 
     fun signOutUser() {
-        DeviceAccessGuard.clear()
+        DeviceAccessGuard.clear(context)
         cleanupListeners()
         auth?.signOut()
         _currentUserEmail.value = null
+        _isAccountAuthenticated.value = false
         _lastSyncStatus.value = "Signed out"
     }
 
@@ -398,15 +403,14 @@ class FirebaseSyncManager(private val context: Context) {
     // SUBSCRIPTION SYNC
     // ==========================================
 
-    // Activation is committed only by PayheroVerifier's receipt transaction.
+    // Activation is committed only by the trusted membership Worker's receipt transaction.
     // The UI callback reads that commit rather than granting a local plan.
     suspend fun loadConfirmedSubscription(receipt: String, paymentReference: String): com.example.data.model.UserSubscription? {
         if (!ensureFirebase()) return null
         val db = firestore ?: return null
         val user = auth?.currentUser ?: return null
         if (user.isAnonymous || receipt.isBlank()) return null
-        val snapshot = db.collection("users").document(user.uid)
-            .collection("subscription").document("current").get(Source.SERVER).await()
+        val snapshot = DeviceAccessGuard.confirmAccount(context)
         if (auth?.currentUser?.uid != user.uid || !snapshot.exists() || snapshot.metadata.hasPendingWrites() ||
             snapshot.getString("mpesaReceipt") != receipt || snapshot.getString("paymentReference") != paymentReference) return null
         return com.example.data.model.UserSubscription(
@@ -433,6 +437,7 @@ class FirebaseSyncManager(private val context: Context) {
                     if (error != null) {
                         if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                             Log.w("FirebaseSync", "Subscription read denied")
+                            DeviceAccessGuard.clear(context)
                             onSubscriptionLoaded(com.example.data.model.UserSubscription())
                         } else {
                             Log.w("FirebaseSync", "Subscription listener notice: ${error.message}")
@@ -462,7 +467,7 @@ class FirebaseSyncManager(private val context: Context) {
                         )
                         scope.launch {
                             try {
-                                val checked = DeviceAccessGuard.confirm(context, tv = false)
+                                val checked = DeviceAccessGuard.confirmAccount(context)
                                 if (auth?.currentUser?.uid != user.uid || checked.getString("planId") != sub.planId ||
                                     checked.getLong("expiresAt") != sub.expiresAt || checked.getString("status") != sub.status) return@launch
                                 onSubscriptionLoaded(sub)
@@ -471,10 +476,15 @@ class FirebaseSyncManager(private val context: Context) {
                                 signOutUser()
                                 onSubscriptionLoaded(com.example.data.model.UserSubscription())
                             } catch (_: Exception) {
-                                if (auth?.currentUser?.uid == user.uid) onSubscriptionLoaded(com.example.data.model.UserSubscription())
+                                if (auth?.currentUser?.uid == user.uid) {
+                                    // A connection failure must not erase a previously confirmed local entitlement.
+                                    val restored = DeviceAccessGuard.restoreOffline(context, user.uid, sub.planId, sub.expiresAt, sub.status)
+                                    onSubscriptionLoaded(if (restored) sub else com.example.data.model.UserSubscription())
+                                }
                             }
                         }
                     } else if (user != null) {
+                        DeviceAccessGuard.clear(context)
                         onSubscriptionLoaded(com.example.data.model.UserSubscription())
                     }
                 }

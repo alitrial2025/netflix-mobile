@@ -54,9 +54,23 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
     private var checkTimeout: Job? = null
     private val installing = AtomicBoolean(false)
     private var approvalOpened = false
+    @Volatile private var checkedOnline = false
     private val verifiedFile get() = File(context.filesDir, "update-gate/verified.apk")
 
-    init { checkOnLaunch() }
+    init {
+        checkOnLaunch()
+        viewModelScope.launch {
+            com.example.data.observePlaybackNetwork(context).collect { network ->
+                // Compare with the connectivity used by the check, including a
+                // transition between initial checking and observer registration.
+                if (network.online != checkedOnline) {
+                    if (_state.value.phase !in listOf(UpdatePhase.INSTALLING, UpdatePhase.APPROVAL)) {
+                        checkOnLaunch(backgroundCheck = network.online && _state.value.phase == UpdatePhase.CONTINUE)
+                    }
+                }
+            }
+        }
+    }
 
     private fun installedVersion(): Long = PackageInfoCompat.getLongVersionCode(
         context.packageManager.getPackageInfo(context.packageName, 0)
@@ -69,6 +83,11 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
     private fun checkOnLaunch(backgroundCheck: Boolean = false) {
         work?.cancel()
         checkTimeout?.cancel()
+        checkedOnline = com.example.data.playbackNetwork(context).online
+        if (!checkedOnline) {
+            _state.value = UpdateGateState(UpdatePhase.CONTINUE)
+            return
+        }
         if (!backgroundCheck) _state.value = UpdateGateState()
         checkTimeout = viewModelScope.launch {
             delay(8000L)
@@ -300,8 +319,7 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         // Keep GET_SIGNING_CERTIFICATES for the complete current signer set on newer APIs.
         val apk = context.packageManager.getPackageArchiveInfo(
             verifiedFile.absolutePath, flags or PackageManager.GET_SIGNATURES
-        )
-            ?: error("Invalid APK")
+        ) ?: error("Invalid APK")
         val installed = context.packageManager.getPackageInfo(context.packageName, flags)
         require(apk.packageName == context.packageName && apk.packageName == release.packageName)
         require(PackageInfoCompat.getLongVersionCode(apk) == release.versionCode && release.versionCode > installedVersion())

@@ -103,12 +103,13 @@ class NetflixDownloadManager(
         @Volatile private var instance: NetflixDownloadManager? = null
         fun getInstance(application: Application): NetflixDownloadManager = instance ?: synchronized(this) {
             instance ?: NetflixDownloadManager(application,
-                NetflixRepository(AppDatabase.getInstance(application).netflixDao()), NetMirrorResolver(application))
+                NetflixRepository(AppDatabase.getInstance(application).netflixDao()), NetMirrorResolver.getInstance(application))
                 .also { instance = it }
         }
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val transferSlots = kotlinx.coroutines.sync.Semaphore(2)
+    private val downloadSlots = DownloadSlotReservations()
     private val cookieJar = AppCookieJar()
 
     private val httpClient: OkHttpClient = (clientOverride ?: OkHttpClient.Builder()
@@ -119,6 +120,8 @@ class NetflixDownloadManager(
         .build()).newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
+    private val automaticPlaybackGate = AutomaticDownloadPlaybackGate()
+    fun setForegroundPlayback(active: Boolean) { automaticPlaybackGate.setForeground(active) }
     private val downloadOwners = ConcurrentHashMap<String, String>()
     private val transferLocks = ConcurrentHashMap<String, Mutex>()
     private val workManager by lazy { WorkManager.getInstance(application) }
@@ -173,7 +176,7 @@ class NetflixDownloadManager(
     @Synchronized
     fun startOrResumeDownload(
         profileId: String, media: MediaItem, episode: Episode? = null,
-        isWifiOnly: Boolean = true, isHighQuality: Boolean = true, isForYou: Boolean = false
+        isWifiOnly: Boolean = true, isHighQuality: Boolean = true, isForYou: Boolean = false, automatic: Boolean = isForYou
     ) {
         val key = if (episode != null) "${media.id}_${episode.id}" else media.id
         require(key.matches(Regex("[A-Za-z0-9_-]{1,200}"))) { "Invalid download identifier" }
@@ -190,7 +193,7 @@ class NetflixDownloadManager(
             .copy(status = DownloadTaskStatus.QUEUED, errorMessage = null, speedFormatted = "Queued")
         // Keep only metadata needed to resume; never serialize the whole recommendation tree.
         val request = SavedDownloadRequest(UUID.randomUUID().toString(), account, profileId,
-            media.copy(episodes = emptyList(), similarMedia = emptyList()), episode, isWifiOnly, isHighQuality, task, isForYou = isForYou)
+            media.copy(episodes = emptyList(), similarMedia = emptyList()), episode, isWifiOnly, isHighQuality, task, isForYou = isForYou, automatic = automatic)
         try {
             requestStore.put(request)
             requests[key] = request
@@ -234,7 +237,7 @@ class NetflixDownloadManager(
     fun resumeSavedDownload(key: String, profileId: String): Boolean {
         val request = requests[key] ?: return false
         if (request.profileId != profileId || request.accountId != accountIdProvider()) return false
-        startOrResumeDownload(profileId, request.media, request.episode, request.wifiOnly, request.highQuality, request.isForYou)
+        startOrResumeDownload(profileId, request.media, request.episode, request.wifiOnly, request.highQuality, request.isForYou, automatic = false)
         return true
     }
 
@@ -271,24 +274,36 @@ class NetflixDownloadManager(
             activeJobs[key] = job
             downloadOwners[key] = request.profileId
             try {
+                automaticPlaybackGate.awaitPermission(request.automatic)
                 transferSlots.acquire()
                 try {
                     updateTask(request.task.copy(status = DownloadTaskStatus.PREPARING, errorMessage = null))
                     val plan = confirmedDownloadPlan(request.accountId)
                     if (request.isForYou && !plan.downloadsForYou)
                         throw DownloadMembershipException("Downloads for You is included with Premium. Upgrade to continue.")
-                    val completedDownloads = repository.getDownloadsOnce(request.profileId)
-                    if (completedDownloads.none { it.downloadKey == key } && completedDownloads.size >= plan.maxDownloads)
+                    if (!downloadSlots.reserve(request.profileId, key, plan.maxDownloads) {
+                            repository.getDownloadsOnce(request.profileId).map { it.downloadKey }
+                        })
                         throw DownloadMembershipException("Your plan's offline title limit is reached. Delete a download to continue.")
-                    executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+                    withContext(AutomaticDownloadContext(request.automatic)) {
+                        automaticPlaybackGate.requirePermission(request.automatic)
+                        executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+                    }
                     removeSavedRequest(key, token)
                     DownloadRunResult.COMPLETE
-                } finally { transferSlots.release() }
+                } finally {
+                    withContext(kotlinx.coroutines.NonCancellable) { downloadSlots.release(request.profileId, key) }
+                    transferSlots.release()
+                }
             } catch (cancelled: CancellationException) {
                 markWaiting(key, token, "Waiting to resume download")
                 throw cancelled
             } catch (error: Exception) {
                 currentCoroutineContext().ensureActive()
+                if (error is AutomaticDownloadDeferredException) {
+                    markWaiting(key, token, "Waiting until playback closes")
+                    return@withLock DownloadRunResult.RETRY
+                }
                 val retry = DownloadRetryPolicy.shouldRetry(error, attempt)
                 if (retry) markWaiting(key, token, "Connection interrupted. Your saved progress will resume automatically.")
                 else if (isCurrentRequest(key, token)) _downloadTasks.value[key]?.let {
@@ -518,6 +533,7 @@ class NetflixDownloadManager(
     }
 
     private suspend fun <T> withResponse(request: Request, client: OkHttpClient = httpClient, block: suspend (okhttp3.Response) -> T): T = coroutineScope {
+        automaticPlaybackGate.requirePermission(currentCoroutineContext()[AutomaticDownloadContext]?.automatic == true)
         val call = client.newCall(request)
         // Cancel the socket too: coroutine cancellation alone does not interrupt execute()/read().
         val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -918,17 +934,19 @@ class NetflixDownloadManager(
                 val available = try { providerHasDownload(media, nextEpisode) }
                     catch (_: com.example.data.PlaybackRateLimitedException) { false }
                 if (!available) return@launch // Keep the watched copy when the provider has no next episode.
+                val nextKey = "${media.id}_${nextEpisode.id}"
+                if (!DownloadQuotaPolicy.canQueue(nextKey, repository.getDownloadsOnce(profileId).map { it.downloadKey }.filter { it != watchedKey },
+                        _downloadTasks.value.values, profileId, maxDownloads)) return@launch
                 repository.removeDownload(profileId, watchedKey)
                 deleteUnreferencedFiles(watchedKey)
-                val owned = _downloadTasks.value.values.count { it.profileId == profileId }
-                if (repository.getDownloadsOnce(profileId).size + owned >= maxDownloads) return@launch
                 emitToast("Smart Downloads: ${com.example.ui.viewmodel.episodeDownloadLabel(nextEpisode)} downloading for offline...")
                 startOrResumeDownload(
                     profileId = profileId,
                     media = media,
                     episode = nextEpisode,
                     isWifiOnly = isWifiOnly,
-                    isHighQuality = isHighQuality
+                    isHighQuality = isHighQuality,
+                    automatic = true
                 )
             } else if (catalog.isNotEmpty()) {
                 // Series finished! Curate another high-match movie or series within allocated storage
@@ -947,6 +965,7 @@ class NetflixDownloadManager(
     // Provider availability, not TMDB popularity, decides whether an automatic download is queued.
     private val candidateAvailability = ConcurrentHashMap<String, Pair<Long, Boolean>>()
     private suspend fun providerHasDownload(media: MediaItem, episode: Episode?): Boolean {
+        automaticPlaybackGate.awaitPermission(automatic = true)
         val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
         val season = episode?.let { com.example.ui.viewmodel.episodeCoordinates(it.id).first } ?: 0
         val number = episode?.episodeNumber ?: 0
@@ -984,7 +1003,7 @@ class NetflixDownloadManager(
         val existingMediaIds = currentDownloads.map { it.mediaId }.toSet()
 
         val ownerTasks = _downloadTasks.value.values.filter { it.profileId == profileId }
-        val remainingSlots = (maxDownloads - currentDownloads.size - ownerTasks.size).coerceAtLeast(0)
+        val remainingSlots = (maxDownloads - DownloadQuotaPolicy.occupiedKeys(existingDownloadedKeys, ownerTasks, profileId).size).coerceAtLeast(0)
         if (remainingSlots == 0) return@withContext
         val completedSizeMb = currentDownloads.filter { it.isForYou }.sumOf { it.fileSizeMb }
         val activeTasksSizeMb = ownerTasks.filter { requests[it.downloadKey]?.isForYou == true }
@@ -1005,7 +1024,7 @@ class NetflixDownloadManager(
         // Priority 2: High match percentage (>=95%) or top rating (>=8.5)
         // Priority 3: Popular trending titles (Stranger Things, Breaking Bad, Wednesday, Inception, Interstellar, Avatar)
         val candidates = candidatePool.filter { media ->
-            !media.isComingSoon && !existingMediaIds.contains(media.id) && !existingDownloadedKeys.any { it == media.id || it.startsWith("${media.id}_") } && ownerTasks.none { it.mediaId == media.id }
+            !media.isComingSoon && !existingMediaIds.contains(media.id) && !existingDownloadedKeys.any { it == media.id || it.startsWith("${media.id}_") } && ownerTasks.none { it.mediaId == media.id && it.status != DownloadTaskStatus.ERROR && it.status != DownloadTaskStatus.COMPLETED }
         }.sortedWith(
             compareByDescending<MediaItem> { userLikedIds.contains(it.id) || watchlistIds.contains(it.id) }
                 .thenByDescending { it.matchPercentage }

@@ -32,4 +32,10 @@ class UpdateGatePolicyTest {
     @Test fun incompatibleNewReleaseCannotUnlockOldApp() {
         assertEquals(UpdateGatePolicy.Decision.Required(release(11, 35), false), UpdateGatePolicy.decide(10, 34, release(11, 35), null))
     }
+    @Test fun offlineLaunchAllowsLocalAccessEvenWithKnownRequiredUpdate() {
+        assertEquals(UpdateGatePolicy.Decision.Current, UpdateGatePolicy.decide(10, 34, null, release(11), online = false))
+        assertEquals(UpdateGatePolicy.Decision.Current, UpdateGatePolicy.decide(10, 34, null, null, online = false))
+        assertEquals(UpdateGatePolicy.Decision.Required(release(11), true), UpdateGatePolicy.decide(10, 34, null, release(11), online = true))
+    }
+
 }

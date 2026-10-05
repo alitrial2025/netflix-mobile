@@ -191,6 +191,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val showTvPairScreen by viewModel.showTvPairScreen.collectAsStateWithLifecycle()
     val pairedTvSessions by viewModel.pairedTvSessions.collectAsStateWithLifecycle()
     val currentUserEmail by viewModel.currentUserEmail.collectAsStateWithLifecycle()
+    val isAccountAuthenticated by viewModel.isAccountAuthenticated.collectAsStateWithLifecycle()
     val showAuthScreen by viewModel.showAuthScreen.collectAsStateWithLifecycle()
     val showSubscriptionSheet by viewModel.showSubscriptionSheet.collectAsStateWithLifecycle()
     val userSubscription by viewModel.userSubscription.collectAsStateWithLifecycle()
@@ -456,6 +457,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 onOpenTvPair = { viewModel.openTvPairScreen(true) },
                                 onOpenClips = { viewModel.selectTab(NavigationTab.CLIPS) },
                                 userSubscription = userSubscription,
+                                isAuthenticated = isAccountAuthenticated,
+                                onOpenSubscription = { viewModel.openSubscriptionSheet(true) },
                                 onOpenAuth = { viewModel.openAuthScreen(true) }
                             )
                         }
@@ -695,7 +698,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 onResumeDownload = { key -> viewModel.resumeDownload(key) },
                 onCancelDownload = { key -> viewModel.cancelDownload(key) },
                 userSubscription = userSubscription,
-                onOpenSubscription = { viewModel.openSubscriptionSheet(true) },
+                onOpenSubscription = viewModel::requestDownloadMembership,
                 onOpenAuth = { viewModel.openAuthScreen(true) }
             )
         }
@@ -806,7 +809,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 onSignOut = { viewModel.signOutUser() },
                 onClose = { viewModel.openAuthScreen(false) },
                 onOpenTvPair = {
-                    if (userSubscription.isGuest) {
+                    if (!isAccountAuthenticated) {
                         viewModel.showToast("Please sign in or create an account to pair with Android TV")
                     } else {
                         viewModel.openAuthScreen(false)
@@ -826,7 +829,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 activeProfile = activeProfile,
                 profiles = profiles,
                 pairedDevices = pairedTvSessions,
-                isSignedOut = currentUserEmail == null,
+                isSignedOut = !isAccountAuthenticated,
                 hasTvAccess = userSubscription.isTvAllowed,
                 onOpenAuth = {
                     viewModel.openTvPairScreen(false)
@@ -880,6 +883,14 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             com.example.ui.screens.SplashScreen(
                 isWarmupFinished = isWarmupFinished,
                 onSplashComplete = { viewModel.completeSplash() }
+            )
+        }
+
+        val showDownloadMembershipPrompt by viewModel.showDownloadMembershipPrompt.collectAsStateWithLifecycle()
+        if (showDownloadMembershipPrompt) {
+            com.example.ui.components.DownloadMembershipDialog(
+                onSubscribe = viewModel::subscribeFromDownloadPrompt,
+                onDismiss = viewModel::dismissDownloadMembershipPrompt
             )
         }
 

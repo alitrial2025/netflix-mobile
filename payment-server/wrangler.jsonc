@@ -1,0 +1,14 @@
+{
+  "name": "netflixpro-membership",
+  "account_id": "858c9b54f3a91e118613f01876b0b6d9",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-05",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "FIREBASE_PROJECT_ID": "netflixpro-cca67"
+  }
+}

@@ -49,7 +49,7 @@ object SubscriptionPlans {
             downloadDevices = 1,
             spatialAudio = false,
             isPopular = false,
-            catalogAccess = "Selected catalog (some titles locked)"
+            catalogAccess = "Full available catalog"
         ),
         SubscriptionPlan(
             id = "plan_basic",
@@ -64,7 +64,7 @@ object SubscriptionPlans {
             downloadDevices = 1,
             spatialAudio = false,
             isPopular = false,
-            catalogAccess = "Expanded catalog (fewer titles locked)"
+            catalogAccess = "Full available catalog"
         ),
         SubscriptionPlan(
             id = "plan_standard",
@@ -79,7 +79,7 @@ object SubscriptionPlans {
             downloadDevices = 2,
             spatialAudio = false,
             isPopular = true,
-            catalogAccess = "Unlimited full catalog"
+            catalogAccess = "Full available catalog"
         ),
         SubscriptionPlan(
             id = "plan_premium",
@@ -94,7 +94,7 @@ object SubscriptionPlans {
             downloadDevices = 6,
             spatialAudio = true,
             isPopular = false,
-            catalogAccess = "Unlimited full catalog + 4K HDR"
+            catalogAccess = "Full available catalog • up to 4K HDR"
         )
     )
 
@@ -180,27 +180,9 @@ data class UserSubscription(
             ((remaining + 86_399_999L) / 86_400_000L).toInt().coerceAtLeast(0)
         } else 0
 
-    /**
-     * Determines whether a movie or TV show is locked based on the current subscription plan.
-     * - Mobile plan: Locks some movies and TV shows (~38% of catalog).
-     * - Basic plan: Locks movies and TV shows, but not as many as mobile (~18% of catalog).
-     * - Standard & Premium: 0 locked (unlimited full access).
-     * - Guest: Full streaming locked (trailer preview only).
-     */
-    fun isMediaLocked(mediaId: String, mediaTitle: String = ""): Boolean {
-        if (!isActive) return true
-        if (planId == "plan_standard" || planId == "plan_premium") return false
-
-        // Deterministic pseudo-random distribution based on media identifier
-        val hash = kotlin.math.abs((mediaId.hashCode() * 31 + mediaTitle.hashCode() * 17 + "netflix_tier_catalog_lock".hashCode()).toLong())
-        val pct = hash % 100
-
-        return when (planId) {
-            "plan_mobile" -> pct < 38 // ~38% locked on Mobile plan
-            "plan_basic" -> pct < 18  // ~18% locked on Basic plan (subset of mobile)
-            else -> true
-        }
-    }
+    /** Every active paid tier includes the available catalog; device and quality limits remain. */
+    @Suppress("UNUSED_PARAMETER")
+    fun isMediaLocked(mediaId: String, mediaTitle: String = ""): Boolean = !isActive
 
     /**
      * Backward compatibility wrapper for movie/tv lock checks.
