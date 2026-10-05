@@ -149,9 +149,9 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         .cookieJar(okhttp3.CookieJar.NO_COOKIES)
         .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS)
         .callTimeout(3, TimeUnit.SECONDS).build()
+    private val publicConfig = ProviderRuntimeConfig(context, client, "netmirror_prefs")
     private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context),
-        backgroundCatalogRefresh = clientOverride == null)
-
+        backgroundCatalogRefresh = clientOverride == null, runtimeConfig = publicConfig)
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
         "net52.cc",
@@ -173,6 +173,10 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
     private val ACTIVE_DOMAIN_KEY = "netmirror_active_domain"
 
     companion object {
+        @Volatile private var applicationResolver: NetMirrorResolver? = null
+        fun getInstance(context: Context): NetMirrorResolver = applicationResolver ?: synchronized(this) {
+            applicationResolver ?: NetMirrorResolver(context.applicationContext).also { applicationResolver = it }
+        }
         @Volatile private var _session: WarmSession? = null
         private val sessionMutex = Mutex()
         private var cachedSourceRevision = PlaybackServiceGate.sourceRevision
@@ -186,6 +190,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
 
     fun playbackCooldownMillis(): Long = PlaybackServiceGate.remainingMs()
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
+        publicPlayback.evict(tmdbId, type, season, episode)
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")
     }
     /** Renew CDN links without throwing away a still-valid provider handshake. */
@@ -309,7 +314,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
      */
     private suspend fun resolveActiveDomain(): String = withContext(Dispatchers.IO) {
         val cached = getSavedActiveDomain()
-        val candidateList = listOf(cached) + DOMAIN_POOL.filter { it != cached }
+        val candidateList = publicConfig.snapshot().bootstrapDomains(listOf(cached) + DOMAIN_POOL)
 
         for (cand in candidateList) {
             try {
@@ -331,7 +336,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
                 Log.d("NetMirror", "⚠️ Domain $cand unreachable: ${e.message}")
             }
         }
-        return@withContext cached
+        return@withContext candidateList.first()
     }
 
     /**
@@ -614,9 +619,9 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         }
     }
 
-    private suspend fun warmSession(): WarmSession? = withContext(Dispatchers.IO) {
+    private suspend fun warmSession(requiredDomain: String? = null): WarmSession? = withContext(Dispatchers.IO) {
         val t0 = System.currentTimeMillis()
-        val domain = resolveActiveDomain()
+        val domain = requiredDomain ?: resolveActiveDomain()
         Log.d("NetMirror", "━━━ Session warmup START on $domain ━━━")
 
         val addhashRes = fetchAddhash(domain)
@@ -624,6 +629,8 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
             val addhashRaw = addhashRes.raw
             val addhashEncoded = addhashRes.encoded
             val activeDomain = addhashRes.resolvedDomain
+            if (!ProviderRuntimeConfig.sessionMatches(activeDomain, requiredDomain))
+                throw java.io.IOException("Generated session does not match the playback origin")
 
             triggerUserver(activeDomain, addhashRaw, addhashRes.quryParam, addhashRes.vsiteSubdomain)
             delay(1000)
@@ -726,19 +733,24 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         return _session?.let { StreamSessionPolicy.isFresh(it.fetchedAt, System.currentTimeMillis()) } == true
     }
 
-    suspend fun getSession(): WarmSession? = withContext(Dispatchers.IO) {
+    suspend fun getSession(requiredDomain: String? = null): WarmSession? = withContext(Dispatchers.IO) {
+        if (requiredDomain != null && !ProviderRuntimeConfig.sessionMatches(requiredDomain, requiredDomain))
+            throw java.io.IOException("Invalid session origin")
         if (restoreSessionFromStorage()) {
-            return@withContext _session
+            val restored = _session
+            if (restored != null && ProviderRuntimeConfig.sessionMatches(restored.domain, requiredDomain))
+                return@withContext restored
         }
 
         sessionMutex.withLock {
             val existing = _session
-            if (existing != null && StreamSessionPolicy.isFresh(existing.fetchedAt, System.currentTimeMillis())) {
-                return@withContext _session
+            if (existing != null && StreamSessionPolicy.isFresh(existing.fetchedAt, System.currentTimeMillis()) &&
+                ProviderRuntimeConfig.sessionMatches(existing.domain, requiredDomain)) {
+                return@withContext existing
             }
-            // Discard this instance's older cookies before polling a new handshake.
+            // Storage and the current session remain intact if targeted warming fails.
             cookieJar.clear()
-            val result = warmSession()
+            val result = warmSession(requiredDomain)
             if (result != null) _session = result
             return@withContext result
         }

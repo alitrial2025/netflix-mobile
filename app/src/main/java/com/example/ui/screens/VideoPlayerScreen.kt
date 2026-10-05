@@ -482,7 +482,7 @@ fun VideoPlayerScreen(
                 .setUpstreamDataSourceFactory(defaultDataSourceFactory)
                 .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory))
+            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory, manifestHeaders = headers))
                 .setLoadErrorHandlingPolicy(com.example.data.PlaybackLoadErrorPolicy())
             val uri = if (url.startsWith("/")) {
                 android.net.Uri.fromFile(java.io.File(url))

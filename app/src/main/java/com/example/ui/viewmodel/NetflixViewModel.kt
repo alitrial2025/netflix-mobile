@@ -126,7 +126,7 @@ data class PlayerState(
 class NetflixViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: NetflixRepository = NetflixRepository(AppDatabase.getInstance(application).netflixDao())
-    private val netMirrorResolver = NetMirrorResolver(application)
+    private val netMirrorResolver = NetMirrorResolver.getInstance(application)
     val syncManager: FirebaseSyncManager = FirebaseSyncManager(application)
 
     val lastSyncStatus: StateFlow<String> = syncManager.lastSyncStatus
@@ -657,6 +657,18 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _membershipPrompt.value = null
         playTrailer(media, "Trailer: ${media.title}")
     }
+    private val _showDownloadMembershipPrompt = MutableStateFlow(false)
+    val showDownloadMembershipPrompt: StateFlow<Boolean> = _showDownloadMembershipPrompt.asStateFlow()
+    fun requestDownloadMembership() { _showDownloadMembershipPrompt.value = true }
+    fun dismissDownloadMembershipPrompt() { _showDownloadMembershipPrompt.value = false }
+    fun subscribeFromDownloadPrompt() {
+        dismissDownloadMembershipPrompt()
+        if (syncManager.isAuthenticated()) openSubscriptionSheet(true) else {
+            subscribeAfterAuthentication = true
+            openAuthScreen(true)
+        }
+    }
+
     private var subscribeAfterAuthentication = false
     fun subscribeFromPrompt() {
         _membershipPrompt.value = null
@@ -1046,6 +1058,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     val currentUserEmail: StateFlow<String?> = syncManager.currentUserEmail
+    val isAccountAuthenticated: StateFlow<Boolean> = syncManager.isAccountAuthenticated
 
     private fun connectCloudDataForActiveProfile() {
         _watchHistory.value = emptyList()
@@ -1266,8 +1279,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signOutUser() {
+        dismissDownloadMembershipPrompt()
         subscribeAfterAuthentication = false
         pendingSmartReplacement = null
+        pendingSmartCurator = false
+        downloadManager.setForegroundPlayback(false)
         profileWriteJob?.cancel()
         smartCuratorJob?.cancel()
         syncManager.signOutUser()
@@ -1854,7 +1870,6 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
         if (!titleAllowed(media)) return
         smartCuratorJob?.cancel() // A background availability probe must yield to an explicit Play tap.
-        finishSmartReplacement()
         persistPlayerProgress(_playerState.value)
         progressTracker.reset()
         val requestGeneration = ++playbackRequestGeneration
@@ -1864,6 +1879,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
+        downloadManager.setForegroundPlayback(true)
         nextEpisodeJob?.cancel()
         val latestProgress = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
         val targetEpisode = initialPlaybackEpisode(media, episode, latestProgress)
@@ -2138,15 +2154,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val ownerUid = syncManager.getUserId()
         val ownerProfile = _activeProfile.value.id
         val replacement = {
-            if (syncManager.getUserId() == ownerUid && _activeProfile.value.id == ownerProfile && _userSubscription.value.isSmartNextEpisodeAllowed) {
+            if (syncManager.getUserId() == ownerUid && _activeProfile.value.id == ownerProfile && _userSubscription.value.isSmartNextEpisodeAllowed && _isSmartDownloadsEnabled.value) {
                 downloadManager.handleEpisodeWatched(ownerProfile, nextMedia, episode, true,
                     true, _isHighQualityEnabled.value, _allocatedStorageGb.value,
                     emptyList(), _userSubscription.value.maxDownloads)
             }
         }
-        // Keep the current local file available for Watch again until the viewer leaves it.
-        if (state.sourceId?.startsWith("Offline Download") == true) pendingSmartReplacement = replacement
-        else replacement()
+        // Do not resolve/download the next episode while the current stream or its
+        // countdown is active. A transition keeps this pending until the player closes.
+        pendingSmartReplacement = replacement
     }
 
     fun togglePlayPause() {
@@ -2275,6 +2291,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun playNextEpisode() {
         val state = _playerState.value
+        if (state.isResolving) return
         val next = state.nextEpisode
         val media = state.nextEpisodeMedia ?: state.media ?: return
         if (next != null) {
@@ -2285,7 +2302,6 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun closePlayer() {
-        finishSmartReplacement()
         nextEpisodeJob?.cancel()
         playbackRequestGeneration++
         resolveJob?.cancel()
@@ -2294,6 +2310,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val devId = com.example.data.DeviceAccessGuard.deviceId(getApplication())
         syncManager.stopActiveStreamHeartbeat(devId)
         _playerState.value = PlayerState(media = null)
+        downloadManager.setForegroundPlayback(false)
+        finishSmartReplacement()
+        if (pendingSmartCurator) { pendingSmartCurator = false; runSmartDownloadCurator() }
     }
 
     private fun persistPlayerProgress(current: PlayerState) {
@@ -2335,6 +2354,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun savePlayerProgress() = persistPlayerProgress(_playerState.value)
 
     override fun onCleared() {
+        downloadManager.setForegroundPlayback(false)
         detailJob?.cancel()
         seasonJob?.cancel()
         nextEpisodeJob?.cancel()
@@ -2426,19 +2446,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     // Downloads with real stream resolution and local file storage
     fun startDownload(media: MediaItem, episode: Episode? = null) {
-        if (_userSubscription.value.isGuest) {
-            showToast("Sign in to download movies and episodes for offline viewing.")
-            _showAuthScreen.value = true
-            return
-        }
-        if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
-            showToast("Renew your membership to download titles for offline viewing.")
-            _showSubscriptionSheet.value = true
+        if (!syncManager.isAuthenticated() || !_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
+            requestDownloadMembership()
             return
         }
         if (isMovieLocked(media)) {
             showToast("Your membership must be verified on this plan’s playback device before downloading. Use the linked device or upgrade.")
-            _showSubscriptionSheet.value = true
+            requestDownloadMembership()
             return
         }
         val key = if (episode == null) media.id else "${media.id}_${episode.id}"
@@ -2450,7 +2464,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 downloads.value.map { it.downloadKey }, downloadManager.downloadTasks.value.values,
                 _activeProfile.value.id, _userSubscription.value.maxDownloads)) {
             showToast("Download limit reached (${_userSubscription.value.maxDownloads} titles on ${_userSubscription.value.planName}). Upgrade plan to download more.")
-            _showSubscriptionSheet.value = true
+            requestDownloadMembership()
             return
         }
 
@@ -2484,8 +2498,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun resumeDownload(key: String, media: MediaItem? = null, episode: Episode? = null) {
         if (!_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
-            showToast("An active download plan is required to continue.")
-            if (_userSubscription.value.isGuest) _showAuthScreen.value = true else _showSubscriptionSheet.value = true
+            requestDownloadMembership()
             return
         }
         if (!com.example.data.download.DownloadQuotaPolicy.canQueue(key,
@@ -2564,10 +2577,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private var smartCuratorJob: Job? = null
+    private var pendingSmartCurator = false
     fun runSmartDownloadCurator() {
         smartCuratorJob?.cancel()
         val subscription = _userSubscription.value
-        if (!_downloadsForYouEnabled.value || !subscription.isDownloadsForYouAllowed) return
+        if (!_downloadsForYouEnabled.value || !subscription.isDownloadsForYouAllowed) { pendingSmartCurator = false; return }
+        if (_playerState.value.media != null) { pendingSmartCurator = true; return }
+        pendingSmartCurator = false
         smartCuratorJob = viewModelScope.launch {
             val profile = _activeProfile.value
             val pool = if (profile.hasMaturityRestriction) {
@@ -2608,7 +2624,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     val showTvPairScreen: StateFlow<Boolean> = _showTvPairScreen.asStateFlow()
 
     fun openTvPairScreen(show: Boolean) {
-        if (show && _userSubscription.value.isGuest) {
+        if (show && !syncManager.isAuthenticated()) {
             showToast("Please sign in or create an account to pair with Android TV.")
             _showAuthScreen.value = true
             return
@@ -2837,7 +2853,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             showToast("Connect to Wi-Fi or change Cellular Data in App Settings to play trailers.")
             return
         }
-        finishSmartReplacement()
+        smartCuratorJob?.cancel()
+        downloadManager.setForegroundPlayback(true)
         val durationSec = if (title.contains("teaser", ignoreCase = true)) 105 else 192
         _playerState.value = PlayerState(
             media = media.copy(title = title),

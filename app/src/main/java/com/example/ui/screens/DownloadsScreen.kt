@@ -80,7 +80,7 @@ fun DownloadsScreen(
         value = withContext(Dispatchers.IO) { runCatching { android.os.StatFs(context.filesDir.absolutePath).let { it.totalBytes to it.availableBytes } }.getOrNull() }
     }
     val canDownload = userSubscription.isActive && userSubscription.maxDownloads > 0
-    val requirePlan: () -> Unit = { if (userSubscription.isGuest) onOpenAuth() else onOpenSubscription() }
+    val requirePlan: () -> Unit = onOpenSubscription
     val back: () -> Unit = { if (showId != null) { showId = null; editing = false } else onClose() }
     BackHandler(enabled = showId != null, onBack = back)
     fun mediaFor(download: DownloadEntity): MediaItem = byId[download.mediaId] ?: MediaItem(download.mediaId, download.mediaTitle,
@@ -164,7 +164,7 @@ fun DownloadsScreen(
                         Text("We’ll download a selection of movies and shows so there’s always something to watch on your phone.", color = Color.LightGray, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp))
                         DownloadPosterFan(catalogMedia, Modifier.fillMaxWidth().height(230.dp))
                         Button(onClick = { if (canDownload) if (userSubscription.isDownloadsForYouAllowed) setup = true else requirePlan() else requirePlan() }, shape = RoundedCornerShape(3.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0071EB)), modifier = Modifier.fillMaxWidth().height(48.dp).testTag("downloads_for_you_setup")) {
-                            Text(if (userSubscription.isGuest) "Sign in to download" else "Set up", fontWeight = FontWeight.Bold)
+                            Text(if (!canDownload) "Choose a download plan" else "Set up", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

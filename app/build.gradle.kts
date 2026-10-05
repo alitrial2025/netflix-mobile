@@ -33,8 +33,8 @@ android {
     applicationId = "com.netflixpro.apk"
     minSdk = 24
     targetSdk = 35
-    versionCode = 11
-    versionName = "1.10"
+    versionCode = 15
+    versionName = "1.14"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "PAYMENT_API_URL", "\"$paymentApiUrl\"")

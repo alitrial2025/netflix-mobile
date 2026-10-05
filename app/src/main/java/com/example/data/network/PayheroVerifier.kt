@@ -119,7 +119,6 @@ object PayheroVerifier {
                 subscribedAt = data.getLong("subscribedAt"), expiresAt = data.getLong("expiresAt"))
             VerificationResult.Success(subscription, result.getInt("amountPaid"), result.getString("message"))
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { VerificationResult.Error(error.message?.take(512)
-            ?: "Unable to finish verification. Retry the same code; do not pay again.") }
+        catch (error: Exception) { VerificationResult.Error(com.example.data.billing.PaymentFailure.message(error)) }
     }
 }
