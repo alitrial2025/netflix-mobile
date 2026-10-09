@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,12 +96,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
-import com.example.data.CatalogData
 import com.example.data.TrailerResolver
 import com.example.data.TrailerResolverCallback
 import com.example.data.TrailerStream
@@ -109,6 +111,7 @@ import com.example.data.model.CastDevice
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.model.NotificationItem
+import com.example.data.model.UserProfile
 import com.example.ui.components.NFilmBadge
 import com.example.ui.components.NSeriesBadge
 import com.example.ui.components.NetflixSpinner
@@ -146,10 +149,16 @@ fun ClipsScreen(
     streamingAllowed: Boolean = true,
     maxVideoHeight: Int = Int.MAX_VALUE,
     spatialAudioEnabled: Boolean = true,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    catalogMedia: List<MediaItem> = emptyList(),
+    upcomingReleases: List<MediaItem> = emptyList(),
+    activeProfile: UserProfile = UserProfile("profile", "Home"),
+    isActive: Boolean = true
 ) {
-    var clipsMode by remember { mutableStateOf(ClipsMode.VERTICAL_FEED) }
-    val clipItems = remember { CatalogData.getTrending() + CatalogData.getComingSoon() }
+    var clipsMode by rememberSaveable { mutableStateOf(ClipsMode.VERTICAL_FEED) }
+    val clipsCatalog = remember(catalogMedia, upcomingReleases, activeProfile) {
+        buildClipsCatalog(catalogMedia, upcomingReleases, activeProfile)
+    }
 
     Box(
         modifier = modifier
@@ -159,8 +168,15 @@ fun ClipsScreen(
     ) {
         when (clipsMode) {
             ClipsMode.VERTICAL_FEED -> {
+                if (clipsCatalog.feed.isEmpty()) {
+                    Column(Modifier.align(Alignment.Center).padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("No clips are available for this profile yet.", color = Color.LightGray, textAlign = TextAlign.Center)
+                        androidx.compose.material3.TextButton(onClick = { clipsMode = ClipsMode.COMING_SOON }) { Text("Coming Soon", color = Color.White) }
+                        androidx.compose.material3.TextButton(onClick = { clipsMode = ClipsMode.TOP_10 }) { Text("Top 10", color = Color.White) }
+                    }
+                } else {
                 TikTokVerticalVideoFeed(
-                    items = clipItems,
+                    items = clipsCatalog.feed,
                     likedMedia = likedMedia,
                     connectedCastDevice = connectedCastDevice,
                     isWatchlistContains = isWatchlistContains,
@@ -176,13 +192,15 @@ fun ClipsScreen(
                     onShowToast = onShowToast,
                     streamingAllowed = streamingAllowed,
                     maxVideoHeight = maxVideoHeight,
-                    spatialAudioEnabled = spatialAudioEnabled
+                    spatialAudioEnabled = spatialAudioEnabled,
+                    isActive = isActive
                 )
+                }
             }
 
             ClipsMode.COMING_SOON -> {
                 ComingSoonListMode(
-                    items = CatalogData.getComingSoon(),
+                    items = clipsCatalog.upcoming,
                     reminders = reminders,
                     onToggleReminder = onToggleReminder,
                     onMediaClick = onMediaClick,
@@ -197,8 +215,8 @@ fun ClipsScreen(
 
             ClipsMode.TOP_10 -> {
                 Top10ListMode(
-                    tvShows = CatalogData.getTop10TvShows(),
-                    movies = CatalogData.getTop10Movies(),
+                    tvShows = clipsCatalog.rankedShows,
+                    movies = clipsCatalog.rankedMovies,
                     onMediaClick = onMediaClick,
                     onPlayClick = onPlayClick,
                     onOpenCast = onOpenCast,
@@ -236,22 +254,20 @@ private fun TikTokVerticalVideoFeed(
     onShowToast: (String) -> Unit,
     streamingAllowed: Boolean,
     maxVideoHeight: Int,
-    spatialAudioEnabled: Boolean
+    spatialAudioEnabled: Boolean,
+    isActive: Boolean
 ) {
     val pagerState = rememberPagerState(pageCount = { items.size })
     val context = LocalContext.current
 
-    // Local mute states per page index
-    val mutedMap = remember { mutableStateMapOf<Int, Boolean>() }
-
-    // Stream URL memory cache to eliminate repeat network requests and enable instant preloading
-    val urlCache = remember { mutableStateMapOf<String, String>() }
+    // Stable identities keep mute preferences with the title when the feed reorders.
+    val mutedMap = remember { mutableStateMapOf<String, Boolean>() }
 
     // Single shared ExoPlayer instance with optimized load control for short video clips
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             repeatMode = Player.REPEAT_MODE_ALL
-            playWhenReady = true
+            playWhenReady = false
         }
     }
     LaunchedEffect(maxVideoHeight, spatialAudioEnabled) {
@@ -274,127 +290,104 @@ private fun TikTokVerticalVideoFeed(
     var resolvedUrl by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, _ ->
+            resumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            if (!resumed) exoPlayer.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val playbackActive = streamingAllowed && isActive && resumed
+
     val currentPage = pagerState.currentPage
-    val latestPage by androidx.compose.runtime.rememberUpdatedState(currentPage)
-    val latestStreamingAllowed by androidx.compose.runtime.rememberUpdatedState(streamingAllowed)
-    val isMuted = mutedMap[currentPage] ?: false
+    val currentItem = items.getOrNull(currentPage)
+    val latestItem by androidx.compose.runtime.rememberUpdatedState(currentItem)
+    val latestPlaybackActive by androidx.compose.runtime.rememberUpdatedState(playbackActive)
+    val isMuted = mutedMap[currentItem?.let { "${it.type}:${it.id}" }] ?: false
 
     LaunchedEffect(isMuted) {
         exoPlayer.volume = if (isMuted) 0f else 1f
     }
 
-    // Smart stream loader & preloader function
-    fun prepareAndPlay(url: String) {
-        if (!latestStreamingAllowed) return
-        resolvedUrl = url
+    fun prepareAndPlay(stream: TrailerStream) {
+        if (!latestPlaybackActive) return
+        resolvedUrl = stream.url
         isResolving = false
-
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        val http = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(10000)
-            .setReadTimeoutMs(10000)
-
-        val mediaItem = Media3Item.Builder()
-            .setUri(url)
-            .apply {
-                if (url.contains(".m3u8", ignoreCase = true)) {
-                    setMimeType(MimeTypes.APPLICATION_M3U8)
-                } else if (url.contains(".mpd", ignoreCase = true)) {
-                    setMimeType(MimeTypes.APPLICATION_MPD)
-                } else {
-                    setMimeType(MimeTypes.VIDEO_MP4)
-                }
-            }
-            .build()
-
-        val mediaSource = if (url.contains(".m3u8", ignoreCase = true)) {
-            HlsMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
-        } else {
-            ProgressiveMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
+            .setConnectTimeoutMs(10000).setReadTimeoutMs(10000)
+            .setDefaultRequestProperties(stream.headers)
+        val mime = when (stream.type) {
+            "hls" -> MimeTypes.APPLICATION_M3U8
+            "dash" -> MimeTypes.APPLICATION_MPD
+            else -> MimeTypes.VIDEO_MP4
         }
-
-        exoPlayer.setMediaSource(mediaSource)
+        val mediaItem = Media3Item.Builder().setUri(stream.url).setMimeType(mime).build()
+        exoPlayer.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(mediaItem))
         exoPlayer.prepare()
         exoPlayer.play()
     }
 
-    LaunchedEffect(currentPage, items, streamingAllowed) {
+    LaunchedEffect(currentItem?.id, currentItem?.type, playbackActive) {
         val pending = mutableListOf<TrailerResolver>()
+        var cancelled = false
+        // A new page must not keep playing the previous title while its trailer resolves.
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        resolvedUrl = null
+        progress = 0f
+        isResolving = false
         try {
-            if (!streamingAllowed) { exoPlayer.stop(); isResolving = false; return@LaunchedEffect }
-            if (currentPage in items.indices) {
-                val currentItem = items[currentPage]
-                isResolving = true
-                resolvedUrl = null
-                progress = 0f
-
-                val cachedUrl = urlCache[currentItem.id]
-                if (cachedUrl != null) {
-                    prepareAndPlay(cachedUrl)
-                } else {
-                    val mediaTypeStr = if (currentItem.type == MediaType.MOVIE) "movie" else "tv"
-                    val resolver = TrailerResolver(
-                        context = context,
-                        tmdbId = currentItem.id,
-                        mediaType = mediaTypeStr,
-                        callback = object : TrailerResolverCallback {
-                            override fun onResolved(stream: TrailerStream) {
-                                urlCache[currentItem.id] = stream.url
-                                if (latestPage == currentPage && latestStreamingAllowed) prepareAndPlay(stream.url)
-                            }
-
-                            override fun onError(error: String) {
-                                if (latestPage == currentPage && latestStreamingAllowed) isResolving = false
-                            }
-                        }
-                    )
-                    pending += resolver
-                    resolver.start()
-                }
-
-                // Pre-resolve next item stream URL into cache for instant TikTok-style swipe without bloating RAM/WiFi
-                val nextItem = items.getOrNull(currentPage + 1)
-                if (nextItem != null && urlCache[nextItem.id] == null) {
-                    val nextMediaType = if (nextItem.type == MediaType.MOVIE) "movie" else "tv"
-                    val prefetch = TrailerResolver(
-                        context = context,
-                        tmdbId = nextItem.id,
-                        mediaType = nextMediaType,
-                        callback = object : TrailerResolverCallback {
-                            override fun onResolved(stream: TrailerStream) {
-                                urlCache[nextItem.id] = stream.url
-                            }
-                            override fun onError(error: String) {}
-                        }
-                    )
-                    pending += prefetch
-                    prefetch.start()
-                }
-
-                // Smooth timeline progress loop
-                while (true) {
-                    kotlinx.coroutines.delay(200)
-                    val duration = exoPlayer.duration
-                    val current = exoPlayer.currentPosition
-                    if (duration > 0) {
-                        progress = (current.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-                    }
-                }
+            val item = currentItem
+            if (!playbackActive || item == null) return@LaunchedEffect
+            isResolving = true
+            fun ownsRequest() = !cancelled && latestPlaybackActive &&
+                latestItem?.id == item.id && latestItem?.type == item.type
+            val resolver = TrailerResolver(context, item.id, if (item.type == MediaType.MOVIE) "movie" else "tv",
+                object : TrailerResolverCallback {
+                    override fun onResolved(stream: TrailerStream) { if (ownsRequest()) prepareAndPlay(stream) }
+                    override fun onError(error: String) { if (ownsRequest()) isResolving = false }
+                })
+            pending += resolver
+            resolver.start()
+            // TrailerResolver's bounded-lifetime cache preserves MIME type and request headers.
+            items.getOrNull(currentPage + 1)?.let { next ->
+                val prefetch = TrailerResolver(context, next.id, if (next.type == MediaType.MOVIE) "movie" else "tv",
+                    object : TrailerResolverCallback {
+                        override fun onResolved(stream: TrailerStream) {}
+                        override fun onError(error: String) {}
+                    })
+                pending += prefetch
+                prefetch.start()
             }
-        } finally { pending.forEach { it.cancel() } }
+            while (true) {
+                delay(200)
+                val duration = exoPlayer.duration
+                if (duration > 0) progress = (exoPlayer.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+            }
+        } finally {
+            cancelled = true
+            pending.forEach { it.cancel() }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
-            key = { page -> items[page].id },
+            key = { page -> "${items[page].type}:${items[page].id}" },
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val item = items[page]
             val isLiked = likedMedia.any { it.id == item.id }
             val isInList = isWatchlistContains(item.id)
-            val pageMuted = mutedMap[page] ?: false
+            val itemKey = "${item.type}:${item.id}"
+            val pageMuted = mutedMap[itemKey] ?: false
             val isCurrent = pagerState.currentPage == page
 
             TikTokClipItemView(
@@ -408,7 +401,7 @@ private fun TikTokVerticalVideoFeed(
                 isInList = isInList,
                 isMuted = pageMuted,
                 onToggleMute = {
-                    mutedMap[page] = !pageMuted
+                    mutedMap[itemKey] = !pageMuted
                     onShowToast(if (!pageMuted) "Audio Muted" else "Audio Unmuted")
                 },
                 onToggleLike = {
@@ -993,7 +986,7 @@ private fun ComingSoonListMode(
             verticalArrangement = Arrangement.spacedBy(24.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(items, key = { it.id }) { item ->
+            items(items, key = { "${it.type}:${it.id}" }) { item ->
                 val isReminded = reminders.any { it.mediaId == item.recommendationTitle().key }
                 ComingSoonFeedCard(
                     item = item,

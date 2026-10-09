@@ -8,6 +8,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MediaPlaybackPolicyTest {
+    @Test fun signedStreamUrlsAndExplicitTrailerFormatsSelectTheRightSource() {
+        assertEquals("application/dash+xml", playbackMimeType("https://cdn.test/VIDEO.MPD?token=hls"))
+        assertEquals("video/mp4", playbackMimeType("https://cdn.test/video.mp4?token=playlist"))
+        assertEquals("application/x-mpegURL", playbackMimeType("/downloads/video.m3u8"))
+        assertEquals("application/dash+xml", playbackMimeType("https://cdn.test/stream", "dash"))
+        assertNull(playbackMimeType("https://cdn.test/film-hls-story?token=.m3u8"))
+    }
+    @Test fun playbackCallbacksAndRecommendationsDistinguishMovieAndSeriesIds() {
+        val movie = show("42", MediaType.MOVIE)
+        val series = show("42")
+        assertNotEquals(playbackMediaId(movie, null), playbackMediaId(series, null))
+        assertEquals(listOf(series), postPlayCandidates(movie, listOf(movie, series)))
+    }
     private fun show(id: String = "mr_robot", type: MediaType = MediaType.TV_SHOW) = MediaItem(
         id, id, type, "", "", 90, "16+", 2015, "4 Seasons", genres = listOf("Drama"), cast = emptyList(), director = "")
     private fun progress(position: Int = 400) = WatchProgressEntity(profileId = "profile", mediaId = "mr_robot",

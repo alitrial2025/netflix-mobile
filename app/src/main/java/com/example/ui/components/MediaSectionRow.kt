@@ -119,7 +119,7 @@ fun MediaSectionRow(
             ) {
                 itemsIndexed(
                     items = items,
-                    key = { _, item -> item.id },
+                    key = { _, item -> "${item.type}:${item.id}" },
                     contentType = { _, _ -> "top10_media_item" }
                 ) { index, item ->
                     val isReminded = remember(reminders, item.id, item.type) { reminders.any { it.mediaId == item.recommendationTitle().key } }
@@ -154,7 +154,7 @@ fun MediaSectionRow(
             ) {
                 items(
                     items = items,
-                    key = { it.id },
+                    key = { "${it.type}:${it.id}" },
                     contentType = { "media_item" }
                 ) { item ->
                     val isReminded = remember(reminders, item.id, item.type) { reminders.any { it.mediaId == item.recommendationTitle().key } }
@@ -226,7 +226,7 @@ fun ContinueWatchingSectionRow(
         ) {
             items(
                 items = items,
-                key = { it.first.id },
+                key = { "${it.first.type}:${it.first.id}" },
                 contentType = { "continue_watching_item" }
             ) { (media, progress) ->
                 val progressFraction = if (progress.totalSeconds > 0) {

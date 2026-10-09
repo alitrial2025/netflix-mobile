@@ -70,11 +70,11 @@ fun DetailScreen(
     val context = LocalContext.current
     val latestProgress = remember(media.id, watchProgressList) { watchProgressList.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp } }
     val resume = latestProgress?.takeIf { it.canResume() }
-    var localSeason by rememberSaveable(media.id) { mutableIntStateOf(resume?.season ?: 1) }
+    var localSeason by rememberSaveable(media.id, media.type) { mutableIntStateOf(resume?.season ?: 1) }
     val season = loadState?.season ?: localSeason
-    var seasonMenu by remember(media.id) { mutableStateOf(false) }
-    var seasonInfo by remember(media.id) { mutableStateOf(false) }
-    var expanded by rememberSaveable(media.id) { mutableStateOf(false) }
+    var seasonMenu by remember(media.id, media.type) { mutableStateOf(false) }
+    var seasonInfo by remember(media.id, media.type) { mutableStateOf(false) }
+    var expanded by rememberSaveable(media.id, media.type) { mutableStateOf(false) }
     var tab by rememberSaveable(media.id, media.type) { mutableIntStateOf(0) }
     val series = media.type == MediaType.TV_SHOW
     val tabs = if (series) listOf("Episodes", "More Like This", "Trailers & More") else listOf("More Like This", "Trailers & More")
@@ -82,7 +82,7 @@ fun DetailScreen(
     val episodes = remember(media.episodes, season) { media.episodes.filter { episodeCoordinates(it.id).first == season }.sortedBy { it.episodeNumber } }
     val progressByEpisode = remember(media.id, watchProgressList) { watchProgressList.filter { it.mediaId == media.id }.groupBy { it.episodeId }.mapValues { (_, entries) -> entries.maxBy { it.lastWatchedTimestamp } } }
     val target = if (series) episodes.firstOrNull { it.id == resume?.episodeId } ?: episodes.firstOrNull() else null
-    val recommendations = remember(media.similarMedia, media.id, kidMaxAge) { media.similarMedia.filter { it.id != media.id && !it.isComingSoon && (kidMaxAge == null || it.isKidSafe(kidMaxAge)) }.distinctBy { it.type to it.id }.take(12) }
+    val recommendations = remember(media.similarMedia, media.id, media.type, kidMaxAge) { media.similarMedia.filter { (it.id != media.id || it.type != media.type) && !it.isComingSoon && (kidMaxAge == null || it.isKidSafe(kidMaxAge)) }.distinctBy { it.type to it.id }.take(12) }
     val locked = userSubscription.isMediaLocked(media.id, media.title)
     val share: () -> Unit = {
         val type = if (series) "tv" else "movie"
@@ -121,7 +121,7 @@ fun DetailScreen(
                 if (resume != null && (!series || target?.id == resume.episodeId)) {
                     if (series) Text(resume.episodeTitle?.takeIf { it.isNotBlank() } ?: "Episode ${resume.episode}", color = Color.LightGray, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        LinearProgressIndicator(progress = { (resume.positionSeconds.toFloat() / resume.totalSeconds).coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(4.dp), color = NetflixRed, trackColor = Color.Gray)
+                        LinearProgressIndicator(progress = { (if (resume.totalSeconds > 0) resume.positionSeconds.toFloat() / resume.totalSeconds else 0f).coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(4.dp), color = NetflixRed, trackColor = Color.Gray)
                         Text("${((resume.totalSeconds - resume.positionSeconds) / 60).coerceAtLeast(1)} min remaining", color = Color.Gray, fontSize = 11.sp)
                     }
                     Spacer(Modifier.height(16.dp))
@@ -240,14 +240,14 @@ private fun DetailPreview(media: MediaItem, modifier: Modifier) {
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
     if (!resumed) return
-    var start by remember(media.id) { mutableStateOf(false) }
-    LaunchedEffect(media.id) { delay(900); start = true }
+    var start by remember(media.id, media.type) { mutableStateOf(false) }
+    LaunchedEffect(media.id, media.type) { delay(900); start = true }
     if (!start) return
-    val player = remember(context, media.id) { ExoPlayer.Builder(context).build().apply { volume = 0f; repeatMode = Player.REPEAT_MODE_OFF } }
-    var ready by remember(media.id) { mutableStateOf(false) }
-    var muted by remember(media.id) { mutableStateOf(true) }
+    val player = remember(context, media.id, media.type) { ExoPlayer.Builder(context).build().apply { volume = 0f; repeatMode = Player.REPEAT_MODE_OFF } }
+    var ready by remember(media.id, media.type) { mutableStateOf(false) }
+    var muted by remember(media.id, media.type) { mutableStateOf(true) }
     LaunchedEffect(muted) { player.volume = if (muted) 0f else 1f }
-    DisposableEffect(media.id, player) {
+    DisposableEffect(media.id, media.type, player) {
         var disposed = false
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() { if (!disposed) ready = true }

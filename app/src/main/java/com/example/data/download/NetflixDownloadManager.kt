@@ -825,7 +825,7 @@ class NetflixDownloadManager(
     }
 
     private suspend fun deleteUnreferencedFiles(key: String) {
-        if (activeJobs[key]?.isActive != true && !repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
+        if (requests[key] == null && activeJobs[key]?.isActive != true && !repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
     }
 
     suspend fun cancelAndJoinTransfers() {
@@ -872,17 +872,23 @@ class NetflixDownloadManager(
                 downloadOwners.filterValues { it == profileId }.keys + requests.values.filter { it.profileId == profileId }.map { it.task.downloadKey }
             try {
                 for (key in keys) {
-                    workManager.cancelUniqueWork(downloadWorkName(key))
-                    removeSavedRequest(key)
-                    val transfer = activeJobs[key]?.takeIf { downloadOwners[key] == profileId }
-                    transfer?.cancel()
-                    transfer?.join()
+                    val transferOwner = requests[key]?.profileId ?: downloadOwners[key]
+                    val mayClearTransfer = transferOwner == null || transferOwner == profileId
+                    if (mayClearTransfer) {
+                        workManager.cancelUniqueWork(downloadWorkName(key))
+                        removeSavedRequest(key)
+                        val transfer = activeJobs[key]?.takeIf { downloadOwners[key] == profileId }
+                        transfer?.cancel()
+                        transfer?.join()
+                    }
                     repository.removeDownload(profileId, key)
                     deleteUnreferencedFiles(key)
-                    _downloadingProgress.update { it - key }
-                    _downloadTasks.update { it - key }
-                    _pausedDownloadKeys.update { it - key }
-                    downloadOwners.remove(key, profileId)
+                    if (mayClearTransfer) {
+                        _downloadingProgress.update { it - key }
+                        _downloadTasks.update { it - key }
+                        _pausedDownloadKeys.update { it - key }
+                        downloadOwners.remove(key, profileId)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("DownloadManager", "Error clearing downloads dir: ${e.message}")

@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,7 +12,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.example.ui.components.BrowseTabs
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -153,6 +152,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val downloadsForYouEnabled by viewModel.downloadsForYouEnabled.collectAsStateWithLifecycle()
     val profileDownloadAllocations by viewModel.profileDownloadAllocations.collectAsStateWithLifecycle()
     val watchlist by viewModel.watchlist.collectAsStateWithLifecycle()
+    val watchlistIds = remember(watchlist) { watchlist.map { it.id }.toSet() }
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val watchHistory by viewModel.watchHistory.collectAsStateWithLifecycle()
     val continueWatchingOptions by viewModel.continueWatchingOptions.collectAsStateWithLifecycle()
@@ -265,11 +265,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                     .fillMaxSize().padding(contentPadding)
             ) {
                 // Tab Content Switcher
-                AnimatedContent(
-                    targetState = selectedTab,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "TabContent"
-                ) { tab ->
+                BrowseTabs(selectedTab, "${currentUserEmail.orEmpty()}:${activeProfile.id}:${activeProfile.contentMaxAge}") { tab ->
                     when (tab) {
                         NavigationTab.HOME -> {
                             val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -322,11 +318,13 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                     HomeScreen(
                                         catalogMedia = catalogMedia,
                                         personalizedMedia = personalizedMedia,
+                                        watchlistIds = watchlistIds,
                                         userSubscription = userSubscription,
                                         reminders = reminders,
                                         onToggleReminder = stableOnToggleReminder,
                                         isLoadingCatalog = isLoadingCatalog,
                                         onRetryCatalog = viewModel::refreshCatalog,
+                                        onClearFilters = { viewModel.setCategoryFilter(CategoryFilter.ALL) },
                                         onOpenDownloads = stableOnDownloadsClick,
                                         activeProfile = activeProfile,
                                         categoryFilter = categoryFilter,
@@ -382,6 +380,14 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                         NavigationTab.CLIPS -> {
                             ClipsScreen(
+                                catalogMedia = catalogMedia,
+                                upcomingReleases = upcomingReleases,
+                                activeProfile = activeProfile,
+                                isActive = selectedTab == NavigationTab.CLIPS && selectedMedia == null &&
+                                    !isPlayerVisible && !showProfilePicker && !showSettingsDrawer &&
+                                    !showDownloadsScreen && !showAuthScreen && !showSubscriptionSheet &&
+                                    !showNotificationsSheet && !showCastDialog && !showTvPairScreen &&
+                                    !showEditProfileScreen && !showAvatarPicker && !showProfileWalkthrough,
                                 streamingAllowed = com.example.data.MobilePlaybackPolicy.permitsStreaming(
                                     com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet),
                                 maxVideoHeight = com.example.data.MobilePlaybackPolicy.maxVideoHeight(isHighQualityEnabled,

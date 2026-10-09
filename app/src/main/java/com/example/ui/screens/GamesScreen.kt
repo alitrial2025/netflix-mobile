@@ -108,7 +108,12 @@ fun GamesScreen(
     scrollState: ScrollState = rememberScrollState(),
     listState: LazyListState = rememberLazyListState()
 ) {
-    if (games.isEmpty()) return
+    if (games.isEmpty()) {
+        Box(modifier.fillMaxSize().background(NetflixBlack), contentAlignment = Alignment.Center) {
+            Text("No games are available for this profile yet.", color = Color.LightGray, modifier = Modifier.padding(28.dp))
+        }
+        return
+    }
 
     val heroGame = games.first()
     val context = LocalContext.current

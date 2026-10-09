@@ -72,7 +72,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
-import com.example.data.CatalogData
 import com.example.data.CloudWatchHistoryItem
 import com.example.data.local.DownloadEntity
 import com.example.data.local.ReminderEntity
@@ -137,8 +136,8 @@ fun MyNetflixScreen(
 ) {
     val scrollState = rememberScrollState()
     var showClearDialog by remember { mutableStateOf(false) }
-    var selectedListFilter by remember { mutableStateOf(MyListFilter.ALL) }
-    var showAllMyList by remember { mutableStateOf(false) }
+    var selectedListFilter by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(MyListFilter.ALL) }
+    var showAllMyList by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 
     val unreadNotificationsCount = notifications.count { !it.isRead }
 
@@ -519,8 +518,8 @@ fun MyNetflixScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("continue_watching_row")
                 ) {
-                    items(continueWatchingList, key = { it.first.id }) { (media, progress) ->
-                    val progressFraction = (progress.positionSeconds.toFloat() / progress.totalSeconds.toFloat()).coerceIn(0.15f, 0.95f)
+                    items(continueWatchingList, key = { "${it.first.type}:${it.first.id}" }) { (media, progress) ->
+                    val progressFraction = (if (progress.totalSeconds > 0) progress.positionSeconds.toFloat() / progress.totalSeconds else 0f).coerceIn(0f, 1f)
 
                     Box(
                         modifier = Modifier
@@ -723,7 +722,7 @@ fun MyNetflixScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.testTag("watch_history_row")
             ) {
-                items(watchHistory, key = { it.mediaId }) { item ->
+                items(watchHistory, key = { "${it.type}:${it.mediaId}" }) { item ->
                     Column(
                         modifier = Modifier
                             .width(120.dp)
@@ -777,11 +776,7 @@ fun MyNetflixScreen(
         // =========================================================================
         // 4. "SERIES & FILMS YOU'VE LIKED" SECTION WITH SHARE BUTTON BELOW POSTER
         // =========================================================================
-        val displayLikedMedia = if (likedMedia.isNotEmpty()) {
-            likedMedia
-        } else {
-            CatalogData.allMedia.filter { it.matchPercentage >= 90 }.take(6)
-        }
+        val displayLikedMedia = likedMedia
 
         if (displayLikedMedia.isNotEmpty()) {
             Column(
@@ -804,7 +799,7 @@ fun MyNetflixScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.testTag("liked_media_row")
                 ) {
-                    items(displayLikedMedia, key = { it.id }) { media ->
+                    items(displayLikedMedia, key = { "${it.type}:${it.id}" }) { media ->
                         Column(
                             modifier = Modifier.width(120.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -887,11 +882,7 @@ fun MyNetflixScreen(
         // =========================================================================
         // 5. "MY LIST" SECTION WITH "SEE ALL >"
         // =========================================================================
-        val displayWatchlist = if (filteredWatchlist.isNotEmpty()) {
-            filteredWatchlist
-        } else {
-            CatalogData.allMedia.take(6)
-        }
+        val displayWatchlist = filteredWatchlist
 
         Column(
             modifier = Modifier
@@ -937,12 +928,16 @@ fun MyNetflixScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            if (displayWatchlist.isEmpty()) {
+                Text(if (watchlist.isEmpty()) "Save titles to My List to find them here." else "No saved titles match this filter.",
+                    color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("my_list_empty"))
+            }
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.testTag("my_list_row")
             ) {
-                items(displayWatchlist, key = { it.id }) { item ->
+                items(displayWatchlist, key = { "${it.type}:${it.id}" }) { item ->
                     MediaPosterCard(
                         media = item,
                         onClick = { onMediaClick(item) }
@@ -1050,7 +1045,7 @@ fun MyNetflixScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(top = 4.dp)
                     ) {
-                        items(remindedMediaItems, key = { it.id }) { media ->
+                        items(remindedMediaItems, key = { "${it.type}:${it.id}" }) { media ->
                             MediaPosterCard(
                                 media = media,
                                 onClick = { onMediaClick(media) }

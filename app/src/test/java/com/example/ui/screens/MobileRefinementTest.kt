@@ -71,6 +71,7 @@ class MobileRefinementTest {
         var selectedEpisode: Episode? = null
         val downloaded = DownloadEntity(profileId = "profile", downloadKey = "mr_robot_ep_mr_robot_S3_7", mediaId = "mr_robot", mediaTitle = "Mr. Robot", episodeTitle = "S3:E7 A saved episode", fileSizeMb = 185)
         rule.setContent { NetflixTheme { DownloadsScreen(listOf(downloaded), smartDownloadsEnabled = false, connectedCastDevice = null,
+            activeProfile = UserProfile("profile", "Alex"),
             userSubscription = premium, onClose = {}, onPlayMedia = { _, ep -> selectedEpisode = ep }, onDeleteDownload = {}, onClearAllDownloads = {},
             onToggleSmartDownloads = {}, onSetUpDownloadsForYou = {}, onOpenSearch = {}, onOpenCast = {}, onOpenMediaDetail = {}, onShowToast = {}, catalogMedia = emptyList()) } }
         rule.onNodeWithTag("download_row_mr_robot_ep_mr_robot_S3_7").performClick()
@@ -156,7 +157,7 @@ class MobileRefinementTest {
         val route = mutableStateOf(false)
         rule.setContent { NetflixTheme {
             if (!route.value) DetailScreen(source, true, premium, downloadProgressMap = emptyMap(), onClose = {}, onPlayClick = { _, _ -> }, onPlayTrailerClick = { _, _ -> }, onWatchlistToggle = {}, onDownloadClick = { _, _ -> }, onRatingSelect = {}, onSimilarMediaClick = {})
-            else DownloadsScreen(listOf(DownloadEntity(downloadKey = "mr_robot_ep_mr_robot_S1_1", mediaId = "mr_robot", mediaTitle = "Squid Game", episodeTitle = "S1:E1 The Invitation", fileSizeMb = 185)),
+            else DownloadsScreen(listOf(DownloadEntity(profileId = "profile", downloadKey = "mr_robot_ep_mr_robot_S1_1", mediaId = "mr_robot", mediaTitle = "Squid Game", episodeTitle = "S1:E1 The Invitation", fileSizeMb = 185)),
                 smartDownloadsEnabled = true, connectedCastDevice = null, userSubscription = premium,
                 onClose = {}, onPlayMedia = { _, _ -> }, onDeleteDownload = {}, onClearAllDownloads = {}, onToggleSmartDownloads = {}, onSetUpDownloadsForYou = {}, onOpenSearch = {}, onOpenCast = {}, onOpenMediaDetail = {}, onShowToast = {}, catalogMedia = listOf(source))
         } }

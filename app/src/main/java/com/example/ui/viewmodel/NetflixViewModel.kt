@@ -64,6 +64,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -79,6 +81,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -108,6 +111,7 @@ data class PlayerState(
     val introWindow: IntroWindow? = null,
     val isResolving: Boolean = false,
     val resolvedUrl: String? = null,
+    val resolvedStreamType: String? = null,
     val resolveHeaders: Map<String, String> = emptyMap(),
     val resolveError: String? = null,
     val sourceId: String? = null,
@@ -157,6 +161,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private var catalogRefreshJob: Job? = null
+    private var catalogLogoJob: Job? = null
+    private val catalogCacheMutex = kotlinx.coroutines.sync.Mutex()
+
+    private fun publishCatalog(items: List<MediaItem>) {
+        _catalogMedia.value = items
+        CatalogData.allMedia = items
+    }
+
+    private suspend fun persistCatalog() = catalogCacheMutex.withLock {
+        withContext(Dispatchers.IO) { catalogCache.write(_catalogMedia.value) }
+    }
 
     fun refreshCatalog() = fetchTmdbCatalog()
 
@@ -169,6 +184,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private fun fetchTmdbCatalog() {
         if (catalogRefreshJob?.isActive == true) return
+        catalogLogoJob?.cancel()
         catalogRefreshJob = viewModelScope.launch(Dispatchers.Default) {
             _isLoadingCatalog.value = true
             try {
@@ -178,111 +194,49 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     CatalogData.allMedia = cached
                 }
                 if (!hasCatalogNetwork()) { setupOfflineFallbacks(); return@launch }
-                val requestSlots = kotlinx.coroutines.sync.Semaphore(4)
-                fun request(block: suspend () -> com.example.data.network.TmdbResponse) = async {
-                    requestSlots.acquire()
-                    try { requestCatalogSection(block) } finally { requestSlots.release() }
-                }
                 val apiKey = TmdbClient.apiKey
                 if (apiKey.isEmpty() || apiKey == "PLACEHOLDER") {
                     setupOfflineFallbacks()
-                    _isLoadingCatalog.value = false
                     return@launch
                 }
-
-                val trendingMoviesDeferred = request { TmdbClient.service.getTrendingMovies(apiKey) }
-                val trendingTvDeferred = request { TmdbClient.service.getTrendingTv(apiKey) }
-                val topRatedMoviesDeferred = request { TmdbClient.service.getTopRatedMovies(apiKey) }
-                val topRatedTvDeferred = request { TmdbClient.service.getTopRatedTv(apiKey) }
-
-                val popularMoviesDeferred = request { TmdbClient.service.getPopularMovies(apiKey) }
-                val popularTvDeferred = request { TmdbClient.service.getPopularTv(apiKey) }
-
-                // Category & Genre Discovery (Crime, Action, Sci-Fi, Thriller, Animation, Comedy, Drama, Horror, Romance, Documentary)
-                val crimeMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") }
-                val crimeTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") }
-                val actionMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") }
-                val sciFiMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") }
-                val animationMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") }
-                val comedyMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") }
-                val dramaMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") }
-                val horrorMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") }
-                val romanceMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") }
-                val docMoviesDeferred = request { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") }
-                val actionTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") }
-                val sciFiTvDeferred = request { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") }
-
-                val trendingMoviesTask = trendingMoviesDeferred.await()
-                val trendingTvTask = trendingTvDeferred.await()
-                val topRatedMoviesTask = topRatedMoviesDeferred.await()
-                val topRatedTvTask = topRatedTvDeferred.await()
-
-                val popularMoviesTask = popularMoviesDeferred.await()
-                val popularTvTask = popularTvDeferred.await()
-
-                val crimeMovies = crimeMoviesDeferred.await()
-                val crimeTv = crimeTvDeferred.await()
-                val actionMovies = actionMoviesDeferred.await()
-                val sciFiMovies = sciFiMoviesDeferred.await()
-                val animationMovies = animationMoviesDeferred.await()
-                val comedyMovies = comedyMoviesDeferred.await()
-                val dramaMovies = dramaMoviesDeferred.await()
-                val horrorMovies = horrorMoviesDeferred.await()
-                val romanceMovies = romanceMoviesDeferred.await()
-                val docMovies = docMoviesDeferred.await()
-                val actionTv = actionTvDeferred.await()
-                val sciFiTv = sciFiTvDeferred.await()
-
-                val mappedItems = mutableListOf<MediaItem>()
-
-                trendingMoviesTask?.results?.forEach { result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, isTrending = true))
+                fun section(type: MediaType, trending: Boolean = false, ranked: Boolean = false,
+                    load: suspend () -> com.example.data.network.TmdbResponse): suspend () -> List<MediaItem> = {
+                    val results = load().results
+                    (if (ranked) results.take(10) else results).mapIndexed { index, result ->
+                        mapResultToMedia(result, type, isTrending = trending, topRank = if (ranked) index + 1 else null)
+                    }
                 }
-
-                trendingTvTask?.results?.forEach { result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, isTrending = true))
+                val primary = listOf(
+                    section(MediaType.MOVIE, trending = true) { TmdbClient.service.getTrendingMovies(apiKey) },
+                    section(MediaType.TV_SHOW, trending = true) { TmdbClient.service.getTrendingTv(apiKey) },
+                    section(MediaType.MOVIE, ranked = true) { TmdbClient.service.getTopRatedMovies(apiKey) },
+                    section(MediaType.TV_SHOW, ranked = true) { TmdbClient.service.getTopRatedTv(apiKey) }
+                )
+                val secondary = listOf(
+                    section(MediaType.MOVIE) { TmdbClient.service.getPopularMovies(apiKey) },
+                    section(MediaType.TV_SHOW) { TmdbClient.service.getPopularTv(apiKey) },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "80,53") },
+                    section(MediaType.TV_SHOW) { TmdbClient.service.discoverTv(apiKey, withGenres = "80,9648") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "28,12") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "878") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "16,10751") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "35") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "18") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "27") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "10749") },
+                    section(MediaType.MOVIE) { TmdbClient.service.discoverMovies(apiKey, withGenres = "99") },
+                    section(MediaType.TV_SHOW) { TmdbClient.service.discoverTv(apiKey, withGenres = "10759") },
+                    section(MediaType.TV_SHOW) { TmdbClient.service.discoverTv(apiKey, withGenres = "10765") }
+                )
+                val mappedItems = fetchCatalogInStages(primary, secondary) { first ->
+                    // Keep cached metadata available to saved lists while genre requests finish.
+                    if (first.isNotEmpty()) publishCatalog(mergeCatalogSections(first + _catalogMedia.value))
                 }
-
-                topRatedMoviesTask?.results?.take(10)?.forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE, topRank = index + 1))
-                }
-
-                topRatedTvTask?.results?.take(10)?.forEachIndexed { index, result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW, topRank = index + 1))
-                }
-
-
-                popularMoviesTask?.results?.forEach { result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.MOVIE))
-                }
-
-                popularTvTask?.results?.forEach { result ->
-                    mappedItems.add(mapResultToMedia(result, MediaType.TV_SHOW))
-                }
-
-                // Add genre discovered media
-                crimeMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                crimeTv?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.TV_SHOW)) }
-                actionMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                sciFiMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                animationMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                comedyMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                dramaMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                horrorMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                romanceMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                docMovies?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.MOVIE)) }
-                actionTv?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.TV_SHOW)) }
-                sciFiTv?.results?.forEach { mappedItems.add(mapResultToMedia(it, MediaType.TV_SHOW)) }
-
-                // Pure TMDB real catalog
-                val deduplicated = mappedItems.distinctBy { it.id }
-                if (deduplicated.isEmpty()) throw java.io.IOException("Catalog is unavailable")
-                withContext(Dispatchers.IO) { catalogCache.write(deduplicated) }
-                CatalogData.allMedia = deduplicated
-                _catalogMedia.value = deduplicated
-
-                // Fetch real TMDB logo titles in background for hero and trending items
-                fetchLogosForItems(apiKey, deduplicated)
+                val catalog = mergeCatalogSections(mappedItems)
+                if (catalog.isEmpty()) throw java.io.IOException("Catalog is unavailable")
+                publishCatalog(catalog)
+                persistCatalog()
+                fetchLogosForItems(apiKey, catalog)
 
                 // History and notifications come from actual user actions, not catalog fixtures.
 
@@ -819,6 +773,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             combine(repository.getWatchlistEntries(profile.id), _catalogMedia) { entries, catalog ->
                 val byId = catalog.associateBy { it.id }
                 entries.mapNotNull { byId[it.mediaId] ?: CatalogData.getById(it.mediaId) }
+                    .filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
             }
         }
         .flowOn(Dispatchers.Default)
@@ -836,7 +791,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     }
                     val remoteMedia = cloudMedia[mediaId]
                     val media = byId[mediaId]?.takeIf { remoteMedia == null || it.type == remoteMedia.type } ?: remoteMedia ?: CatalogData.getById(mediaId)
-                    if (media == null) null else Pair(media, latest)
+                    if (media == null || (profile.hasMaturityRestriction && !media.isKidSafe(profile.contentMaxAge))) null else Pair(media, latest)
                 }.sortedByDescending { it.second.lastWatchedTimestamp }
             }
         }
@@ -858,7 +813,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val likedMedia: StateFlow<List<MediaItem>> = _activeProfile
-        .flatMapLatest { profile -> repository.getLikedItems(profile.id) }
+        .flatMapLatest { profile ->
+            combine(repository.getAllRatings(profile.id), _catalogMedia) { ratings, catalog ->
+                val byId = catalog.associateBy { it.id }
+                ratings.filter { it.ratingType == "LIKE" || it.ratingType == "DOUBLE_LIKE" }
+                    .mapNotNull { byId[it.mediaId] }
+                    .filter { !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge) }
+            }
+        }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // 2026 "Trailers You've Watched" Hub
@@ -951,7 +914,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         } else {
             list
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CatalogData.gamesList)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Filtered search results
     private val _searchResults = MutableStateFlow<List<MediaItem>>(emptyList())
@@ -1366,6 +1329,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectProfile(profile: UserProfile) {
+        if (_activeProfile.value != profile) {
+            closePlayer()
+            closeDetail()
+        }
         _activeProfile.value = profile
         _allocatedStorageGb.value = _profileDownloadAllocations.value[profile.id] ?: 0f
         _showProfilePicker.value = false
@@ -1526,7 +1493,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         seasonJob?.cancel()
         detailGeneration++
         seasonGeneration++
-        val latest = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
+        val latest = allWatchProgress.value.filter { it.profileId == _activeProfile.value.id && it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
         val season = latest?.takeIf { it.canResume() }?.season ?: 1
         _detailLoadState.value = DetailLoadState(loading = true, season = season)
         _selectedMedia.value = media
@@ -1618,10 +1585,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         detailJob = viewModelScope.launch {
             try {
                 val apiKey = TmdbClient.apiKey
-                val mediaIdInt = resolveTmdbId(media.id) ?: return@launch
+                val mediaIdInt = resolveTmdbId(media.id) ?: throw java.io.IOException("Title metadata is unavailable")
 
                 if (media.type == MediaType.MOVIE) {
-                    val details = TmdbClient.service.getMovieDetails(mediaIdInt, apiKey)
+                    val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) {
+                        TmdbClient.service.getMovieDetails(mediaIdInt, apiKey)
+                    } ?: throw java.io.IOException("Title lookup timed out")
 
                     val castNames = details.credits?.cast?.take(6)?.map { it.name } ?: emptyList()
                     val directorName = details.credits?.crew?.find { it.job == "Director" }?.name
@@ -1659,7 +1628,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         } else current
                     }
                 } else {
-                    val details = TmdbClient.service.getTvShowDetails(mediaIdInt, apiKey)
+                    val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) {
+                        TmdbClient.service.getTvShowDetails(mediaIdInt, apiKey)
+                    } ?: throw java.io.IOException("Title lookup timed out")
 
                     val castNames = details.credits?.cast?.take(6)?.map { it.name } ?: emptyList()
                     val directorName = details.credits?.crew?.find { it.job == "Executive Producer" || it.job == "Director" }?.name
@@ -1709,39 +1680,31 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun fetchLogosForItems(apiKey: String, items: List<MediaItem>) {
-        viewModelScope.launch {
-            try {
-                val targets = items.take(15).filter { it.id.toIntOrNull() != null }
-                val updatedItems = _catalogMedia.value.toMutableList()
-                var anyUpdated = false
-
-                for (item in targets) {
-                    val tmdbId = item.id.toIntOrNull() ?: continue
-                    try {
-                        val imagesResponse = if (item.type == MediaType.MOVIE) {
-                            TmdbClient.service.getMovieImages(tmdbId, apiKey)
-                        } else {
-                            TmdbClient.service.getTvShowImages(tmdbId, apiKey)
+        catalogLogoJob?.cancel()
+        catalogLogoJob = viewModelScope.launch(Dispatchers.Default) {
+            val slots = kotlinx.coroutines.sync.Semaphore(3)
+            val logos = kotlinx.coroutines.coroutineScope {
+                items.take(15).map { item -> async {
+                    slots.withPermit {
+                        requestCatalogSection {
+                            val id = item.id.toIntOrNull() ?: return@requestCatalogSection null
+                            val images = if (item.type == MediaType.MOVIE) TmdbClient.service.getMovieImages(id, apiKey)
+                                else TmdbClient.service.getTvShowImages(id, apiKey)
+                            val path = images.logos.firstOrNull { it.language == "en" }?.filePath
+                                ?: images.logos.firstOrNull()?.filePath
+                            path?.let { (item.type to item.id) to "https://image.tmdb.org/t/p/w500$it" }
                         }
-                        val logoPath = imagesResponse.logos.firstOrNull { it.language == "en" }?.filePath
-                            ?: imagesResponse.logos.firstOrNull()?.filePath
-                        if (logoPath != null) {
-                            val logoUrl = "https://image.tmdb.org/t/p/w500$logoPath"
-                            val index = updatedItems.indexOfFirst { it.id == item.id }
-                            if (index >= 0) {
-                                updatedItems[index] = updatedItems[index].copy(logoUrl = logoUrl)
-                                anyUpdated = true
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                if (anyUpdated) {
-                    CatalogData.allMedia = updatedItems
-                    _catalogMedia.value = updatedItems
-                    withContext(Dispatchers.IO) { catalogCache.write(updatedItems) }
-                }
-            } catch (_: Exception) {}
+                    }
+                } }.awaitAll().filterNotNull().toMap()
+            }
+            if (logos.isNotEmpty()) {
+                // Merge against the current list rather than restoring an outdated snapshot.
+                _catalogMedia.update { current -> current.map { item ->
+                    logos[item.type to item.id]?.let { item.copy(logoUrl = it) } ?: item
+                } }
+                CatalogData.allMedia = _catalogMedia.value
+                persistCatalog()
+            }
         }
     }
 
@@ -1846,19 +1809,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         if (!titleAllowed(media)) return
+        if (isMovieLocked(media)) {
+            _membershipPrompt.value = media
+            return
+        }
         smartCuratorJob?.cancel() // A background availability probe must yield to an explicit Play tap.
         finishSmartReplacement()
         persistPlayerProgress(_playerState.value)
         progressTracker.reset()
         val requestGeneration = ++playbackRequestGeneration
-        if (isMovieLocked(media)) {
-            resolveJob?.cancel()
-            _membershipPrompt.value = media
-            return
-        }
-
         nextEpisodeJob?.cancel()
-        val latestProgress = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
+        val latestProgress = allWatchProgress.value.filter { it.profileId == _activeProfile.value.id && it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
         val targetEpisode = initialPlaybackEpisode(media, episode, latestProgress)
         val totalSec = targetEpisode?.durationMinutes?.times(60) ?: 7200
 
@@ -1891,13 +1852,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
 
         val downloadKey = if (episode != null) "${media.id}_${episode.id}" else if (media.type == MediaType.TV_SHOW && targetEpisode != null) "${media.id}_${targetEpisode.id}" else media.id
-        val existingDownload = downloads.value.find { it.downloadKey == downloadKey && it.isComplete }
+        val existingDownload = downloads.value.find { it.profileId == _activeProfile.value.id && it.downloadKey == downloadKey && it.isComplete }
         val useConfirmedOfflineDownload = !playbackNetwork(getApplication()).online &&
             existingDownload?.localFilePath?.let { java.io.File(it).let { file -> file.exists() && file.length() > 0 } } == true
         syncManager.stopActiveStreamHeartbeat(devId)
 
         resolveJob?.cancel()
         val playbackUid = syncManager.getUserId()
+        val playbackProfile = _activeProfile.value.id
         resolveJob = viewModelScope.launch {
             try {
                 if (syncManager.getUserId() != playbackUid || requestGeneration != playbackRequestGeneration) return@launch
@@ -1917,6 +1879,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     resolveError = error.message ?: "Membership could not be verified. Reconnect and try again.") }
                 return@launch
             }
+            ensureActive()
+            if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid) return@launch
             if (!useConfirmedOfflineDownload) {
                 syncManager.startActiveStreamHeartbeat(
                     deviceId = devId,
@@ -1924,14 +1888,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     mediaTitle = media.title,
                     maxAllowedScreens = maxScreens,
                     onLimitExceeded = { active, max ->
-                        viewModelScope.launch(Dispatchers.Main) {
+                        viewModelScope.launch(Dispatchers.Main) limit@ {
+                            if (requestGeneration != playbackRequestGeneration || syncManager.getUserId() != playbackUid) return@limit
                             if (_playerState.value.sourceId != "Trailer") closePlayer()
                             showToast("Screen limit reached ($active/$max active streams). Upgrade your plan to watch simultaneously.")
                         }
                     }
                 )
             }
-            val progressEntity = repository.getProgress(_activeProfile.value.id, media.id).firstOrNull()
+            val progressEntity = repository.getProgress(playbackProfile, media.id).firstOrNull()
             if (requestGeneration != playbackRequestGeneration) return@launch
             if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
                 _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
@@ -1955,6 +1920,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 if (!existingDownload.localFilePath.isNullOrEmpty()) {
                     val file = java.io.File(existingDownload.localFilePath)
                     if (file.exists() && file.length() > 0) {
+                        syncManager.stopActiveStreamHeartbeat(devId)
                         showToast("Playing downloaded media offline...")
                         _playerState.update {
                             it.copy(
@@ -1973,12 +1939,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             }
 
             if (offlineOnly) {
+                syncManager.stopActiveStreamHeartbeat(devId)
                 _playerState.update { it.copy(isResolving = false, isPlaying = false,
                     resolveError = "This download is missing from your device. Delete it in Downloads and download it again.") }
                 return@launch
             }
             if (!MobilePlaybackPolicy.permitsStreaming(mobileSettings.cellularDataMode,
                     playbackNetwork(getApplication()).wifiOrEthernet)) {
+                syncManager.stopActiveStreamHeartbeat(devId)
                 _playerState.update { it.copy(isResolving = false, isPlaying = false,
                     resolveError = "Connect to Wi-Fi or change Cellular Data in App Settings to play this title.") }
                 return@launch
@@ -2024,6 +1992,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 throw cancelled
             } catch (e: Exception) {
                 if (requestGeneration != playbackRequestGeneration) return@launch
+                syncManager.stopActiveStreamHeartbeat(devId)
                 if (syncManager.getUserId() != playbackUid || isMovieLocked(media)) {
                     _playerState.update { it.copy(isResolving = false, isPlaying = false, resolvedUrl = null,
                         resolveError = "Your membership changed. Choose a plan to continue.") }
@@ -2050,6 +2019,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val state = _playerState.value
         val media = state.media ?: return
         if (state.sourceId?.startsWith("Offline") == true || state.sourceId == "Trailer") return
+        syncManager.stopActiveStreamHeartbeat(com.example.data.DeviceAccessGuard.deviceId(getApplication()))
         val season = state.episode?.id?.substringAfter("_S", "")?.substringBefore('_')?.toIntOrNull()
             ?: if (media.type == MediaType.TV_SHOW) 1 else 0
         netMirrorResolver.evictCachedStream(media.id, if (media.type == MediaType.MOVIE) "movie" else "tv",
@@ -2078,7 +2048,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         if (!isTrailer && syncManager.isAuthenticated() && progressTracker.shouldSave(currentSec)) {
             val eventTimestamp = com.example.data.ContinueWatchingEventPolicy.newTimestamp()
             viewModelScope.launch {
-                if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
+                if (syncManager.getUserId() != ownerUid) return@launch
                 repository.saveProgress(
                     ownerProfile,
                     media.id,
@@ -2294,7 +2264,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         if (current.media != null && current.sourceId != "Trailer" && current.currentPositionSec >= 0 && current.resolvedUrl != null && !current.isResolving && syncManager.isAuthenticated()) {
             val eventTimestamp = com.example.data.ContinueWatchingEventPolicy.newTimestamp()
             viewModelScope.launch {
-                if (syncManager.getUserId() != ownerUid || _activeProfile.value.id != ownerProfile) return@launch
+                // Profile switches may finish after this save is queued; keep its captured owner.
+                if (syncManager.getUserId() != ownerUid) return@launch
                 repository.saveProgress(
                     ownerProfile,
                     current.media.id,
@@ -2821,6 +2792,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         finishSmartReplacement()
+        persistPlayerProgress(_playerState.value)
+        progressTracker.reset()
+        nextEpisodeJob?.cancel()
+        val requestGeneration = ++playbackRequestGeneration
+        syncManager.stopActiveStreamHeartbeat(com.example.data.DeviceAccessGuard.deviceId(getApplication()))
         val durationSec = if (title.contains("teaser", ignoreCase = true)) 105 else 192
         _playerState.value = PlayerState(
             media = media.copy(title = title),
@@ -2843,27 +2819,31 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
                 showToast("Loading trailer...")
 
-                val trailerStream = kotlinx.coroutines.suspendCancellableCoroutine<TrailerStream?> { continuation ->
-                    val resolver = TrailerResolver(
-                        context = getApplication(),
-                        tmdbId = tmdbId,
-                        mediaType = type,
-                        callback = object : TrailerResolverCallback {
-                            override fun onResolved(stream: TrailerStream) {
-                                if (continuation.isActive) continuation.resume(stream)
-                            }
+                val trailerStream = kotlinx.coroutines.withTimeoutOrNull(35_000L) {
+                    kotlinx.coroutines.suspendCancellableCoroutine<TrailerStream?> { continuation ->
+                        val resolver = TrailerResolver(
+                            context = getApplication(),
+                            tmdbId = tmdbId,
+                            mediaType = type,
+                            callback = object : TrailerResolverCallback {
+                                override fun onResolved(stream: TrailerStream) {
+                                    if (continuation.isActive) continuation.resume(stream)
+                                }
 
-                            override fun onError(error: String) {
-                                if (continuation.isActive) continuation.resume(null)
+                                override fun onError(error: String) {
+                                    if (continuation.isActive) continuation.resume(null)
+                                }
+                                override fun onExternalTrailer(url: String) {
+                                    if (continuation.isActive) continuation.resume(TrailerStream(url, "youtube"))
+                                }
                             }
-                            override fun onExternalTrailer(url: String) {
-                                if (continuation.isActive) continuation.resume(TrailerStream(url, "youtube"))
-                            }
-                        }
-                    )
-                    continuation.invokeOnCancellation { resolver.cancel() }
-                    resolver.start()
+                        )
+                        continuation.invokeOnCancellation { resolver.cancel() }
+                        resolver.start()
+                    }
                 }
+                ensureActive()
+                if (requestGeneration != playbackRequestGeneration) return@launch
                 if (trailerStream?.type == "youtube") {
                     val app = getApplication<Application>()
                     try {
@@ -2875,7 +2855,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     closePlayer()
                 } else if (trailerStream != null) {
                     _playerState.update { it.copy(isResolving = false, resolvedUrl = trailerStream.url,
-                        resolveHeaders = trailerStream.headers, sourceId = "Trailer", isPlaying = true) }
+                        resolvedStreamType = trailerStream.type, resolveHeaders = trailerStream.headers, sourceId = "Trailer", isPlaying = true) }
                 } else {
                     _playerState.update { it.copy(isResolving = false, resolveError = "Trailer not available for this title.", isPlaying = false) }
                     showToast("Trailer not available for this title.")
@@ -2883,6 +2863,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (requestGeneration != playbackRequestGeneration) return@launch
                 _playerState.update {
                     it.copy(
                         isResolving = false,

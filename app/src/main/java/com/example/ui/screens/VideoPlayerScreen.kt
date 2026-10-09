@@ -208,8 +208,8 @@ fun VideoPlayerScreen(
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
     var playbackError by remember { mutableStateOf<String?>(null) }
-    var slowLookup by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
-    LaunchedEffect(media.id, playerState.episode?.id, playerState.isResolving) {
+    var slowLookup by remember(media.type, media.id, playerState.episode?.id) { mutableStateOf(false) }
+    LaunchedEffect(media.type, media.id, playerState.episode?.id, playerState.isResolving) {
         slowLookup = false
         if (playerState.isResolving) {
             kotlinx.coroutines.delay(15_000L)
@@ -218,11 +218,11 @@ fun VideoPlayerScreen(
     }
 
 
-    var thumbnailCues by remember(media.id, playerState.episode?.id) { mutableStateOf<List<SeekThumbnail>>(emptyList()) }
-    var scrubPosition by remember(media.id, playerState.episode?.id) { mutableStateOf<Int?>(null) }
-    var thumbnailRequested by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
+    var thumbnailCues by remember(media.type, media.id, playerState.episode?.id) { mutableStateOf<List<SeekThumbnail>>(emptyList()) }
+    var scrubPosition by remember(media.type, media.id, playerState.episode?.id) { mutableStateOf<Int?>(null) }
+    var thumbnailRequested by remember(media.type, media.id, playerState.episode?.id) { mutableStateOf(false) }
     val thumbnailCaption = remember(playerState.captions) { playerState.captions.firstOrNull { it.type == "thumbnails" && it.url.startsWith("https://") } }
-    LaunchedEffect(thumbnailRequested, thumbnailCaption?.url, media.id, playerState.episode?.id) {
+    LaunchedEffect(thumbnailRequested, thumbnailCaption?.url, media.type, media.id, playerState.episode?.id) {
         val caption = thumbnailCaption ?: return@LaunchedEffect
         if (!thumbnailRequested || playerState.isResolving) return@LaunchedEffect
         try {
@@ -282,7 +282,7 @@ fun VideoPlayerScreen(
 
     fun reportProgress() {
         val state = latestPlayerState
-        val expectedId = "${state.media?.id}:${state.episode?.id.orEmpty()}"
+        val expectedId = com.example.ui.viewmodel.playbackMediaId(state.media, state.episode)
         if (state.media == null || exoPlayer.currentMediaItem?.mediaId != expectedId) return
         val duration = exoPlayer.duration
         if (duration > 0L && duration != C.TIME_UNSET) {
@@ -291,7 +291,7 @@ fun VideoPlayerScreen(
         }
     }
 
-    LaunchedEffect(media.id, playerState.episode?.id, playerState.captions, playerState.sourceId) {
+    LaunchedEffect(media.type, media.id, playerState.episode?.id, playerState.captions, playerState.sourceId) {
         if (media.type != MediaType.TV_SHOW || playerState.sourceId == "Trailer") return@LaunchedEffect
         val caption = playerState.captions.firstOrNull {
             it.type != "thumbnails" && it.language.contains("English", true) &&
@@ -326,7 +326,7 @@ fun VideoPlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 val state = latestPlayerState
-                if (exoPlayer.currentMediaItem?.mediaId != "${state.media?.id}:${state.episode?.id.orEmpty()}") return
+                if (exoPlayer.currentMediaItem?.mediaId != com.example.ui.viewmodel.playbackMediaId(state.media, state.episode)) return
                 isBuffering = (playbackState == Player.STATE_BUFFERING)
                 if (playbackState == Player.STATE_ENDED) {
                     reportProgress()
@@ -337,7 +337,7 @@ fun VideoPlayerScreen(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                val expectedId = "${latestPlayerState.media?.id}:${latestPlayerState.episode?.id.orEmpty()}"
+                val expectedId = com.example.ui.viewmodel.playbackMediaId(latestPlayerState.media, latestPlayerState.episode)
                 if (exoPlayer.currentMediaItem?.mediaId != expectedId) return
                 val limited = generateSequence<Throwable>(error) { it.cause }.take(16)
                     .filterIsInstance<com.example.data.PlaybackRateLimitedException>().firstOrNull()
@@ -457,7 +457,7 @@ fun VideoPlayerScreen(
     }
 
     // Load stream whenever resolvedUrl, resolveHeaders or captions change
-    LaunchedEffect(media.id, playerState.episode?.id, playerState.resolvedUrl, playerState.resolveHeaders, playerState.captions) {
+    LaunchedEffect(media.type, media.id, playerState.episode?.id, playerState.resolvedUrl, playerState.resolvedStreamType, playerState.resolveHeaders, playerState.captions) {
         playbackError = null
         val url = playerState.resolvedUrl
         if (!url.isNullOrEmpty()) {
@@ -497,13 +497,9 @@ fun VideoPlayerScreen(
 
             val mediaItem = Media3Item.Builder()
                 .setUri(uri)
-                .setMediaId("${media.id}:${playerState.episode?.id.orEmpty()}")
+                .setMediaId(com.example.ui.viewmodel.playbackMediaId(media, playerState.episode))
                 .apply {
-                    if (url.contains(".m3u8") || url.contains("playlist") || url.contains("hls")) {
-                        setMimeType(MimeTypes.APPLICATION_M3U8)
-                    } else if (url.endsWith(".mp4")) {
-                        setMimeType(MimeTypes.APPLICATION_MP4)
-                    }
+                    com.example.ui.viewmodel.playbackMimeType(url, playerState.resolvedStreamType)?.let { setMimeType(it) }
                 }
                 .setSubtitleConfigurations(subtitleConfigs)
                 .build()
@@ -1467,7 +1463,7 @@ fun VideoPlayerScreen(
             }
         }
 
-        var watchCredits by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
+        var watchCredits by remember(media.type, media.id, playerState.episode?.id) { mutableStateOf(false) }
         val nearEnd = playerState.durationSec > 60 && playerState.currentPositionSec >= playerState.durationSec - 30
         LaunchedEffect(nearEnd) { if (!nearEnd) watchCredits = false }
         if (playerState.hasEnded && playerState.sourceId != "Trailer" && !playerState.isLocked) {

@@ -60,15 +60,14 @@ fun DownloadsScreen(
     onOpenProfiles: () -> Unit = {},
     openSmartSettings: Boolean = false
 ) {
-    var editing by rememberSaveable { mutableStateOf(false) }
-    var selected by remember { mutableStateOf(emptySet<String>()) }
-    var deleteKeys by remember { mutableStateOf<Set<String>?>(null) }
-    var clearAll by remember { mutableStateOf(false) }
-    var settings by rememberSaveable(openSmartSettings) { mutableStateOf(openSmartSettings) }
-    var setup by rememberSaveable { mutableStateOf(false) }
-    var showId by rememberSaveable { mutableStateOf<String?>(null) }
-    val byId = remember(catalogMedia) { catalogMedia.associateBy { it.id } }
-    val ready = remember(downloads) { downloads.filter { it.isComplete } }
+    var editing by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
+    var selected by remember(activeProfile.id) { mutableStateOf(emptySet<String>()) }
+    var deleteKeys by remember(activeProfile.id) { mutableStateOf<Set<String>?>(null) }
+    var clearAll by remember(activeProfile.id) { mutableStateOf(false) }
+    var settings by rememberSaveable(activeProfile.id, openSmartSettings) { mutableStateOf(openSmartSettings) }
+    var setup by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
+    var showId by rememberSaveable(activeProfile.id) { mutableStateOf<String?>(null) }
+    val ready = remember(downloads, activeProfile.id) { downloads.filter { it.profileId == activeProfile.id && it.isComplete } }
     val readyKeys = remember(ready) { ready.map { it.downloadKey }.toSet() }
     val groups = remember(ready) { ready.groupBy { it.mediaId to it.isForYou }.values.toList() }
     val activeKeys = remember(downloadingProgress, downloadTasks, readyKeys) {
@@ -81,11 +80,15 @@ fun DownloadsScreen(
     }
     val canDownload = userSubscription.isActive && userSubscription.maxDownloads > 0
     val requirePlan: () -> Unit = { if (userSubscription.isGuest) onOpenAuth() else onOpenSubscription() }
-    val back: () -> Unit = { if (showId != null) { showId = null; editing = false } else onClose() }
-    BackHandler(enabled = showId != null, onBack = back)
-    fun mediaFor(download: DownloadEntity): MediaItem = byId[download.mediaId] ?: MediaItem(download.mediaId, download.mediaTitle,
-        if (download.episodeTitle != null) MediaType.TV_SHOW else MediaType.MOVIE, "", "", 0, "16+", 0, "Downloaded",
-        genres = emptyList(), cast = emptyList(), director = "", isOriginal = false)
+    val back: () -> Unit = {
+        when {
+            editing -> { editing = false; selected = emptySet() }
+            showId != null -> showId = null
+            else -> onClose()
+        }
+    }
+    BackHandler(enabled = showId != null || editing, onBack = back)
+    fun mediaFor(download: DownloadEntity): MediaItem = downloadedMedia(download, catalogMedia)
     fun play(download: DownloadEntity) {
         if (!canDownload) { onShowToast("Offline playback requires an active download plan."); requirePlan(); return }
         val media = mediaFor(download)

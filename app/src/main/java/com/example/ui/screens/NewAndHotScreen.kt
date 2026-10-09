@@ -62,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,7 +81,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.CatalogData
 import com.example.data.local.ReminderEntity
 import com.example.data.model.CastDevice
 import com.example.data.model.GameItem
@@ -123,7 +123,7 @@ fun NewAndHotScreen(
     upcomingReleases: List<MediaItem> = emptyList(),
     recentReleases: List<MediaItem> = emptyList()
 ) {
-    var selectedTab by remember { mutableStateOf(NewAndHotTab.COMING_SOON) }
+    var selectedTab by rememberSaveable { mutableStateOf(NewAndHotTab.COMING_SOON) }
     val context = LocalContext.current
 
     // Local sound mute toggles for trailer previews
@@ -131,9 +131,9 @@ fun NewAndHotScreen(
 
     val comingSoonList = upcomingReleases
     val everyonesWatchingList = recentReleases
-    val top10TvShows = recentReleases.filter { it.type == com.example.data.model.MediaType.TV_SHOW }.take(10)
-    val top10Movies = recentReleases.filter { it.type == com.example.data.model.MediaType.MOVIE }.take(10)
-    val activeGames = if (games.isNotEmpty()) games else CatalogData.gamesList
+    val top10TvShows = remember(recentReleases) { recentReleases.filter { it.type == com.example.data.model.MediaType.TV_SHOW }.take(10) }
+    val top10Movies = remember(recentReleases) { recentReleases.filter { it.type == com.example.data.model.MediaType.MOVIE }.take(10) }
+    val activeGames = games
 
     val unreadNotificationsCount = notifications.count { !it.isRead }
 
@@ -265,7 +265,18 @@ fun NewAndHotScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Dynamic Tab Content
-        when (selectedTab) {
+        val emptyTab = when (selectedTab) {
+            NewAndHotTab.COMING_SOON -> comingSoonList.isEmpty()
+            NewAndHotTab.EVERYONES_WATCHING -> everyonesWatchingList.isEmpty()
+            NewAndHotTab.TOP_10_TV -> top10TvShows.isEmpty()
+            NewAndHotTab.TOP_10_MOVIES -> top10Movies.isEmpty()
+            NewAndHotTab.GAMES -> activeGames.isEmpty()
+        }
+        if (emptyTab) {
+            Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+                Text("No titles are available here yet. Try another category.", color = Color.LightGray, textAlign = TextAlign.Center)
+            }
+        } else when (selectedTab) {
             NewAndHotTab.COMING_SOON -> {
                 LazyColumn(
                     contentPadding = PaddingValues(bottom = 110.dp),

@@ -5,6 +5,25 @@ import com.example.data.model.Episode
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 
+internal fun playbackMediaId(media: MediaItem?, episode: Episode?): String =
+    "${media?.type}:${media?.id}:${episode?.id.orEmpty()}"
+
+/** Signed URL query strings must not change the format inferred from the path. */
+internal fun playbackMimeType(url: String, streamType: String? = null): String? {
+    when (streamType?.lowercase()) {
+        "hls" -> return "application/x-mpegURL"
+        "dash" -> return "application/dash+xml"
+        "mp4" -> return "video/mp4"
+    }
+    val path = url.substringBefore('?').substringBefore('#').lowercase()
+    return when {
+        path.endsWith(".m3u8") -> "application/x-mpegURL"
+        path.endsWith(".mpd") -> "application/dash+xml"
+        path.endsWith(".mp4") -> "video/mp4"
+        else -> null
+    }
+}
+
 data class DetailLoadState(
     val loading: Boolean = false,
     val error: String? = null,
@@ -48,7 +67,7 @@ internal fun episodeDownloadLabel(episode: Episode): String {
 }
 
 internal fun postPlayCandidates(current: MediaItem, safeCatalog: List<MediaItem>): List<MediaItem> =
-    safeCatalog.filter { it.id != current.id && !it.isComingSoon }
+    safeCatalog.filter { (it.id != current.id || it.type != current.type) && !it.isComingSoon }
         .distinctBy { it.type to it.id }
         .sortedWith(compareByDescending<MediaItem> { candidate -> candidate.genres.count { it in current.genres } }
             .thenByDescending { it.matchPercentage })

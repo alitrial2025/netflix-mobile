@@ -9,6 +9,9 @@ import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.repository.NetflixRepository
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.*
 import okio.Buffer
@@ -34,6 +37,37 @@ class BackgroundDownloadTest {
     private fun media() = MediaItem("movie", "A movie", MediaType.MOVIE, "", "", 90, "16+", 2026, "2h",
         genres = emptyList(), cast = emptyList(), director = "")
     private fun packet() = ByteArray(188 * 3) { 1 }.apply { for (i in indices step 188) this[i] = 0x47 }
+
+    @Test fun clearingOneProfilesDownloadsPreservesAnotherProfilesQueuedTransferAndFiles() = runBlocking {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app,
+            Configuration.Builder().setExecutor(SynchronousExecutor()).setTaskExecutor(SynchronousExecutor()).build())
+        val database = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java).build()
+        val repository = NetflixRepository(database.netflixDao())
+        val manager = NetflixDownloadManager(app, repository, NetMirrorResolver(app), accountIdProvider = { "account" })
+        val item = media().copy(id = "shared_profile_movie")
+        val store = DownloadRequestStore(File(app.noBackupFilesDir, "download-requests"))
+        val wm = WorkManager.getInstance(app)
+        val savedFile = File(app.filesDir, "downloads/${item.id}.mp4").apply { parentFile!!.mkdirs(); writeBytes(packet()) }
+        try {
+            repository.addDownload("profile-a", item.id, item.title, null, 1, localFilePath = savedFile.absolutePath)
+            manager.startOrResumeDownload("profile-b", item, isWifiOnly = true)
+            val queued = wm.getWorkInfosForUniqueWork(downloadWorkName(item.id)).get().single()
+            // The toast is emitted after cleanup, so it is a completion barrier for this operation.
+            val cleared = async(start = CoroutineStart.UNDISPATCHED) {
+                kotlinx.coroutines.withTimeout(5_000L) { manager.toastEvents.first { it == "All downloads cleared" } }
+            }
+            manager.clearAllDownloads("profile-a")
+            cleared.await()
+            assertTrue(repository.getDownloadsOnce("profile-a").isEmpty())
+            assertEquals(WorkInfo.State.ENQUEUED, wm.getWorkInfoById(queued.id).get()!!.state)
+            assertEquals("profile-b", store.all().first { it.task.downloadKey == item.id }.profileId)
+            assertEquals(DownloadTaskStatus.QUEUED, manager.downloadTasks.value[item.id]?.status)
+            assertArrayEquals(packet(), savedFile.readBytes())
+        } finally {
+            manager.cancelAndJoinTransfers(); manager.close(); wm.cancelAllWork().result.get()
+            database.close(); store.remove(item.id); savedFile.delete()
+        }
+    }
 
     @Test fun queuedDownloadsAreDurableAndPauseResumeCancelOperateBeforeWorkerStarts() {
         WorkManagerTestInitHelper.initializeTestWorkManager(app,

@@ -122,6 +122,8 @@ fun SubscriptionSheet(
     var successMessage by remember { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
     var showPaySubWebView by remember { mutableStateOf(false) }
 
+    androidx.activity.compose.BackHandler { onClose() }
+
     Surface(
         modifier = modifier
             .fillMaxSize()

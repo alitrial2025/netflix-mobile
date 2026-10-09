@@ -152,7 +152,7 @@ class NativeMobileFilmMotionTest {
         com.example.data.CatalogData.allMedia = listOf(show)
         rule.setContent { NetflixTheme {
             com.example.ui.screens.DownloadsScreen(
-                downloads = listOf(com.example.data.local.DownloadEntity(downloadKey="42", mediaId="42", mediaTitle="Squid Game", episodeTitle=null, fileSizeMb=485)),
+                downloads = listOf(com.example.data.local.DownloadEntity(profileId="profile", downloadKey="42", mediaId="42", mediaTitle="Squid Game", episodeTitle=null, fileSizeMb=485)),
                 smartDownloadsEnabled=true, connectedCastDevice=null, onClose={}, onPlayMedia={_,_->}, onDeleteDownload={},
                 onClearAllDownloads={}, onToggleSmartDownloads={}, onSetUpDownloadsForYou={}, onOpenSearch={}, onOpenCast={},
                 onOpenMediaDetail={}, onShowToast={}, userSubscription=membership)
@@ -161,7 +161,7 @@ class NativeMobileFilmMotionTest {
     }
     @Test fun filmClips() {
         com.example.data.CatalogData.allMedia = listOf(show)
-        rule.setContent { NetflixTheme { com.example.ui.screens.ClipsScreen() } }
+        rule.setContent { NetflixTheme { com.example.ui.screens.ClipsScreen(catalogMedia = listOf(show), isActive = false) } }
         ready(); capture("clips")
     }
     @Test fun filmMyList() {
