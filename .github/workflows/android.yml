@@ -78,13 +78,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v5
-      - name: Restore release signing and client payment configuration
+      - name: Restore release signing configuration
         env:
           KEYSTORE: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          PAYHERO_API_AUTH: ${{ secrets.PAYHERO_API_AUTH }}
         run: |
           python3 - <<'PY'
           import os, base64
@@ -95,8 +94,6 @@ jobs:
           Path('app/release.jks').write_bytes(base64.b64decode(os.environ['KEYSTORE']))
           values={'storeFile':'release.jks','storePassword':os.environ['STORE_PASSWORD'],'keyPassword':os.environ['KEY_PASSWORD'],'keyAlias':os.environ['KEY_ALIAS']}
           Path('app/release-signing.properties').write_text(''.join(k+'='+property_value(v)+'\n' for k,v in values.items()))
-          if os.environ['PAYHERO_API_AUTH']:
-              Path('.env').write_text('PAYHERO_API_AUTH='+property_value(os.environ['PAYHERO_API_AUTH'])+'\n')
           PY
       - name: Build and lint signed obfuscated release
         run: ./gradlew --no-daemon --max-workers=2 :app:assembleRelease :app:lintRelease

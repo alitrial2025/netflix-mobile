@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +52,7 @@ import com.example.data.local.WatchProgressEntity
 import com.example.data.model.*
 import com.example.ui.components.*
 import com.example.ui.theme.NetflixRed
+import com.example.ui.util.FocusedPreviewPolicy
 import com.example.ui.viewmodel.*
 import kotlinx.coroutines.delay
 
@@ -92,12 +94,22 @@ fun DetailScreen(
     val backdropGradient = remember(media.id, media.secondaryColorHex) {
         Brush.verticalGradient(listOf(Color(media.secondaryColorHex).copy(alpha = .32f), Color(0xFF101010)), endY = 1000f)
     }
+    val listState = rememberLazyListState()
+    val previewArtworkVisible by remember(listState, media.id) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val artwork = layout.visibleItemsInfo.firstOrNull { it.key == "artwork_${media.id}" }
+            artwork != null && !listState.isScrollInProgress &&
+                (minOf(artwork.offset + artwork.size, layout.viewportEndOffset) -
+                    maxOf(artwork.offset, layout.viewportStartOffset)).coerceAtLeast(0) >= artwork.size / 2
+        }
+    }
     Box(modifier.fillMaxSize().background(Color(0xFF101010)).background(backdropGradient)) {
-    LazyColumn(Modifier.fillMaxSize().testTag("detail_list"), contentPadding = PaddingValues(bottom = 36.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("detail_list"), state = listState, contentPadding = PaddingValues(bottom = 36.dp)) {
         item(key = "artwork_${media.id}", contentType = "artwork") {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).heightIn(max = 380.dp).clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)).background(Color.Black)) {
                 AsyncImage(media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                if (previewEnabled && isActive) DetailPreview(media, Modifier.fillMaxSize())
+                if (previewEnabled && isActive && previewArtworkVisible) DetailPreview(media, Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = .4f), .45f to Color.Transparent, 1f to Color(0xFF101010))))
             }
         }
@@ -240,31 +252,57 @@ private fun DetailPreview(media: MediaItem, modifier: Modifier) {
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
     if (!resumed) return
+    val focusedAt = remember(media.id) { android.os.SystemClock.uptimeMillis() }
     var start by remember(media.id) { mutableStateOf(false) }
-    LaunchedEffect(media.id) { delay(900); start = true }
+    LaunchedEffect(media.id) { delay(FocusedPreviewPolicy.FOCUS_SETTLE_MS); start = true }
     if (!start) return
-    val player = remember(context, media.id) { ExoPlayer.Builder(context).build().apply { volume = 0f; repeatMode = Player.REPEAT_MODE_OFF } }
+    val player = remember(context, media.id) {
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(2_000, 5_000, FocusedPreviewPolicy.START_BUFFER_MS, 1_000)
+            .setBackBuffer(0, false).build()
+        ExoPlayer.Builder(context).setLoadControl(loadControl).build().apply {
+            volume = 0f
+            repeatMode = Player.REPEAT_MODE_OFF
+            trackSelectionParameters = trackSelectionParameters.buildUpon()
+                .setMaxVideoSize(960, 540).setMaxVideoBitrate(1_500_000).build()
+        }
+    }
     var ready by remember(media.id) { mutableStateOf(false) }
+    var abandoned by remember(media.id) { mutableStateOf(false) }
+    var activeResolver by remember(media.id) { mutableStateOf<TrailerResolver?>(null) }
+    LaunchedEffect(media.id, player) {
+        delay(FocusedPreviewPolicy.remainingStartupMs(focusedAt, android.os.SystemClock.uptimeMillis()))
+        if (!ready) {
+            abandoned = true
+            activeResolver?.cancel()
+            player.stop()
+            player.clearMediaItems()
+        }
+    }
     var muted by remember(media.id) { mutableStateOf(true) }
     LaunchedEffect(muted) { player.volume = if (muted) 0f else 1f }
     DisposableEffect(media.id, player) {
         var disposed = false
         val listener = object : Player.Listener {
-            override fun onRenderedFirstFrame() { if (!disposed) ready = true }
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) { if (!disposed) { ready = false; player.stop() } }
+            override fun onRenderedFirstFrame() { if (!disposed && !abandoned) ready = true }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) { if (!disposed) { ready = false; abandoned = true; activeResolver?.cancel(); player.stop(); player.clearMediaItems() } }
         }
         player.addListener(listener)
         val resolver = TrailerResolver(context, media.id, if (media.type == MediaType.MOVIE) "movie" else "tv", object : TrailerResolverCallback {
             override fun onResolved(stream: TrailerStream) {
-                if (disposed) return
+                if (disposed || abandoned) return
                 val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(stream.headers)
                 val mime = when (stream.type) { "hls" -> MimeTypes.APPLICATION_M3U8; "dash" -> MimeTypes.APPLICATION_MPD; else -> MimeTypes.VIDEO_MP4 }
-                player.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(VideoItem.Builder().setUri(stream.url).setMimeType(mime).build()))
+                player.setMediaSource(DefaultMediaSourceFactory(http).setLoadErrorHandlingPolicy(
+                    androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(0)
+                ).createMediaSource(VideoItem.Builder().setUri(stream.url).setMimeType(mime).build()))
                 player.prepare(); player.play()
             }
             override fun onError(error: String) { if (!disposed) ready = false }
         })
-        resolver.start(); onDispose { disposed = true; resolver.cancel(); player.removeListener(listener); player.release() }
+        activeResolver = resolver
+        resolver.start()
+        onDispose { disposed = true; activeResolver = null; resolver.cancel(); player.removeListener(listener); player.release() }
     }
     Box(modifier) {
         AndroidView(factory = { PlayerView(it).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM; this.player = player } }, update = { it.player = player }, onRelease = { it.player = null }, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (ready) 1f else 0f })

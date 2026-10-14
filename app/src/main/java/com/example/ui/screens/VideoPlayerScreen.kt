@@ -294,7 +294,7 @@ fun VideoPlayerScreen(
     LaunchedEffect(media.id, playerState.episode?.id, playerState.captions, playerState.sourceId) {
         if (media.type != MediaType.TV_SHOW || playerState.sourceId == "Trailer") return@LaunchedEffect
         val caption = playerState.captions.firstOrNull {
-            it.type != "thumbnails" && it.language.contains("English", true) &&
+            it.type !in setOf("thumbnails", "chapters") && it.language.contains("English", true) &&
                 it.url.startsWith("https://") && !it.url.contains(".m3u8", true)
         } ?: return@LaunchedEffect
         try {
@@ -433,7 +433,7 @@ fun VideoPlayerScreen(
                 )
 
                 if (latestPlayerState.captions.isNotEmpty()) {
-                    latestPlayerState.captions.filter { it.type != "thumbnails" }.forEachIndexed { idx, cap ->
+                    latestPlayerState.captions.filter { it.type !in setOf("thumbnails", "chapters") }.forEachIndexed { idx, cap ->
                         val label = cap.language
                         if (subList.none { it.name.equals(label, ignoreCase = true) }) {
                             subList.add(
@@ -475,7 +475,9 @@ fun VideoPlayerScreen(
                 .setUpstreamDataSourceFactory(defaultDataSourceFactory)
                 .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory, playerState.sourceId.orEmpty()))
+            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(
+                cacheDataSourceFactory, defaultDataSourceFactory,
+                sourceId = playerState.sourceId, manifestHeaders = headers))
                 .setLoadErrorHandlingPolicy(com.example.data.PlaybackLoadErrorPolicy())
             val uri = if (url.startsWith("/")) {
                 android.net.Uri.fromFile(java.io.File(url))
@@ -484,7 +486,7 @@ fun VideoPlayerScreen(
             }
 
             val subtitleConfigs = playerState.captions
-                .filter { it.type != "thumbnails" }
+                .filter { it.type !in setOf("thumbnails", "chapters") }
                 .map { caption ->
                     val mimeType = if (caption.type == "srt" || caption.url.endsWith(".srt", ignoreCase = true)) {
                         MimeTypes.APPLICATION_SUBRIP

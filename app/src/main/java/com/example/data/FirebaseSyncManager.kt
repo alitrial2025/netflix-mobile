@@ -88,6 +88,8 @@ class FirebaseSyncManager(private val context: Context) {
 
     private val _currentUserEmail = MutableStateFlow<String?>(null)
     val currentUserEmail: StateFlow<String?> = _currentUserEmail.asStateFlow()
+    private val _isAccountAuthenticated = MutableStateFlow(false)
+    val isAccountAuthenticated: StateFlow<Boolean> = _isAccountAuthenticated.asStateFlow()
 
     private val entryMutex = Mutex()
     private val entryStateLock = Any()
@@ -98,6 +100,9 @@ class FirebaseSyncManager(private val context: Context) {
     private val subscriptionGeneration = java.util.concurrent.atomic.AtomicLong()
     private val subscriptionListenerEpoch = java.util.concurrent.atomic.AtomicLong()
     private var pendingSubscriptionKey: String? = null
+    // Read and written under entryMutex; server timestamps order queued snapshots
+    // against a newer confirmation that completed while the listener waited.
+    private var confirmedEntryVersion: Pair<String, Long>? = null
 
     init {
         ensureFirebase()
@@ -122,6 +127,7 @@ class FirebaseSyncManager(private val context: Context) {
                     }
                     observedUid = user?.uid
                     _currentUserEmail.value = user?.email
+                    _isAccountAuthenticated.value = user?.isAnonymous == false
                     if (user != null) {
                         if (!user.isAnonymous) ContinueWatchingOutbox.resume(context)
                         _lastSyncStatus.value = "Connected as ${user.email}"
@@ -133,6 +139,7 @@ class FirebaseSyncManager(private val context: Context) {
             }
             isFirebaseReady = true
             _currentUserEmail.value = auth?.currentUser?.email
+            _isAccountAuthenticated.value = auth?.currentUser?.isAnonymous == false
             _isCloudSyncEnabled.value = true
             _lastSyncStatus.value = if (auth?.currentUser != null) {
                 "Connected as ${auth?.currentUser?.email}"
@@ -280,6 +287,7 @@ class FirebaseSyncManager(private val context: Context) {
         cleanupListeners()
         auth?.signOut()
         _currentUserEmail.value = null
+        _isAccountAuthenticated.value = false
         _lastSyncStatus.value = "Signed out"
     }
 
@@ -413,7 +421,7 @@ class FirebaseSyncManager(private val context: Context) {
     // SUBSCRIPTION SYNC
     // ==========================================
 
-    // Activation is committed only by PayheroVerifier's receipt transaction.
+    // Activation is committed only by the trusted payment service's receipt transaction.
     // The UI callback reads that commit rather than granting a local plan.
     suspend fun loadConfirmedSubscription(receipt: String, paymentReference: String): com.example.data.model.UserSubscription? {
         if (!ensureFirebase()) return null
@@ -453,7 +461,12 @@ class FirebaseSyncManager(private val context: Context) {
 
     /** Membership/device verification and screen admission happen once at application entry. */
     suspend fun prepareEntrySession(expected: com.example.data.model.UserSubscription? = null): com.example.data.model.UserSubscription = entryMutex.withLock {
-        if (!isAuthenticated()) return@withLock com.example.data.model.UserSubscription()
+        prepareEntrySessionLocked(expected)
+    }
+
+    /** Called only while entryMutex is held, including authoritative listener updates. */
+    private suspend fun prepareEntrySessionLocked(expected: com.example.data.model.UserSubscription? = null): com.example.data.model.UserSubscription {
+        if (!isAuthenticated()) return com.example.data.model.UserSubscription()
         val owner = getUserId()
         val attempt = synchronized(entryStateLock) { entryGeneration }
         fun ensureCurrentEntry() {
@@ -464,6 +477,10 @@ class FirebaseSyncManager(private val context: Context) {
         val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
         synchronized(entryStateLock) { ensureCurrentEntry() }
         val subscription = subscriptionFrom(snapshot)
+        val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
+        if (serverVersion != null && (confirmedEntryVersion?.first != owner || serverVersion >= confirmedEntryVersion!!.second)) {
+            confirmedEntryVersion = owner to serverVersion
+        }
         if (subscription.isActive) {
             if (!hasAdmittedEntrySession()) {
                 ScreenLease.acquire(context, tv = false)
@@ -483,7 +500,7 @@ class FirebaseSyncManager(private val context: Context) {
                 endEntrySession()
             }
         }
-        subscription
+        return subscription
     }
 
     fun listenToSubscription(onSubscriptionLoaded: (com.example.data.model.UserSubscription) -> Unit) {
@@ -498,10 +515,17 @@ class FirebaseSyncManager(private val context: Context) {
                 if (auth?.currentUser?.uid != user.uid || listenerEpoch != subscriptionListenerEpoch.get()) return@addSnapshotListener
                 if (error != null) {
                     if (error.isAuthoritativeAccessFailure()) {
-                        subscriptionGeneration.incrementAndGet()
-                        DeviceAccessGuard.clear()
-                        endEntrySession()
-                        onSubscriptionLoaded(com.example.data.model.UserSubscription())
+                        val requestGeneration = subscriptionGeneration.incrementAndGet()
+                        scope.launch {
+                            entryMutex.withLock {
+                                if (auth?.currentUser?.uid != user.uid || listenerEpoch != subscriptionListenerEpoch.get() ||
+                                    requestGeneration != subscriptionGeneration.get()) return@withLock
+                                pendingSubscriptionKey = null
+                                DeviceAccessGuard.clear()
+                                endEntrySession()
+                                onSubscriptionLoaded(com.example.data.model.UserSubscription())
+                            }
+                        }
                     }
                     // Listener/transport failures do not replace a verified plan with Guest.
                     return@addSnapshotListener
@@ -509,37 +533,46 @@ class FirebaseSyncManager(private val context: Context) {
                 if (snapshot == null || snapshot.metadata.hasPendingWrites() || snapshot.metadata.isFromCache) return@addSnapshotListener
                 val subscription = if (snapshot.exists()) subscriptionFrom(snapshot) else com.example.data.model.UserSubscription()
                 val key = "${user.uid}:${subscription.planId}:${subscription.expiresAt}:${subscription.status}"
-                if (key == pendingSubscriptionKey) return@addSnapshotListener
                 val requestGeneration = subscriptionGeneration.incrementAndGet()
-                runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()?.let(SubscriptionTime::observeServerTimestamp)
-                if (!subscription.isActive) {
-                    pendingSubscriptionKey = null
-                    DeviceAccessGuard.clear()
-                    endEntrySession()
-                    onSubscriptionLoaded(subscription)
-                    return@addSnapshotListener
-                }
-                if (DeviceAccessGuard.isConfirmed(user.uid, subscription.planId, subscription.expiresAt, subscription.status) && hasAdmittedEntrySession()) {
-                    onSubscriptionLoaded(subscription)
-                    return@addSnapshotListener
-                }
-                // A changed server plan is authoritative; never continue using broader old entitlements.
-                pendingSubscriptionKey = key
-                DeviceAccessGuard.clear()
-                endEntrySession()
-                onSubscriptionLoaded(subscription)
+                val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
+                serverVersion?.let(SubscriptionTime::observeServerTimestamp)
                 scope.launch {
-                    try {
-                        val checked = prepareEntrySession(subscription)
-                        if (auth?.currentUser?.uid == user.uid && listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()) {
+                    entryMutex.withLock {
+                        fun isCurrent() = auth?.currentUser?.uid == user.uid &&
+                            listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()
+                        if (!isCurrent()) return@withLock
+                        val confirmed = confirmedEntryVersion
+                        if (serverVersion != null && confirmed?.first == user.uid && serverVersion < confirmed.second) return@withLock
+                        if (!subscription.isActive) {
                             pendingSubscriptionKey = null
-                            onSubscriptionLoaded(checked)
+                            DeviceAccessGuard.clear()
+                            endEntrySession()
+                            onSubscriptionLoaded(subscription)
+                            return@withLock
                         }
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (failure: Exception) {
-                        if (auth?.currentUser?.uid == user.uid && listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()) {
-                            pendingSubscriptionKey = null
-                            _entryError.value = failure.accessFailureMessage()
+                        // Initial snapshots wait for in-flight entry verification before
+                        // deciding whether a server plan really changed. Clearing proof
+                        // during that verification would revoke its own generation.
+                        if (DeviceAccessGuard.isConfirmed(user.uid, subscription.planId, subscription.expiresAt, subscription.status) && hasAdmittedEntrySession()) {
+                            onSubscriptionLoaded(subscription)
+                            return@withLock
+                        }
+                        pendingSubscriptionKey = key
+                        DeviceAccessGuard.clear()
+                        endEntrySession()
+                        onSubscriptionLoaded(subscription)
+                        try {
+                            val checked = prepareEntrySessionLocked(subscription)
+                            if (isCurrent()) {
+                                pendingSubscriptionKey = null
+                                onSubscriptionLoaded(checked)
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) {
+                            if (isCurrent()) {
+                                pendingSubscriptionKey = null
+                                _entryError.value = failure.accessFailureMessage()
+                            }
                         }
                     }
                 }

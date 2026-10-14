@@ -51,6 +51,7 @@ class NetMirrorPlaybackAuditTest {
             when (req.url.encodedPath) {
                 "/3/movie/$tmdbId" -> response(req, """{"title":"Caption Fixture","release_date":"2001-01-01"}""")
                 "/search.php" -> response(req, """{"searchResult":[{"id":"8100000001","t":"Caption Fixture","y":"2001"}]}""")
+                "/mobile/post.php" -> response(req, "{}", 404)
                 "/title/8100000001" -> response(req, """<script type="application/ld+json">{"@type":"Movie","name":"Caption Fixture","datePublished":"2001-01-01"}</script>""")
                 "/mobile/playlist.php" -> response(req, """{"sources":[{"file":"https://cdn.invalid/caption-video.m3u8?in=issued-signature"}],"tracks":[{"file":"/captions/english.vtt","kind":"subtitles","label":"English","srclang":"en"}]}""")
                 "/caption-video.m3u8" -> response(req, "#EXTM3U\n#EXTINF:1,\ns.jpg")

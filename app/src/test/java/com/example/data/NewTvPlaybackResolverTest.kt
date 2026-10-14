@@ -11,6 +11,8 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -20,6 +22,18 @@ import java.util.Base64
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28])
 class NewTvPlaybackResolverTest {
+    // Robolectric resets elapsedRealtime between tests; process-level queues and
+    // cooldowns must not retain a deadline from a previous clock instance.
+    @Before @After fun isolateProviderGate() {
+        VerifiedManifestHandoff.clear()
+        val cooldown = org.robolectric.util.ReflectionHelpers.getStaticField<PlaybackRequestCooldown>(
+            PlaybackServiceGate::class.java, "cooldown")
+        org.robolectric.util.ReflectionHelpers.setField(cooldown, "blockedUntilMs", 0L)
+        org.robolectric.util.ReflectionHelpers.setField(cooldown, "lastLimitMs", 0L)
+        org.robolectric.util.ReflectionHelpers.setField(cooldown, "strikes", 0)
+        org.robolectric.util.ReflectionHelpers.setStaticField(PlaybackServiceGate::class.java, "lastRequestAt", 0L)
+    }
+
     private data class Fixture(val body: String, val code: Int = 200, val headers: Map<String, String> = emptyMap())
     private fun client(seen: MutableList<Request>, respond: (Request) -> Fixture): OkHttpClient =
         OkHttpClient.Builder().addInterceptor { chain ->
@@ -294,4 +308,52 @@ https://cdn.example/video/720.m3u8?in=provider-issued
         assertEquals(1, seen.count { it.url.encodedPath == "/mobile/hs/post.php" })
     }
 
+    @Test fun primaryPlaybackReusesPersistedEpisodeCatalogAcrossNextAndResolverRestart() = runBlocking {
+        val directory = java.nio.file.Files.createTempDirectory("newtv-episodes").toFile()
+        val context = object : android.content.ContextWrapper(org.robolectric.RuntimeEnvironment.getApplication()) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getFilesDir(): java.io.File = directory
+        }
+        val seen = mutableListOf<Request>()
+        val http = client(seen) { request -> when (request.url.encodedPath) {
+            "/mobile/hs/post.php" -> Fixture("""{"status":"y","title":"Lanterns","type":"t","year":"2026","episodes":[{"id":"1271684191","s":"S1","ep":"E1"},{"id":"1271684192","s":"S1","ep":"E2"}]}""")
+            "/checknewtv.php" -> discovery()
+            "/newtv/player.php" -> Fixture("""{"video_link":"https://cdn.example/${request.url.queryParameter("id")}.m3u8"}""")
+            "/1271684191.m3u8", "/1271684192.m3u8" -> media
+            else -> throw AssertionError("Primary playback must not resolve an issued playlist")
+        } }
+        val first = PublicPlaybackResolver(http, catalog = PublicProviderCatalog(context),
+            backgroundCatalogRefresh = false, newTv = newTv(http))
+        assertEquals("1271684191", first.resolve("Lanterns", "2026", "tv", 1, 1, "95350").contentId)
+        val restarted = PublicPlaybackResolver(http, catalog = PublicProviderCatalog(context),
+            backgroundCatalogRefresh = false, newTv = newTv(http))
+        val next = restarted.resolve("Lanterns", "2026", "tv", 1, 2, "95350")
+        assertEquals(PlaybackRoute.NEWTV, next.route)
+        assertEquals("1271684192", next.contentId)
+        assertEquals(1, seen.count { it.url.encodedPath.endsWith("post.php") })
+        assertEquals(2, seen.count { it.url.encodedPath == "/newtv/player.php" })
+    }
+
+    @Test fun legacyCooldownRevisionKeepsPrimaryCacheAndItsVerifiedManifestHandoff() = runBlocking {
+        VerifiedManifestHandoff.clear()
+        val seen = mutableListOf<Request>()
+        val http = client(seen) { request -> when (request.url.encodedPath) {
+            "/mobile/hs/post.php" -> Fixture("""{"status":"y","title":"Lanterns","type":"t","year":"2026","episodes":[{"id":"1271684191","s":"S1","ep":"E1"}]}""")
+            "/checknewtv.php" -> discovery()
+            "/newtv/player.php" -> Fixture("""{"video_link":"https://cdn.example/media.m3u8"}""")
+            "/media.m3u8" -> media
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val resolver = PublicPlaybackResolver(http, backgroundCatalogRefresh = false, newTv = newTv(http))
+        val first = resolver.resolve("Lanterns", "2026", "tv", 1, 1, "95350")
+        try {
+            PlaybackServiceGate.recordLimit(120_000L)
+            assertEquals(first, resolver.resolve("Lanterns", "2026", "tv", 1, 1, "95350"))
+            assertEquals(1, seen.count { it.url.encodedPath == "/newtv/player.php" })
+            assertNull(VerifiedManifestHandoff.take(first.url, first.headers))
+            assertNotNull(VerifiedManifestHandoff.take(first.url, first.headers, sourceId = "[NewTV]"))
+        } finally {
+            isolateProviderGate()
+        }
+    }
 }

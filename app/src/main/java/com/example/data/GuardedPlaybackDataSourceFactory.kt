@@ -18,7 +18,8 @@ internal class GuardedPlaybackDataSourceFactory(
     private val upstream: DataSource.Factory,
     private val uncachedManifests: DataSource.Factory = upstream,
     private val sourceId: String? = null,
-    private val newTvGate: CookieFreePlaybackGate = NewTvPlaybackGate
+    private val newTvGate: CookieFreePlaybackGate = NewTvPlaybackGate,
+    private val manifestHeaders: Map<String, String> = emptyMap()
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource = GuardedSource(object : DataSource {
         private var active: DataSource? = null
@@ -39,8 +40,10 @@ internal class GuardedPlaybackDataSourceFactory(
         override fun getUri(): Uri? = active?.uri
         override fun getResponseHeaders(): Map<String, List<String>> = active?.responseHeaders.orEmpty()
         override fun close() { try { active?.close() } finally { active = null } }
-    }, sourceId, newTvGate)
-    private class GuardedSource(private val delegate: DataSource, sourceId: String?, private val newTvGate: CookieFreePlaybackGate) : DataSource by delegate {
+    }, sourceId, newTvGate, manifestHeaders)
+    private class GuardedSource(private val delegate: DataSource, private val sourceId: String?,
+        private val newTvGate: CookieFreePlaybackGate,
+        private val manifestHeaders: Map<String, String>) : DataSource by delegate {
         private val newTv = sourceId?.contains("[NewTV]", ignoreCase = true) == true
         private fun remainingMs() = if (newTv) newTvGate.remainingMs() else PlaybackServiceGate.remainingMs()
         private fun check() = if (newTv) newTvGate.check() else PlaybackServiceGate.check()
@@ -48,9 +51,15 @@ internal class GuardedPlaybackDataSourceFactory(
             if (newTv) newTvGate.checkResponse(code, body, retryAfter, url)
             else PlaybackServiceGate.checkResponse(code, body, retryAfter, url)
         }
+        private var cachedUri: android.net.Uri? = null
+        private var delegateOpened = false
+        override fun getUri(): android.net.Uri? = cachedUri ?: delegate.uri
+        override fun getResponseHeaders(): Map<String, List<String>> = if (cachedUri != null) emptyMap() else delegate.responseHeaders
         private var manifest: ByteArrayInputStream? = null
         override fun open(dataSpec: DataSpec): Long {
             manifest = null
+            cachedUri = null
+            delegateOpened = false
             val url = dataSpec.uri.toString()
             val isManifest = dataSpec.uri.path?.endsWith(".m3u8", true) == true
             val providerHost = dataSpec.uri.host.orEmpty()
@@ -63,7 +72,18 @@ internal class GuardedPlaybackDataSourceFactory(
                 // it for eviction without creating or extending a cooldown.
                 if (StreamSessionPolicy.isWaitingVideo(url)) throw PlaybackRateLimitedException(remainingMs())
             }
+            if (isManifest && dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong() &&
+                dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET) {
+                VerifiedManifestHandoff.take(url, manifestHeaders + dataSpec.httpRequestHeaders, sourceId)?.let { data ->
+                    if (StreamSessionPolicy.isRateLimited(200, data.toString(Charsets.UTF_8)))
+                        throw PlaybackRateLimitedException(remainingMs())
+                    cachedUri = dataSpec.uri
+                    manifest = ByteArrayInputStream(data)
+                    return data.size.toLong()
+                }
+            }
             try {
+                delegateOpened = true
                 val length = delegate.open(dataSpec)
                 if (!isManifest) return length
                 val bytes = ByteArrayOutputStream()
@@ -97,7 +117,11 @@ internal class GuardedPlaybackDataSourceFactory(
         }
         override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
             manifest?.read(buffer, offset, length) ?: delegate.read(buffer, offset, length)
-        override fun close() { manifest = null; delegate.close() }
+        override fun close() {
+            manifest = null; cachedUri = null
+            if (delegateOpened) delegate.close()
+            delegateOpened = false
+        }
     }
 }
 
