@@ -10,6 +10,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -43,6 +51,9 @@ import kotlin.math.roundToInt
 @Composable
 fun SplashScreen(
     isWarmupFinished: Boolean = false,
+    startupError: String? = null,
+    onRetryStartup: () -> Unit = {},
+    onSignOut: () -> Unit = {},
     onSplashComplete: () -> Unit
 ) {
     val currentIsWarmupFinished by androidx.compose.runtime.rememberUpdatedState(isWarmupFinished)
@@ -96,6 +107,10 @@ fun SplashScreen(
         
         // 4. Stand under standalone N logo for a smooth visual beat (600ms)
         delay(600)
+
+        // Account/device and screen admission, local profiles and catalog initialization
+        // must finish before the animation can reveal the application.
+        snapshotFlow { currentIsWarmupFinished }.first { it }
 
         // 5. Play the dramatic Netflix "Tadum" zoom effect!
         launch {
@@ -214,6 +229,17 @@ fun SplashScreen(
                         .alpha(crossfadeAlpha.value),
                     contentScale = ContentScale.Fit
                 )
+            }
+        }
+
+        if (startupError != null) {
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp, vertical = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(startupError, color = Color.White, textAlign = TextAlign.Center)
+                Button(onClick = onRetryStartup) { Text("Try again") }
+                TextButton(onClick = onSignOut) { Text("Sign out") }
             }
         }
 

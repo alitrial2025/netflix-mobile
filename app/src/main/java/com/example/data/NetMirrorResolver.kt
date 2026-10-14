@@ -150,7 +150,8 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
         .connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS)
         .callTimeout(3, TimeUnit.SECONDS).build()
     private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context),
-        backgroundCatalogRefresh = clientOverride == null)
+        backgroundCatalogRefresh = clientOverride == null,
+        newTv = NewTvPlaybackResolver(client, endpointCache = NewTvEndpointCache(context)))
 
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
@@ -185,6 +186,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
 
     fun playbackCooldownMillis(): Long = PlaybackServiceGate.remainingMs()
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
+        publicPlayback.evict(tmdbId, type, season, episode)
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")
     }
     /** Renew CDN links without throwing away a still-valid provider handshake. */
@@ -1200,16 +1202,15 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
 
     suspend fun resolveStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0, label: String = "Net52", cardTitle: String = "", cardYear: String = ""): NetMirrorStream = kotlinx.coroutines.withTimeout(34_000L) {
         withContext(Dispatchers.IO) {
-            PlaybackServiceGate.check()
             if (cachedSourceRevision != PlaybackServiceGate.sourceRevision) {
-                streamCache.clear()
+                streamCache.entries.removeAll { !it.value.sourceId.contains("[NewTV]") }
                 cachedSourceRevision = PlaybackServiceGate.sourceRevision
             }
             val key = "${type}_${tmdbId}_${season}_${episode}"
-            streamCache[key]?.takeIf { it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withContext it }
+            streamCache[key]?.takeIf { (if (it.sourceId.contains("[NewTV]")) NewTvPlaybackGate.remainingMs() else PlaybackServiceGate.remainingMs()) == 0L && it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withContext it }
             val info = getTmdbInfo(tmdbId, type, cardTitle, cardYear)
             val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
-            val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}]", source.expiresAt, info.title)
+            val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}] [${source.route.label}]", source.expiresAt, info.title)
             if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
             streamCache[key] = stream
             stream

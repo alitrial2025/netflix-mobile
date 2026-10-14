@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class CloudMyListChange(
     val mediaId: String,
@@ -87,6 +89,16 @@ class FirebaseSyncManager(private val context: Context) {
     private val _currentUserEmail = MutableStateFlow<String?>(null)
     val currentUserEmail: StateFlow<String?> = _currentUserEmail.asStateFlow()
 
+    private val entryMutex = Mutex()
+    private val entryStateLock = Any()
+    private var entryGeneration = 0L
+    private val admission = EntrySessionAdmission()
+    private val _entryError = MutableStateFlow<String?>(null)
+    val entryError: StateFlow<String?> = _entryError.asStateFlow()
+    private val subscriptionGeneration = java.util.concurrent.atomic.AtomicLong()
+    private val subscriptionListenerEpoch = java.util.concurrent.atomic.AtomicLong()
+    private var pendingSubscriptionKey: String? = null
+
     init {
         ensureFirebase()
     }
@@ -103,7 +115,11 @@ class FirebaseSyncManager(private val context: Context) {
                 auth = FirebaseAuth.getInstance()
                 auth?.addAuthStateListener { firebaseAuth ->
                     val user = firebaseAuth.currentUser
-                    if (observedUid != user?.uid) cleanupListeners()
+                    if (observedUid != user?.uid) {
+                        endEntrySession()
+                        DeviceAccessGuard.clear()
+                        cleanupListeners()
+                    }
                     observedUid = user?.uid
                     _currentUserEmail.value = user?.email
                     if (user != null) {
@@ -163,7 +179,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.signInWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
-                DeviceAccessGuard.confirm(context, tv = false)
+                prepareEntrySession()
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
                 _lastSyncStatus.value = "Signed in as $userEmail"
@@ -197,7 +213,6 @@ class FirebaseSyncManager(private val context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e is DeviceAccessException || e is MembershipCheckException) signOutUser()
             Log.w("FirebaseSync", "Sign in failed (${e.javaClass.simpleName})")
             onError(e.message ?: "Sign in failed. Check email and password.")
         }
@@ -215,7 +230,7 @@ class FirebaseSyncManager(private val context: Context) {
             if (a != null && isFirebaseReady) {
                 val result = a.createUserWithEmailAndPassword(email.trim(), pass).await()
                 val user = result.user ?: error("Authentication returned no user. Please try again.")
-                DeviceAccessGuard.confirm(context, tv = false)
+                prepareEntrySession()
                 val userEmail = user.email ?: email.trim()
                 _currentUserEmail.value = userEmail
 
@@ -254,13 +269,13 @@ class FirebaseSyncManager(private val context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (e is DeviceAccessException || e is MembershipCheckException) signOutUser()
             Log.w("FirebaseSync", "Sign up failed (${e.javaClass.simpleName})")
             onError(e.message ?: "Sign up failed. Try again.")
         }
     }
 
     fun signOutUser() {
+        endEntrySession()
         DeviceAccessGuard.clear()
         cleanupListeners()
         auth?.signOut()
@@ -422,63 +437,113 @@ class FirebaseSyncManager(private val context: Context) {
         )
     }
 
-    fun listenToSubscription(onSubscriptionLoaded: (com.example.data.model.UserSubscription) -> Unit) {
-        val db = firestore
-        val user = auth?.currentUser
-        if (db != null && isFirebaseReady && user != null) {
-            subscriptionListener?.remove()
-            subscriptionListener = db.collection("users").document(user.uid).collection("subscription").document("current")
-                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
-                    if (auth?.currentUser?.uid != user.uid) return@addSnapshotListener
-                    if (error != null) {
-                        if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                            Log.w("FirebaseSync", "Subscription read denied")
-                            onSubscriptionLoaded(com.example.data.model.UserSubscription())
-                        } else {
-                            Log.w("FirebaseSync", "Subscription listener notice: ${error.message}")
-                        }
-                        return@addSnapshotListener
-                    }
-                    if (snapshot?.metadata?.hasPendingWrites() == true || snapshot?.metadata?.isFromCache == true) return@addSnapshotListener
-                    if (snapshot != null && snapshot.exists()) {
-                        if (!snapshot.metadata.isFromCache) runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()?.let {
-                            SubscriptionTime.observeServerTimestamp(it)
-                        }
-                        val status = snapshot.getString("status") ?: "NONE"
-                        val planId = snapshot.getString("planId") ?: "plan_guest"
-                        val planName = snapshot.getString("planName") ?: "Guest"
-                        val expiresAt = snapshot.getLong("expiresAt") ?: 0L
+    private fun subscriptionFrom(snapshot: com.google.firebase.firestore.DocumentSnapshot) = com.example.data.model.UserSubscription(
+        status = snapshot.getString("status") ?: "NONE",
+        planId = snapshot.getString("planId") ?: "plan_guest",
+        planName = snapshot.getString("planName") ?: "Guest",
+        amount = (snapshot.getLong("amount") ?: 0L).toInt(),
+        currency = snapshot.getString("currency") ?: "KES",
+        paymentReference = snapshot.getString("paymentReference") ?: "",
+        mpesaReceipt = snapshot.getString("mpesaReceipt") ?: "",
+        subscribedAt = snapshot.getLong("subscribedAt") ?: 0L,
+        expiresAt = snapshot.getLong("expiresAt") ?: 0L
+    )
 
-                        val sub = com.example.data.model.UserSubscription(
-                            status = status,
-                            planId = planId,
-                            planName = planName,
-                            amount = (snapshot.getLong("amount") ?: 0L).toInt(),
-                            currency = snapshot.getString("currency") ?: "KES",
-                            paymentReference = snapshot.getString("paymentReference") ?: "",
-                            mpesaReceipt = snapshot.getString("mpesaReceipt") ?: "",
-                            subscribedAt = snapshot.getLong("subscribedAt") ?: 0L,
-                            expiresAt = expiresAt
-                        )
-                        scope.launch {
-                            try {
-                                val checked = DeviceAccessGuard.confirm(context, tv = false)
-                                if (auth?.currentUser?.uid != user.uid || checked.getString("planId") != sub.planId ||
-                                    checked.getLong("expiresAt") != sub.expiresAt || checked.getString("status") != sub.status) return@launch
-                                onSubscriptionLoaded(sub)
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (blocked: DeviceAccessException) {
-                                signOutUser()
-                                onSubscriptionLoaded(com.example.data.model.UserSubscription())
-                            } catch (_: Exception) {
-                                if (auth?.currentUser?.uid == user.uid) onSubscriptionLoaded(com.example.data.model.UserSubscription())
-                            }
-                        }
-                    } else if (user != null) {
+    fun hasAdmittedEntrySession(): Boolean = admission.isAdmitted(getUserId(), DeviceAccessGuard.deviceId(context))
+
+    /** Membership/device verification and screen admission happen once at application entry. */
+    suspend fun prepareEntrySession(expected: com.example.data.model.UserSubscription? = null): com.example.data.model.UserSubscription = entryMutex.withLock {
+        if (!isAuthenticated()) return@withLock com.example.data.model.UserSubscription()
+        val owner = getUserId()
+        val attempt = synchronized(entryStateLock) { entryGeneration }
+        fun ensureCurrentEntry() {
+            if (getUserId() != owner || entryGeneration != attempt) throw MembershipCheckException()
+        }
+        val forceRefresh = !hasAdmittedEntrySession() ||
+            (expected != null && !DeviceAccessGuard.isConfirmed(owner, expected.planId, expected.expiresAt, expected.status))
+        val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
+        synchronized(entryStateLock) { ensureCurrentEntry() }
+        val subscription = subscriptionFrom(snapshot)
+        if (subscription.isActive) {
+            if (!hasAdmittedEntrySession()) {
+                ScreenLease.acquire(context, tv = false)
+                synchronized(entryStateLock) {
+                    ensureCurrentEntry()
+                    admission.admit(owner, DeviceAccessGuard.deviceId(context))
+                }
+            }
+            synchronized(entryStateLock) {
+                ensureCurrentEntry()
+                startEntrySessionHeartbeat(owner, attempt)
+                _entryError.value = null
+            }
+        } else {
+            synchronized(entryStateLock) {
+                ensureCurrentEntry()
+                endEntrySession()
+            }
+        }
+        subscription
+    }
+
+    fun listenToSubscription(onSubscriptionLoaded: (com.example.data.model.UserSubscription) -> Unit) {
+        val db = firestore ?: return
+        val user = auth?.currentUser?.takeUnless { it.isAnonymous } ?: return
+        subscriptionListener?.remove()
+        val listenerEpoch = subscriptionListenerEpoch.incrementAndGet()
+        subscriptionGeneration.incrementAndGet()
+        pendingSubscriptionKey = null
+        subscriptionListener = db.collection("users").document(user.uid).collection("subscription").document("current")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (auth?.currentUser?.uid != user.uid || listenerEpoch != subscriptionListenerEpoch.get()) return@addSnapshotListener
+                if (error != null) {
+                    if (error.isAuthoritativeAccessFailure()) {
+                        subscriptionGeneration.incrementAndGet()
+                        DeviceAccessGuard.clear()
+                        endEntrySession()
                         onSubscriptionLoaded(com.example.data.model.UserSubscription())
                     }
+                    // Listener/transport failures do not replace a verified plan with Guest.
+                    return@addSnapshotListener
                 }
-        }
+                if (snapshot == null || snapshot.metadata.hasPendingWrites() || snapshot.metadata.isFromCache) return@addSnapshotListener
+                val subscription = if (snapshot.exists()) subscriptionFrom(snapshot) else com.example.data.model.UserSubscription()
+                val key = "${user.uid}:${subscription.planId}:${subscription.expiresAt}:${subscription.status}"
+                if (key == pendingSubscriptionKey) return@addSnapshotListener
+                val requestGeneration = subscriptionGeneration.incrementAndGet()
+                runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()?.let(SubscriptionTime::observeServerTimestamp)
+                if (!subscription.isActive) {
+                    pendingSubscriptionKey = null
+                    DeviceAccessGuard.clear()
+                    endEntrySession()
+                    onSubscriptionLoaded(subscription)
+                    return@addSnapshotListener
+                }
+                if (DeviceAccessGuard.isConfirmed(user.uid, subscription.planId, subscription.expiresAt, subscription.status) && hasAdmittedEntrySession()) {
+                    onSubscriptionLoaded(subscription)
+                    return@addSnapshotListener
+                }
+                // A changed server plan is authoritative; never continue using broader old entitlements.
+                pendingSubscriptionKey = key
+                DeviceAccessGuard.clear()
+                endEntrySession()
+                onSubscriptionLoaded(subscription)
+                scope.launch {
+                    try {
+                        val checked = prepareEntrySession(subscription)
+                        if (auth?.currentUser?.uid == user.uid && listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()) {
+                            pendingSubscriptionKey = null
+                            onSubscriptionLoaded(checked)
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        if (auth?.currentUser?.uid == user.uid && listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()) {
+                            pendingSubscriptionKey = null
+                            _entryError.value = failure.accessFailureMessage()
+                        }
+                    }
+                }
+            }
     }
 
     // My List is scoped to a Firebase account and profile. Tombstones keep removals
@@ -842,25 +907,41 @@ class FirebaseSyncManager(private val context: Context) {
 
     private var streamHeartbeatJob: kotlinx.coroutines.Job? = null
 
-    fun startActiveStreamHeartbeat(deviceId: String, deviceName: String, mediaTitle: String, maxAllowedScreens: Int, onLimitExceeded: (Int, Int) -> Unit) {
-        val owner = auth?.currentUser?.takeUnless { it.isAnonymous }?.uid ?: return
-        streamHeartbeatJob?.cancel()
+    private fun startEntrySessionHeartbeat(owner: String, attempt: Long) {
+        if (streamHeartbeatJob?.isActive == true) return
         streamHeartbeatJob = scope.launch {
+            // Entry already acquired a slot. Do not immediately repeat that transaction.
             while (isActive && auth?.currentUser?.uid == owner) {
-                try { ScreenLease.acquire(context, tv = false) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) {
-                    onLimitExceeded(maxAllowedScreens, maxAllowedScreens)
-                    ScreenLease.release()
-                    return@launch
-                }
                 kotlinx.coroutines.delay(20_000L)
+                if (synchronized(entryStateLock) { entryGeneration != attempt || getUserId() != owner }) return@launch
+                try {
+                    ScreenLease.acquire(context, tv = false)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    synchronized(entryStateLock) {
+                        if (entryGeneration != attempt || getUserId() != owner) return@launch
+                        val authoritative = failure.isAuthoritativeAccessFailure()
+                        admission.onRefreshFailure(authoritative)
+                        if (authoritative) {
+                            endEntrySession(failure.accessFailureMessage())
+                            return@launch
+                        }
+                    }
+                    // An interrupted heartbeat is recoverable. Keep the admitted session and
+                    // paid membership while retrying at the next interval, without request loops.
+                }
             }
         }
     }
 
-    fun stopActiveStreamHeartbeat(deviceId: String) {
+    fun releaseEntrySession() = endEntrySession()
+
+    private fun endEntrySession(error: String? = null) = synchronized(entryStateLock) {
+        entryGeneration++
         streamHeartbeatJob?.cancel()
+        streamHeartbeatJob = null
+        admission.clear()
+        _entryError.value = error
         ScreenLease.releaseIn(scope)
     }
 
@@ -917,6 +998,9 @@ class FirebaseSyncManager(private val context: Context) {
         myListListener = null
         watchHistoryListener?.remove()
         watchHistoryListener = null
+        subscriptionGeneration.incrementAndGet()
+        subscriptionListenerEpoch.incrementAndGet()
+        pendingSubscriptionKey = null
         subscriptionListener?.remove()
         subscriptionListener = null
         tvSessionListener?.remove()
@@ -924,7 +1008,7 @@ class FirebaseSyncManager(private val context: Context) {
     }
 
     fun cleanup() {
-        streamHeartbeatJob?.cancel()
+        endEntrySession()
         cleanupListeners()
     }
 }

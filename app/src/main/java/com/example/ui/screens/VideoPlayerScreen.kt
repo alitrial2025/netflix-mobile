@@ -341,9 +341,13 @@ fun VideoPlayerScreen(
                 if (exoPlayer.currentMediaItem?.mediaId != expectedId) return
                 val limited = generateSequence<Throwable>(error) { it.cause }.take(16)
                     .filterIsInstance<com.example.data.PlaybackRateLimitedException>().firstOrNull()
+                // The guarded data source already recorded a real rejection.
+                // Propagating that exception must not renew the provider block.
                 latestPlaybackFailed()
-                playbackError = if (limited != null) {
+                playbackError = if (limited != null && (limited.retryAfterMs ?: 60_000L) > 0L) {
                     "Playback is busy. Please wait ${((limited.retryAfterMs ?: 60_000L) + 999L) / 1_000L} seconds before trying again."
+                } else if (limited != null) {
+                    "This playback source is unavailable. Please try again."
                 } else "This title cannot be played. Try again later."
                 isBuffering = false
                 exoPlayer.stop()
@@ -471,7 +475,7 @@ fun VideoPlayerScreen(
                 .setUpstreamDataSourceFactory(defaultDataSourceFactory)
                 .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory))
+            val mediaSourceFactory = DefaultMediaSourceFactory(com.example.data.GuardedPlaybackDataSourceFactory(cacheDataSourceFactory, defaultDataSourceFactory, playerState.sourceId.orEmpty()))
                 .setLoadErrorHandlingPolicy(com.example.data.PlaybackLoadErrorPolicy())
             val uri = if (url.startsWith("/")) {
                 android.net.Uri.fromFile(java.io.File(url))

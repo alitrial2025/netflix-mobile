@@ -42,10 +42,20 @@ internal object StreamSessionPolicy {
     // Duration alone is not evidence: children's episodes can legitimately be nine minutes.
     private val waitingVideo = Regex("""/files/220884(?:[/?."\s]|$)""", RegexOption.IGNORE_CASE)
     private val limitMessage = Regex("""\brate[_ -]?limit(?:ed)?\b|too many requests|limit exceeded""", RegexOption.IGNORE_CASE)
+    private val errorField = Regex(""""(?:error|message|detail|reason|status|code)"\s*:\s*"([^"]*)"""", RegexOption.IGNORE_CASE)
     fun isWaitingVideo(value: String): Boolean = waitingVideo.containsMatchIn(value.replace("\\/", "/"))
 
-    fun isRateLimited(code: Int, body: String): Boolean = code == 429 ||
-        isWaitingVideo(body) || limitMessage.containsMatchIn(body)
+    fun isRateLimited(code: Int, body: String): Boolean {
+        if (code == 429 || isWaitingVideo(body)) return true
+        val payload = body.trimStart()
+        // Valid HLS paths and ordinary JSON titles can contain these words.
+        // They cannot independently start a provider-wide cooldown.
+        if (payload.startsWith("#EXTM3U")) return false
+        if (payload.startsWith('{') || payload.startsWith('[')) {
+            return errorField.findAll(payload).any { limitMessage.containsMatchIn(it.groupValues[1]) }
+        }
+        return limitMessage.containsMatchIn(payload)
+    }
 
     fun isSessionRejected(code: Int, body: String): Boolean = code == 401 || code == 403 ||
         (body.trimStart().startsWith("#EXTM3U") && body.contains("in=unknown", ignoreCase = true)) ||

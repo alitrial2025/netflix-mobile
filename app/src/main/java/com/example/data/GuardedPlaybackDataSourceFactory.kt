@@ -16,7 +16,9 @@ import java.io.IOException
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class GuardedPlaybackDataSourceFactory(
     private val upstream: DataSource.Factory,
-    private val uncachedManifests: DataSource.Factory = upstream
+    private val uncachedManifests: DataSource.Factory = upstream,
+    private val sourceId: String? = null,
+    private val newTvGate: CookieFreePlaybackGate = NewTvPlaybackGate
 ) : DataSource.Factory {
     override fun createDataSource(): DataSource = GuardedSource(object : DataSource {
         private var active: DataSource? = null
@@ -37,20 +39,29 @@ internal class GuardedPlaybackDataSourceFactory(
         override fun getUri(): Uri? = active?.uri
         override fun getResponseHeaders(): Map<String, List<String>> = active?.responseHeaders.orEmpty()
         override fun close() { try { active?.close() } finally { active = null } }
-    })
-    private class GuardedSource(private val delegate: DataSource) : DataSource by delegate {
+    }, sourceId, newTvGate)
+    private class GuardedSource(private val delegate: DataSource, sourceId: String?, private val newTvGate: CookieFreePlaybackGate) : DataSource by delegate {
+        private val newTv = sourceId?.contains("[NewTV]", ignoreCase = true) == true
+        private fun remainingMs() = if (newTv) newTvGate.remainingMs() else PlaybackServiceGate.remainingMs()
+        private fun check() = if (newTv) newTvGate.check() else PlaybackServiceGate.check()
+        private fun checkResponse(code: Int, body: String, retryAfter: String?, url: String) {
+            if (newTv) newTvGate.checkResponse(code, body, retryAfter, url)
+            else PlaybackServiceGate.checkResponse(code, body, retryAfter, url)
+        }
         private var manifest: ByteArrayInputStream? = null
         override fun open(dataSpec: DataSpec): Long {
             manifest = null
             val url = dataSpec.uri.toString()
             val isManifest = dataSpec.uri.path?.endsWith(".m3u8", true) == true
             val providerHost = dataSpec.uri.host.orEmpty()
-            val usesPlaybackProvider = providerHost.contains("freecdn", true) ||
+            val usesPlaybackProvider = newTv || providerHost.contains("freecdn", true) ||
                 providerHost in listOf("net52.cc", "netmirror.app", "netmirror.gg", "mobidetects.com", "mobidetect.art") ||
                 dataSpec.uri.path?.startsWith("/files/") == true
             if (isManifest) {
-                if (usesPlaybackProvider) PlaybackServiceGate.check()
-                PlaybackServiceGate.checkResponse(200, "", null, url)
+                if (usesPlaybackProvider) check()
+                // A cached waiting URL is not a fresh provider response. Reject
+                // it for eviction without creating or extending a cooldown.
+                if (StreamSessionPolicy.isWaitingVideo(url)) throw PlaybackRateLimitedException(remainingMs())
             }
             try {
                 val length = delegate.open(dataSpec)
@@ -67,7 +78,7 @@ internal class GuardedPlaybackDataSourceFactory(
                 val retryAfter = delegate.responseHeaders.entries.firstOrNull {
                     it.key.equals("Retry-After", true)
                 }?.value?.firstOrNull()
-                PlaybackServiceGate.checkResponse(200, data.toString(Charsets.UTF_8), retryAfter, url)
+                checkResponse(200, data.toString(Charsets.UTF_8), retryAfter, url)
                 manifest = ByteArrayInputStream(data)
                 return data.size.toLong()
             } catch (error: HttpDataSource.InvalidResponseCodeException) {
@@ -75,7 +86,7 @@ internal class GuardedPlaybackDataSourceFactory(
                     val retryAfter = error.headerFields.entries.firstOrNull {
                         it.key.equals("Retry-After", true)
                     }?.value?.firstOrNull()
-                    PlaybackServiceGate.checkResponse(429, "", retryAfter, url)
+                    checkResponse(429, "", retryAfter, url)
                 }
                 throw error
             } catch (error: IOException) {

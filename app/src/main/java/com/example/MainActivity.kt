@@ -205,6 +205,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     }
     val isLoadingCatalog by viewModel.isLoadingCatalog.collectAsStateWithLifecycle()
     val isWarmupFinished by viewModel.isWarmupFinished.collectAsStateWithLifecycle()
+    val startupError by viewModel.startupError.collectAsStateWithLifecycle()
     val hasCompletedSplash by viewModel.hasCompletedSplash.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -876,9 +877,12 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         }
 
         // Splash screen overlay
-        if (!hasCompletedSplash) {
+        if (!hasCompletedSplash || !isWarmupFinished) {
             com.example.ui.screens.SplashScreen(
                 isWarmupFinished = isWarmupFinished,
+                startupError = startupError,
+                onRetryStartup = viewModel::retryStartup,
+                onSignOut = viewModel::signOutUser,
                 onSplashComplete = { viewModel.completeSplash() }
             )
         }
