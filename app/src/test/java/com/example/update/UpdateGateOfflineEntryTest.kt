@@ -29,11 +29,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetworkInfo
+import org.robolectric.shadows.ShadowNetworkCapabilities
 
 /** Real launch orchestration: offline entry must not touch a pending update/install. */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = Application::class, packageName = "com.netflixpro.apk")
+@Config(sdk = [34], application = Application::class)
 class UpdateGateOfflineEntryTest {
     private lateinit var application: Application
     private val models = ViewModelStore()
@@ -99,10 +100,10 @@ class UpdateGateOfflineEntryTest {
             NetworkInfo.DetailedState.CONNECTED, ConnectivityManager.TYPE_WIFI, 0, true, true
         ))
         network.setDefaultNetworkActive(true)
-        network.setNetworkCapabilities(connectivity.activeNetwork!!, NetworkCapabilities().apply {
-            addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        })
+        val capabilities = ShadowNetworkCapabilities.newInstance()
+        shadowOf(capabilities).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        shadowOf(capabilities).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        network.setNetworkCapabilities(connectivity.activeNetwork!!, capabilities)
         val installed = PackageInfoCompat.getLongVersionCode(
             application.packageManager.getPackageInfo(application.packageName, 0)
         )
