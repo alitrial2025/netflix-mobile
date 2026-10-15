@@ -24,7 +24,7 @@ class MembershipCheckException(cause: Throwable? = null) : java.io.IOException("
 class MembershipRevokedException : java.io.IOException("Your membership is no longer active. Choose a plan to continue.")
 
 internal fun Throwable.isAuthoritativeAccessFailure(): Boolean = generateSequence(this) { it.cause }.any {
-    it is DeviceAccessException || it is MembershipRevokedException ||
+    (it is DeviceAccessException && it !is ScreenLimitException) || it is MembershipRevokedException ||
         (it is FirebaseFirestoreException && it.code in setOf(
             FirebaseFirestoreException.Code.PERMISSION_DENIED, FirebaseFirestoreException.Code.UNAUTHENTICATED))
 }

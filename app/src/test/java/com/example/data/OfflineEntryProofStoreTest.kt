@@ -24,12 +24,15 @@ class OfflineEntryProofStoreTest {
 
     @Before fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        file = File(context.noBackupFilesDir, "test-verified-entry.json")
+        file = File(context.noBackupFilesDir, "test-verified-entry-${java.util.UUID.randomUUID()}.json")
         store = OfflineEntryProofStore(file)
         store.clear()
     }
 
-    @After fun tearDown() { store.clear() }
+    @After fun tearDown() {
+        store.clear()
+        File(file.parentFile, "${file.name}.blocked").delete()
+    }
 
     @Test fun processRestartRestoresOnlyPreviouslyAdmittedMembershipWithItsOriginalExpiry() {
         store.save(entry)
@@ -46,7 +49,7 @@ class OfflineEntryProofStoreTest {
     @Test fun offlineRestartPreservesAllPreviouslyVerifiedSubscriptionAndPaymentDetails() {
         val paidSubscription = subscription.copy(amount = 1_299, currency = "USD", paymentReference = "checkout-reference-123",
             mpesaReceipt = "VERIFIED-RECEIPT-456", subscribedAt = expiry - 30L * RenewalPolicy.DAY_MS)
-        val paidEntry = entry.copy(subscription = paidSubscription)
+        val paidEntry = entry.copy(subscription = paidSubscription, serverVersion = expiry - RenewalPolicy.DAY_MS)
         store.save(paidEntry)
 
         val restored = OfflineEntryProofStore(file).load("account-a", "phone-a", expiry - 1L)!!
@@ -70,9 +73,45 @@ class OfflineEntryProofStoreTest {
 
     @Test fun authoritativeSignOutOrRevocationRemovesAdmissionAcrossRestarts() {
         store.save(entry)
-        store.clear()
+        store.blockMigration("account-a", "phone-a")
         assertNull(OfflineEntryProofStore(file).load("account-a", "phone-a", expiry - 1L))
         assertFalse(file.exists())
+        assertTrue(OfflineEntryProofStore(file).isMigrationBlocked("account-a", "phone-a"))
+    }
+
+    @Test fun oldCachedMembershipCannotClearRevocationButFreshServerConfirmationCan() {
+        store.save(entry, serverConfirmed = true)
+        store.blockMigration("account-a", "phone-a")
+        val restarted = OfflineEntryProofStore(file)
+        restarted.save(entry)
+        assertTrue(restarted.isMigrationBlocked("account-a", "phone-a"))
+        assertNull(restarted.load("account-a", "phone-a", expiry - 1L))
+
+        restarted.save(entry, serverConfirmed = true)
+        assertFalse(restarted.isMigrationBlocked("account-a", "phone-a"))
+        assertEquals(entry, restarted.load("account-a", "phone-a", expiry - 1L))
+    }
+
+    @Test fun tombstonesAreScopedToTheDeniedAccountAndInstallation() {
+        store.blockMigration("account-a", "phone-a")
+        store.blockMigration("account-b", "phone-a")
+        assertTrue(store.isMigrationBlocked("account-a", "phone-a"))
+        assertTrue(store.isMigrationBlocked("account-b", "phone-a"))
+        assertFalse(store.isMigrationBlocked("account-a", "phone-b"))
+        store.save(entry, serverConfirmed = true)
+        assertFalse(store.isMigrationBlocked("account-a", "phone-a"))
+        assertTrue(store.isMigrationBlocked("account-b", "phone-a"))
+    }
+
+    @Test fun corruptRevocationMarkerCannotResurrectOldMembership() {
+        file.parentFile!!.mkdirs()
+        File(file.parentFile, "${file.name}.blocked").writeText("{truncated")
+        assertTrue(store.isMigrationBlocked("account-a", "phone-a"))
+        store.save(entry)
+        assertNull(store.load("account-a", "phone-a", expiry - 1L))
+        store.save(entry, serverConfirmed = true)
+        assertEquals(entry, store.load("account-a", "phone-a", expiry - 1L))
+        assertTrue(store.isMigrationBlocked("account-b", "phone-a"))
     }
 
     @Test fun serverPlanOrExpiryChangeCannotFallBackToAnOlderHigherTier() {
@@ -116,7 +155,7 @@ class OfflineEntryProofStoreTest {
     }
 
     @Test fun explicitMembershipDeviceAndServerAuthorizationDenialsStillRevokeAdmission() {
-        val denials = listOf(MembershipRevokedException(), DeviceAccessException("Device removed"), ScreenLimitException("Screens in use"),
+        val denials = listOf(MembershipRevokedException(), DeviceAccessException("Device removed"),
             FirebaseFirestoreException("Access denied", FirebaseFirestoreException.Code.PERMISSION_DENIED),
             FirebaseFirestoreException("Invalid account credentials", FirebaseFirestoreException.Code.UNAUTHENTICATED))
         for (failure in denials) {
@@ -125,5 +164,15 @@ class OfflineEntryProofStoreTest {
             admission.onRefreshFailure(failure.isAuthoritativeAccessFailure())
             assertFalse(admission.isAdmitted("account-a", "phone-a"))
         }
+    }
+
+    @Test fun fullOnlineScreensDoNotRevokeVerifiedOfflineMembership() {
+        store.save(entry, serverConfirmed = true)
+        val failure = MembershipCheckException(ScreenLimitException("Screens in use"))
+        assertFalse(failure.isAuthoritativeAccessFailure())
+        val admission = EntrySessionAdmission().apply { admit("account-a", "phone-a") }
+        admission.onRefreshFailure(failure.isAuthoritativeAccessFailure())
+        assertTrue(admission.isAdmitted("account-a", "phone-a"))
+        assertEquals(entry, store.load("account-a", "phone-a", expiry - 1L))
     }
 }

@@ -75,4 +75,22 @@ class MobilePinAndClipsTest {
         rule.runOnIdle { membership.value = membership.value.copy(planId = "plan_premium", expiresAt = 0) }
         rule.onNodeWithTag("nav_tab_clips").assertDoesNotExist()
     }
+
+    @Test fun blockedClipsExplainsTheEntryRequirementInsteadOfTheWifiPolicy() {
+        val entryMessage = "Clips needs a verified online Premium session. Your saved downloads remain available offline."
+        val wifiMessage = "Connect to Wi-Fi or change Cellular Data in App Settings to watch Clips."
+        val needsOnlineEntry = mutableStateOf(true)
+        rule.setContent { NetflixTheme {
+            if (needsOnlineEntry.value) {
+                ClipsScreen(streamingAllowed = false, streamingBlockedMessage = entryMessage)
+            } else {
+                ClipsScreen(streamingAllowed = false)
+            }
+        } }
+        rule.onNodeWithText(entryMessage).assertIsDisplayed()
+        rule.onNodeWithText(wifiMessage).assertDoesNotExist()
+        rule.runOnIdle { needsOnlineEntry.value = false }
+        rule.onNodeWithText(wifiMessage).assertIsDisplayed()
+        rule.onNodeWithText(entryMessage).assertDoesNotExist()
+    }
 }

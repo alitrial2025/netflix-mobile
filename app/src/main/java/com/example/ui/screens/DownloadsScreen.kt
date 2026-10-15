@@ -87,7 +87,8 @@ fun DownloadsScreen(
         if (download.episodeTitle != null) MediaType.TV_SHOW else MediaType.MOVIE, "", "", 0, "16+", 0, "Downloaded",
         genres = emptyList(), cast = emptyList(), director = "", isOriginal = false)
     fun play(download: DownloadEntity) {
-        if (!canDownload) { onShowToast("Offline playback requires an active download plan."); requirePlan(); return }
+        // Playback authorizes the account's verified entitlement in the ViewModel.
+        // A missing online check must not turn a saved download into a purchase prompt.
         val media = mediaFor(download)
         val id = downloadEpisodeId(download.mediaId, download.downloadKey)
         val episode = id?.let { media.episodes.firstOrNull { ep -> ep.id == it } ?: Episode(it, episodeCoordinates(it).second, download.episodeTitle.orEmpty(), 45, "") }

@@ -36,8 +36,8 @@ internal data class MembershipProof(
             DeviceAccessPolicy.confirmationStatusMatches(this.status, status, expiry, now)
 }
 
-/** Written only after server membership, device binding and screen admission all succeeded. */
-internal data class OfflineEntryProof(val proof: MembershipProof, val subscription: UserSubscription) {
+/** Verified membership/device authorization is independent of an online concurrent-screen slot. */
+internal data class OfflineEntryProof(val proof: MembershipProof, val subscription: UserSubscription, val serverVersion: Long = 0L) {
     fun permits(uid: String, device: String, now: Long, expected: UserSubscription? = null): Boolean =
         proof.matches(uid, device, subscription.planId, subscription.expiresAt, subscription.status, now) &&
             (expected == null || proof.matches(uid, device, expected.planId, expected.expiresAt, expected.status, now))
@@ -46,8 +46,9 @@ internal data class OfflineEntryProof(val proof: MembershipProof, val subscripti
 /** App-private and excluded from backup; a new installation cannot inherit another device's admission. */
 internal class OfflineEntryProofStore(private val file: File) {
     private val atomicFile = AtomicFile(file)
+    private val blockedFile = AtomicFile(File(file.parentFile, "${file.name}.blocked"))
 
-    @Synchronized fun save(entry: OfflineEntryProof) {
+    @Synchronized fun save(entry: OfflineEntryProof, serverConfirmed: Boolean = false) {
         val data = JSONObject().apply {
             put("version", 1)
             put("uid", entry.proof.uid)
@@ -61,12 +62,14 @@ internal class OfflineEntryProofStore(private val file: File) {
             put("paymentReference", entry.subscription.paymentReference)
             put("mpesaReceipt", entry.subscription.mpesaReceipt)
             put("subscribedAt", entry.subscription.subscribedAt)
+            put("serverVersion", entry.serverVersion)
         }.toString().toByteArray(Charsets.UTF_8)
         file.parentFile?.mkdirs()
         val output = atomicFile.startWrite()
         try {
             output.write(data)
             atomicFile.finishWrite(output)
+            if (serverConfirmed) unblock(entry.proof.uid, entry.proof.device)
         } catch (failure: Exception) {
             atomicFile.failWrite(output)
             throw failure
@@ -74,6 +77,7 @@ internal class OfflineEntryProofStore(private val file: File) {
     }
 
     @Synchronized fun load(uid: String, device: String, now: Long, expected: UserSubscription? = null): OfflineEntryProof? {
+        if (isMigrationBlocked(uid, device)) return null
         val entry = runCatching {
             val json = JSONObject(atomicFile.readFully().toString(Charsets.UTF_8))
             require(json.getInt("version") == 1)
@@ -82,12 +86,140 @@ internal class OfflineEntryProofStore(private val file: File) {
             OfflineEntryProof(proof, UserSubscription(status = proof.status, planId = proof.plan,
                 planName = json.getString("planName"), amount = json.getInt("amount"), currency = json.getString("currency"),
                 paymentReference = json.getString("paymentReference"), mpesaReceipt = json.getString("mpesaReceipt"),
-                subscribedAt = json.getLong("subscribedAt"), expiresAt = proof.expiry))
+                subscribedAt = json.getLong("subscribedAt"), expiresAt = proof.expiry), json.optLong("serverVersion", 0L))
         }.getOrNull() ?: return null
         return entry.takeIf { it.permits(uid, device, now, expected) }
     }
 
     @Synchronized fun clear() = atomicFile.delete()
+
+    /** A deleted proof must not be resurrected from older Firestore cache after a denial/sign-out. */
+    @Synchronized fun blockMigration(uid: String, device: String) {
+        clear()
+        if (uid.isBlank() || device.isBlank()) return
+        val blocked = readBlocked()
+        blocked.put("$uid:$device", true)
+        writeBlocked(blocked)
+    }
+
+    @Synchronized fun isMigrationBlocked(uid: String, device: String): Boolean {
+        val blocked = readBlocked()
+        val key = "$uid:$device"
+        return if (blocked.has(key)) blocked.optBoolean(key, true) else blocked.optBoolean("corrupt", false)
+    }
+
+    private fun unblock(uid: String, device: String) {
+        val blocked = readBlocked()
+        if (blocked.optBoolean("corrupt", false)) blocked.put("$uid:$device", false) else blocked.remove("$uid:$device")
+        writeBlocked(blocked)
+    }
+
+    private fun readBlocked(): JSONObject = runCatching {
+        JSONObject(blockedFile.readFully().toString(Charsets.UTF_8))
+    }.getOrElse {
+        // A missing marker is normal. Corrupt marker data must fail closed for migration.
+        if (blockedFile.baseFile.exists()) JSONObject().put("corrupt", true) else JSONObject()
+    }
+
+    private fun writeBlocked(blocked: JSONObject) {
+        file.parentFile?.mkdirs()
+        val output = blockedFile.startWrite()
+        try {
+            output.write(blocked.toString().toByteArray(Charsets.UTF_8))
+            blockedFile.finishWrite(output)
+        } catch (failure: Exception) {
+            blockedFile.failWrite(output)
+            throw failure
+        }
+    }
+}
+
+internal enum class OfflineCacheDecision { VERIFIED, INCOMPLETE, DENIED }
+
+/** Cached pending writes cannot establish paid membership or a single-device binding. */
+internal object OfflineMembershipCachePolicy {
+    fun bindingDecision(plan: String, exists: Boolean, pendingWrites: Boolean, boundDevice: String?, device: String): OfflineCacheDecision = when {
+        !DeviceAccessPolicy.isSingleDevice(plan) -> OfflineCacheDecision.VERIFIED
+        !exists || pendingWrites -> OfflineCacheDecision.INCOMPLETE
+        boundDevice.isNullOrBlank() || boundDevice != device -> OfflineCacheDecision.DENIED
+        else -> OfflineCacheDecision.VERIFIED
+    }
+
+    fun cacheMayOverrideProof(cacheVersion: Long, proofVersion: Long): Boolean =
+        cacheVersion <= 0L || proofVersion <= 0L || cacheVersion >= proofVersion
+}
+
+internal data class CachedOfflineSubscription(val uid: String, val exists: Boolean, val pendingWrites: Boolean,
+    val subscription: UserSubscription, val serverVersion: Long = 0L)
+internal data class CachedOfflineBinding(val uid: String, val exists: Boolean, val pendingWrites: Boolean, val device: String?)
+
+/** Implementations read local committed records only; recovery never requests a server transaction. */
+internal interface OfflineMembershipCacheReader {
+    suspend fun subscription(uid: String): CachedOfflineSubscription?
+    suspend fun binding(uid: String): CachedOfflineBinding?
+}
+
+internal interface OfflineEntryEpoch {
+    fun ensureCurrent()
+    fun <T> withCurrent(action: () -> T): T
+}
+
+internal suspend fun recoverOfflineMembershipProof(
+    uid: String,
+    device: String,
+    now: Long,
+    expected: UserSubscription?,
+    store: OfflineEntryProofStore,
+    reader: OfflineMembershipCacheReader,
+    epoch: OfflineEntryEpoch,
+    onInvalidation: () -> Unit = {}
+): OfflineEntryProof? {
+    epoch.ensureCurrent()
+    val stored = store.load(uid, device, now, expected)
+    if (store.isMigrationBlocked(uid, device)) return stored
+    val cached = reader.subscription(uid)
+    epoch.ensureCurrent()
+    if (cached == null || cached.uid != uid || cached.pendingWrites) return stored
+    if (stored != null && !OfflineMembershipCachePolicy.cacheMayOverrideProof(cached.serverVersion, stored.serverVersion)) return stored
+    val subscription = if (cached.exists) cached.subscription else UserSubscription()
+    // An unversioned active cache cannot roll back a known newer server-confirmed tier.
+    if (stored != null && cached.serverVersion <= 0L && stored.serverVersion > 0L &&
+        DeviceAccessPolicy.screenCount(subscription.planId) > 0 && RenewalPolicy.grantsAccess(subscription.status, subscription.expiresAt, now)) return stored
+    val candidate = OfflineEntryProof(MembershipProof(uid, device, subscription.planId, subscription.expiresAt, subscription.status),
+        subscription, cached.serverVersion)
+    if (!candidate.permits(uid, device, now, expected)) {
+        return epoch.withCurrent {
+            store.blockMigration(uid, device)
+            onInvalidation()
+            null
+        }
+    }
+    val binding = if (DeviceAccessPolicy.isSingleDevice(subscription.planId)) reader.binding(uid) else null
+    epoch.ensureCurrent()
+    val decision = OfflineMembershipCachePolicy.bindingDecision(subscription.planId, binding?.exists == true && binding.uid == uid,
+        binding?.pendingWrites == true, binding?.device, device)
+    return epoch.withCurrent {
+        when (decision) {
+            OfflineCacheDecision.DENIED -> {
+                store.blockMigration(uid, device)
+                onInvalidation()
+                null
+            }
+            OfflineCacheDecision.INCOMPLETE -> {
+                if (stored?.permits(uid, device, now, subscription) == true) stored
+                else {
+                    store.clear()
+                    onInvalidation()
+                    null
+                }
+            }
+            OfflineCacheDecision.VERIFIED -> {
+                // A failed disk checkpoint still permits this process's committed cached proof.
+                runCatching { store.save(candidate) }
+                candidate
+            }
+        }
+    }
 }
 
 /** App entry owns the screen admission; temporary refresh failures do not revoke that session. */

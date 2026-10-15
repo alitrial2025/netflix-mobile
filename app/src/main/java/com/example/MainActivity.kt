@@ -195,6 +195,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val showAuthScreen by viewModel.showAuthScreen.collectAsStateWithLifecycle()
     val showSubscriptionSheet by viewModel.showSubscriptionSheet.collectAsStateWithLifecycle()
     val userSubscription by viewModel.userSubscription.collectAsStateWithLifecycle()
+    val onlineEntryReady by viewModel.syncManager.onlineEntryReady.collectAsStateWithLifecycle()
     val diagnosticRunning by viewModel.diagnosticRunning.collectAsStateWithLifecycle()
     val diagnosticResult by viewModel.diagnosticResult.collectAsStateWithLifecycle()
     val catalogMedia by viewModel.displayCatalogMedia.collectAsStateWithLifecycle()
@@ -384,8 +385,12 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                         NavigationTab.CLIPS -> {
                             ClipsScreen(
-                                streamingAllowed = com.example.data.MobilePlaybackPolicy.permitsStreaming(
+                                streamingAllowed = onlineEntryReady && userSubscription.isClipsAllowed &&
+                                    com.example.data.MobilePlaybackPolicy.permitsStreaming(
                                     com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet),
+                                streamingBlockedMessage = if (!onlineEntryReady || !userSubscription.isClipsAllowed)
+                                    "Clips needs a verified online Premium session. Your saved downloads remain available offline."
+                                else "Connect to Wi-Fi or change Cellular Data in App Settings to watch Clips.",
                                 maxVideoHeight = com.example.data.MobilePlaybackPolicy.maxVideoHeight(isHighQualityEnabled,
                                     com.example.data.CellularDataMode.fromLabel(cellularDataOption), playbackNetwork.wifiOrEthernet, userSubscription.planId),
                                 spatialAudioEnabled = isSpatialAudioEnabled && userSubscription.isActive && userSubscription.planId == "plan_premium",

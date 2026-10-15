@@ -77,6 +77,22 @@ class MobileRefinementTest {
         assertEquals("ep_mr_robot_S3_7", selectedEpisode?.id)
         assertEquals(7, selectedEpisode?.episodeNumber)
     }
+    @Test fun savedDownloadDelegatesMembershipVerificationWithoutOpeningCheckout() {
+        var selectedMedia: MediaItem? = null
+        var checkoutOpened = false
+        val downloaded = DownloadEntity(profileId = "profile", downloadKey = "saved-movie", mediaId = "saved-movie",
+            mediaTitle = "Saved movie", episodeTitle = null, fileSizeMb = 180)
+        rule.setContent { NetflixTheme { DownloadsScreen(listOf(downloaded), smartDownloadsEnabled = false, connectedCastDevice = null,
+            userSubscription = UserSubscription(), onClose = {}, onPlayMedia = { media, _ -> selectedMedia = media },
+            onDeleteDownload = {}, onClearAllDownloads = {}, onToggleSmartDownloads = {}, onSetUpDownloadsForYou = {},
+            onOpenSearch = {}, onOpenCast = {}, onOpenMediaDetail = {}, onShowToast = {},
+            onOpenSubscription = { checkoutOpened = true }, catalogMedia = emptyList()) } }
+
+        rule.onNodeWithTag("download_row_saved-movie").performClick()
+
+        assertEquals("saved-movie", selectedMedia?.id)
+        assertFalse(checkoutOpened)
+    }
     @Test @Config(qualifiers = "w895dp-h412dp-mdpi") fun completionActionsUseCurrentTitleAndRecommendations() {
         var replayed = false; var selected: String? = null
         val recommendation = media(MediaType.MOVIE).copy(id = "next", title = "Next story")

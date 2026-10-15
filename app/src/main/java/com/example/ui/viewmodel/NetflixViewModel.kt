@@ -155,11 +155,22 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                     startupCacheJob?.join()
                     loadCachedCatalog()
                     val subscription = syncManager.prepareEntrySession()
-                    setUserSubscription(subscription)
-                    saveStoredSubscription(subscription)
-                    awaitCatalogWhileOnline(catalogRefreshJob,
-                        observePlaybackNetwork(getApplication()).map { it.online })
-                    if (subscription.isActive && !syncManager.hasAdmittedEntrySession()) {
+                    // A local library without a recoverable entitlement can still open.
+                    // Its Guest sentinel is not a server downgrade of the saved account.
+                    if (!syncManager.isOfflineLibraryEntry() || syncManager.hasAdmittedEntrySession()) {
+                        setUserSubscription(subscription)
+                        saveStoredSubscription(subscription)
+                    }
+                    if (!syncManager.isOfflineLibraryEntry()) {
+                        awaitCatalogWhileOnline(catalogRefreshJob,
+                            observePlaybackNetwork(getApplication()).map { it.online })
+                    } else {
+                        // A refresh started before the outage may still be pending. It
+                        // must not cover the local library with the catalog loading overlay.
+                        _isLoadingCatalog.value = false
+                    }
+                    if (subscription.isActive && !syncManager.hasAdmittedEntrySession() &&
+                        !syncManager.isOfflineLibraryEntry()) {
                         throw com.example.data.MembershipCheckException()
                     }
                     syncManager.listenToSubscription(::acceptSubscriptionUpdate)
@@ -175,9 +186,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun acceptSubscriptionUpdate(subscription: com.example.data.model.UserSubscription) {
+        if (syncManager.isOfflineLibraryEntry() && !syncManager.hasAdmittedEntrySession()) return
         setUserSubscription(subscription)
         saveStoredSubscription(subscription)
-        if (subscription.isActive && !syncManager.hasAdmittedEntrySession()) {
+        if (subscription.isActive && !syncManager.hasAdmittedEntrySession() &&
+            !syncManager.isOfflineLibraryEntry()) {
             _isWarmupFinished.value = false
         } else if (_hasCompletedSplash.value) {
             _startupError.value = null
@@ -682,11 +695,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             .apply()
     }
 
-    fun isMovieLocked(media: MediaItem): Boolean {
+    private fun hasVerifiedMembership(): Boolean {
         val sub = _userSubscription.value
-        if (!syncManager.isAuthenticated() || !syncManager.hasAdmittedEntrySession() || !com.example.data.DeviceAccessGuard.isConfirmed(syncManager.getUserId(), sub.planId, sub.expiresAt, sub.status)) return true
-        return sub.isMediaLocked(media.id, media.title)
+        return syncManager.isAuthenticated() && syncManager.hasAdmittedEntrySession() &&
+            com.example.data.DeviceAccessGuard.isConfirmed(syncManager.getUserId(), sub.planId, sub.expiresAt, sub.status)
     }
+
+    fun isMovieLocked(media: MediaItem): Boolean =
+        !hasVerifiedMembership() || _userSubscription.value.isMediaLocked(media.id, media.title)
 
     private val _membershipPrompt = MutableStateFlow<MediaItem?>(null)
     val membershipPrompt: StateFlow<MediaItem?> = _membershipPrompt.asStateFlow()
@@ -1076,6 +1092,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         retryStartup()
         viewModelScope.launch {
+            startupCacheJob?.join()
+            syncManager.confirmedEntrySubscription.collect { entry ->
+                // Reconnection refreshes entry admission in the background. Publish its
+                // verified tier without restarting splash or interrupting local files.
+                if (entry != null && _isWarmupFinished.value) {
+                    syncManager.withCurrentConfirmedEntry(entry, ::acceptSubscriptionUpdate)
+                }
+            }
+        }
+        viewModelScope.launch {
             syncManager.entryError.collect { failure ->
                 if (failure != null) {
                     _startupError.value = failure
@@ -1400,6 +1426,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectTab(tab: NavigationTab) {
+        if (tab == NavigationTab.CLIPS && _userSubscription.value.isClipsAllowed && !hasVerifiedMembership()) {
+            showToast("Connect to verify your membership before watching Clips.")
+            return
+        }
         if (tab == NavigationTab.CLIPS && !_userSubscription.value.isClipsAllowed) {
             if (_userSubscription.value.isGuest) {
                 showToast("Sign in and upgrade to Premium to access Fast Laughs & Clips.")
@@ -1414,6 +1444,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setCategoryFilter(filter: CategoryFilter, genre: String? = null) {
+        if (filter == CategoryFilter.GAMES && _userSubscription.value.isGamesAllowed && !hasVerifiedMembership()) {
+            showToast("Connect to verify your membership before playing games.")
+            return
+        }
         if (filter == CategoryFilter.GAMES && !_userSubscription.value.isGamesAllowed) {
             if (_userSubscription.value.isGuest) {
                 showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
@@ -1931,6 +1965,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val requestGeneration = ++playbackRequestGeneration
         if (isMovieLocked(media)) {
             resolveJob?.cancel()
+            if (syncManager.isOfflineLibraryEntry() && !syncManager.hasAdmittedEntrySession()) {
+                showToast("Connect to verify the membership for these downloads. Your saved files are still on this device.")
+                return
+            }
             _membershipPrompt.value = media
             return
         }
@@ -2936,6 +2974,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun installGame(gameId: String) {
+        if (_userSubscription.value.isGamesAllowed && !hasVerifiedMembership()) {
+            showToast("Connect to verify your membership before playing games.")
+            return
+        }
         if (_userSubscription.value.isGuest) {
             showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
             _showAuthScreen.value = true
@@ -2969,6 +3011,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun launchGame(game: GameItem) {
+        if (_userSubscription.value.isGamesAllowed && !hasVerifiedMembership()) {
+            showToast("Connect to verify your membership before playing games.")
+            return
+        }
         if (_userSubscription.value.isGuest) {
             showToast("Sign in and subscribe to Standard or Premium to play NetflixPro Games.")
             _showAuthScreen.value = true

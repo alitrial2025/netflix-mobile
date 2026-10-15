@@ -144,6 +144,7 @@ fun ClipsScreen(
     onOpenSearch: () -> Unit = {},
     onShowToast: (String) -> Unit = {},
     streamingAllowed: Boolean = true,
+    streamingBlockedMessage: String = "Connect to Wi-Fi or change Cellular Data in App Settings to watch Clips.",
     maxVideoHeight: Int = Int.MAX_VALUE,
     spatialAudioEnabled: Boolean = true,
     modifier: Modifier = Modifier
@@ -157,7 +158,12 @@ fun ClipsScreen(
             .background(NetflixBlack)
             .testTag("clips_screen")
     ) {
-        when (clipsMode) {
+        if (!streamingAllowed) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(streamingBlockedMessage, color = Color.White, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(28.dp))
+            }
+        } else when (clipsMode) {
             ClipsMode.VERTICAL_FEED -> {
                 TikTokVerticalVideoFeed(
                     items = clipItems,
@@ -208,11 +214,6 @@ fun ClipsScreen(
                     onSelectMode = { clipsMode = it }
                 )
             }
-        }
-        if (!streamingAllowed) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .9f)).clickable {},
-            contentAlignment = Alignment.Center) {
-            Text("Connect to Wi-Fi or change Cellular Data in App Settings to watch Clips.",
-                color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(28.dp))
         }
     }
 }

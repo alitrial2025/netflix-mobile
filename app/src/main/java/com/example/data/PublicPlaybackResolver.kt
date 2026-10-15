@@ -55,6 +55,7 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
     suspend fun resolve(title: String, year: String, type: String, season: Int, episode: Int, tmdbId: String = ""): PublicPlaybackResult = withTimeout(28_000L) {
         if (normalize(title).isEmpty() || type !in listOf("movie", "tv") || type == "tv" && (season < 1 || episode < 1))
             throw IOException("Invalid title or episode selection")
+        val probeBudget = PlaybackProbeBudget(System.nanoTime() + 28_000_000_000L)
         if (backgroundCatalogRefresh) runtimeConfig?.refreshInBackground()
         val settings = runtimeConfig?.snapshot() ?: ProviderRuntimeConfig.Snapshot(baseUrl = defaultBase.toString())
         val key = ResolutionKey(settings.toString(), PlaybackServiceGate.sourceRevision, tmdbId, normalize(title), year, type,
@@ -69,10 +70,12 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
                 cached?.takeIf { it.expiresAt - now > StreamSessionPolicy.EXPIRY_MARGIN_MS &&
                     (if (it.route == PlaybackRoute.NEWTV) NewTvPlaybackGate.remainingMs() else PlaybackServiceGate.remainingMs()) == 0L }
                     ?.let { return@withLock it }
-                val result = Run(settings).resolve(title, year, type, season, episode, tmdbId)
+                val result = Run(settings, probeBudget).resolve(title, year, type, season, episode, tmdbId)
                 // A legacy cooldown must not discard a separately verified NewTV result.
-                resolved.entries.removeAll { (it.key.revision != key.revision && it.value.route != PlaybackRoute.NEWTV) ||
-                    it.value.expiresAt - now <= StreamSessionPolicy.EXPIRY_MARGIN_MS }
+                resolved.entries.removeAll {
+                    (it.key.revision != key.revision && it.value.route != PlaybackRoute.NEWTV) ||
+                        it.value.expiresAt - now <= StreamSessionPolicy.EXPIRY_MARGIN_MS
+                }
                 if (resolved.size >= 32) resolved.keys.firstOrNull()?.let(resolved::remove)
                 resolved[key] = result
                 result
@@ -82,7 +85,7 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
         }
     }
 
-    private inner class Run(private val settings: ProviderRuntimeConfig.Snapshot) {
+    private inner class Run(private val settings: ProviderRuntimeConfig.Snapshot, private val probeBudget: PlaybackProbeBudget) {
         private val base = settings.baseUrl.toHttpUrl()
         private val requestCounter = java.util.concurrent.atomic.AtomicInteger()
         private val requests get() = requestCounter.get()
@@ -104,7 +107,7 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
         private val mediaHeaders = mapOf("User-Agent" to USER_AGENT, "Origin" to base.toString().trimEnd('/'),
             "Referer" to base.toString(), "X-Requested-With" to "app.netmirror.netmirrornew")
 
-        private suspend fun text(url: HttpUrl, publicNetflix: Boolean = false): HttpTextResponse {
+        private suspend fun text(url: HttpUrl, publicNetflix: Boolean = false, unsignedProbe: Boolean = false): HttpTextResponse {
             if (requestCounter.incrementAndGet() > 32) throw IOException("Playback request budget exceeded")
             if (!url.isHttps || url.username.isNotEmpty() || url.password.isNotEmpty()) throw IOException("Invalid playback URL")
             val request = Request.Builder().url(url).apply {
@@ -119,7 +122,18 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
             val execute: suspend () -> HttpTextResponse = {
                 if (!publicNetflix) PlaybackServiceGate.check()
                 val response = http.fetchText(request, if (publicNetflix) 6L * 1024 * 1024 else 1024L * 1024)
-                if (!publicNetflix) PlaybackServiceGate.checkResponse(response.code, response.body, response.header("Retry-After"), url.toString())
+                if (!publicNetflix) {
+                    // An unsigned request may get a HTTP 200 rejection clip while
+                    // the normal issued-playlist route remains available. This
+                    // probe's rejection is not proof of service-wide throttling.
+                    val waitingProbe = unsignedProbe && response.code in 200..299 &&
+                        (StreamSessionPolicy.isWaitingVideo(response.body) || StreamSessionPolicy.isWaitingVideo(url.toString()))
+                    val explicitLimit = Regex("\\brate[_ -]?limit(?:ed)?\\b|too many requests|limit exceeded", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(response.body)
+                    if (waitingProbe && !explicitLimit && response.header("Retry-After") == null)
+                        throw IOException("Unauthenticated HLS probe unavailable")
+                    PlaybackServiceGate.checkResponse(response.code, response.body, response.header("Retry-After"), url.toString())
+                }
                 response
             }
             return if (url.host == base.host && !publicNetflix) PlaybackServiceGate.request(block = execute) else execute()
@@ -243,7 +257,11 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
                             .addQueryParameter("phrase", title).build()
                         val ids = try {
                             val response = text(searchUrl, publicNetflix = true)
-                            if (response.isSuccessful) PublicIdentityDiscovery.primeSearchIds(response.body, titleAliases.toList(), year, type) else emptyList()
+                            if (response.isSuccessful) {
+                                PublicIdentityDiscovery.primeSearchIds(response.body, titleAliases.toList(), year, type)
+                            } else {
+                                emptyList()
+                            }
                         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                         catch (_: IOException) { emptyList() }
                         DiscoveryBatch(ids, false)
@@ -434,26 +452,28 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
             }
             val cachedSeason = catalog?.episodeCatalog?.seasons(base.toString(), ott, showId, System.currentTimeMillis())?.get(season)
                 ?: if (ott != "hs") catalog?.seasonCandidates(base.toString(), ott, showId, titleAliases.toList())?.get(season) else null
-            val seasonId = cachedSeason ?: if (ott == "nf") {
-                publicSeasons(showId, title, season)[season] ?: throw IOException("Requested season is unavailable")
-            } else if (ott == "pv" && showId == PRIME_MR_ROBOT.first()) {
-                PRIME_MR_ROBOT.getOrNull(season - 1) ?: throw IOException("Requested season is unavailable")
-            } else if (ott == "pv") {
-                val html = publicPages[showId to ott] ?: text("https://www.primevideo.com/detail/$showId".toHttpUrl(), publicNetflix = true).also(::requirePublicSuccess).body
-                val seasons = parsePrimeSeasons(html, titleAliases.firstOrNull { PublicProviderIdentity.matchesPrime(html, it, year = "", type = "tv", typedMapping = true) } ?: title, showId)
-                catalog?.episodeCatalog?.saveSeasons(base.toString(), ott, showId, seasons, System.currentTimeMillis(), "official-public")
-                seasons[season] ?: throw IOException("Requested Prime season is unavailable in the public catalog")
-            } else {
-                val data = providerDetails[showId to ott] ?: (json("${prefix(ott)}/post.php", "id" to showId) as? JSONObject) ?: throw IOException("Season catalog unavailable")
-                if (titleAliases.none { PublicProviderIdentity.matches(data, it, "", "tv", typedMapping = true) }) throw IOException("Provider show identity mismatch")
-                val directRows = data.optJSONArray("episodes") ?: JSONArray()
-                cacheLabelledEpisodes(showId, ott, season, directRows)
-                findEpisode(directRows, season, episode, requireSeasonLabel = true)?.let { return it }
-                val rows = objects(data.optJSONArray("season") ?: data.optJSONArray("seasons") ?: JSONArray())
-                    .filter { number(field(it, "s", "season", "name", "title")) == season }
-                rows.singleOrNull()?.let(::id)?.takeIf(String::isNotBlank)?.also { id ->
-                    catalog?.episodeCatalog?.saveSeasons(base.toString(), ott, showId, mapOf(season to id), System.currentTimeMillis(), "provider-public")
-                } ?: throw IOException("Requested season ID is unavailable")
+            val seasonId = cachedSeason ?: run {
+                if (ott == "nf") {
+                    publicSeasons(showId, title, season)[season] ?: throw IOException("Requested season is unavailable")
+                } else if (ott == "pv" && showId == PRIME_MR_ROBOT.first()) {
+                    PRIME_MR_ROBOT.getOrNull(season - 1) ?: throw IOException("Requested season is unavailable")
+                } else if (ott == "pv") {
+                    val html = publicPages[showId to ott] ?: text("https://www.primevideo.com/detail/$showId".toHttpUrl(), publicNetflix = true).also(::requirePublicSuccess).body
+                    val seasons = parsePrimeSeasons(html, titleAliases.firstOrNull { PublicProviderIdentity.matchesPrime(html, it, year = "", type = "tv", typedMapping = true) } ?: title, showId)
+                    catalog?.episodeCatalog?.saveSeasons(base.toString(), ott, showId, seasons, System.currentTimeMillis(), "official-public")
+                    seasons[season] ?: throw IOException("Requested Prime season is unavailable in the public catalog")
+                } else {
+                    val data = providerDetails[showId to ott] ?: (json("${prefix(ott)}/post.php", "id" to showId) as? JSONObject) ?: throw IOException("Season catalog unavailable")
+                    if (titleAliases.none { PublicProviderIdentity.matches(data, it, "", "tv", typedMapping = true) }) throw IOException("Provider show identity mismatch")
+                    val directRows = data.optJSONArray("episodes") ?: JSONArray()
+                    cacheLabelledEpisodes(showId, ott, season, directRows)
+                    findEpisode(directRows, season, episode, requireSeasonLabel = true)?.let { return it }
+                    val rows = objects(data.optJSONArray("season") ?: data.optJSONArray("seasons") ?: JSONArray())
+                        .filter { number(field(it, "s", "season", "name", "title")) == season }
+                    rows.singleOrNull()?.let(::id)?.takeIf(String::isNotBlank)?.also { id ->
+                        catalog?.episodeCatalog?.saveSeasons(base.toString(), ott, showId, mapOf(season to id), System.currentTimeMillis(), "provider-public")
+                    } ?: throw IOException("Requested season ID is unavailable")
+                }
             }
             for (page in 1..5) {
                 val params = mutableListOf("s" to seasonId, "series" to showId)
@@ -532,18 +552,23 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
         private suspend fun earlyRoutes(contentId: String, ott: String, season: Int, episode: Int): PublicPlaybackResult? {
             if (ott !in setOf("hs", "nf", "pv") || !contentId.matches(Regex("[A-Za-z0-9]{5,40}"))) return null
             // Never retry the same provider after its 429, even when identity fallback continues.
-            if (!primaryRateLimited && primaryAttempted.add(contentId to ott)) {
-                try { return newTv.resolve(contentId, ott, season, episode) }
+            val primaryBudget = probeBudget.primaryMs()
+            if (primaryBudget > 0L && !primaryRateLimited && primaryAttempted.add(contentId to ott)) {
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(primaryBudget) { newTv.resolve(contentId, ott, season, episode) }
+                        ?.let { return it }
+                }
                 catch (rate: PlaybackRateLimitedException) { primaryRateLimited = true }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (_: IOException) { }
             }
-            if (!directAttempted.add(contentId to ott)) return null
+            val directBudget = probeBudget.directMs()
+            if (directBudget <= 0L || !directAttempted.add(contentId to ott)) return null
             PlaybackServiceGate.check()
             val direct = base.newBuilder().encodedPath("${prefix(ott)}/hls/$contentId.m3u8").query(null).build()
             return try {
-                val expiry = kotlinx.coroutines.withTimeoutOrNull(6_000L) {
-                    CookieFreeManifestValidator { url, _ -> text(url) }.validate(direct, mediaHeaders)
+                val expiry = kotlinx.coroutines.withTimeoutOrNull(directBudget) {
+                    CookieFreeManifestValidator { url, _ -> text(url, unsignedProbe = true) }.validate(direct, mediaHeaders)
                 } ?: throw IOException("Direct playback timed out")
                 PublicPlaybackResult(direct.toString(), mediaHeaders, emptyList(), contentId, ott, expiry, PlaybackRoute.DIRECT)
             } catch (rate: PlaybackRateLimitedException) { throw rate }
