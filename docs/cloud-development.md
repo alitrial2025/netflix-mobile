@@ -1,21 +1,22 @@
 # Cloud Android development
 
-Use the existing checkout; do not create a worktree during environment onboarding. The prepared cloud toolchain is Android SDK 35, build tools 34/35, full Temurin Java 21 and checksum-verified Gradle 8.9.
+Use the existing `/workspace/netflix-mobile` checkout. The retained cloud toolchain is Oracle JDK 21, the project's Gradle 8.9 wrapper, Android platform 35 and build tools 34/35. Activate it in each shell:
 
 ```bash
-source /workspace/cloud-setup/env.sh
+source /workspace/.netflix-tv-tools/activate.sh
+cd /workspace/netflix-mobile
 ./gradlew --no-daemon --max-workers=2 :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+node --test tools/public-playback/*.test.mjs tools/cdn-audit/*.test.mjs
 ```
 
-Run the two repositories sequentially. Do not run Gradle and a software emulator together: this environment has four CPUs and no `/dev/kvm`. Cloud-only proxy, certificate authority, Maven mirror and Robolectric configuration live under `/workspace/cloud-setup`, outside Git. GitHub Actions validates debug builds, unit tests and lint and uploads APKs/reports for review.
+Run Gradle builds for the TV and mobile checkouts sequentially. This machine has four CPUs and no `/dev/kvm`; stop the software Android emulator before building. Tooling, caches, proxy trust configuration and runtime logs belong outside Git under `/workspace/.netflix-tv-tools`. Keep TLS and artifact verification enabled. Robolectric/Compose tests exercise Android behavior headlessly; they do not establish physical-device decoding or performance.
 
-Release builds require the original signing keystore and ignored signing properties. Never substitute the cloud debug key for the released app key. A blank `app/src/main/assets/update-gate.json` disables the retired update endpoint until a replacement HTTPS site is selected. Local update fixtures must override debug assets outside the checkout; do not commit local certificate keys or publish debug APKs through the release publisher.
+GitHub Actions runs debug builds, unit tests, lint and isolated Firestore membership/discovery rules tests before producing a signed release. Release signing uses the existing repository secrets. Never substitute a debug key or commit signing files. Production APKs must retain certificate SHA-256 `3cea049428d723e0fd69d7c9c00cdb35f08b3661468c1d4679a8ebefae034255` so existing users can upgrade while preserving accounts and downloads. Uninstalling is unnecessary and would remove app-private data.
 
-The mobile regression suite covers independent offline catalog failures, cancellation, catalog cache recovery, episode progress/intro boundaries, HTTP Range validation, truncated transfers, unsafe HLS rejection and profile download references. Native Android UI tests exercise the redesigned Home/profile picker and the offline downloads action using deterministic TMDB poster/logo fixtures, which are excluded from the APK.
+Release publication uses the TV repository's `tools/update-gate/publish-update.mjs` and the existing website at `https://npro-app.vercel.app/`. Follow `docs/update-gate.md`; retain every previous immutable APK and the site's payment backend. Update checks run at entry, defer offline and do not interrupt an admitted player. See `docs/mobile-offline-recovery.md` for verified entitlement recovery and its account, device, revocation and expiry rules.
 
-Release verification still needs physical-device offline startup and playback checks, a real membership/account, notification and unknown-source installation permissions, release signing, and a replacement HTTPS update URL. Download transfers still need a durable background execution/restore design before promising survival across process termination. Encrypted HLS, fragmented MP4, discontinuities and byte-range HLS currently fail explicitly rather than produce a corrupted download; offline multi-track audio/subtitles need a separate supported-format implementation. Some storage and lookup paths still use raw numeric TMDB IDs; cross-type collisions need a typed-identity migration before release. Remaining lint warnings and device performance are not resolved by a passing build.
+The download regression suite covers durable background work, account/profile ownership, transfer checkpoints, renewed links, integrity checks, local manifests and supported audio/subtitle formats. Generated local media lives in `app/src/test/resources/offline-hls`; it contains no provider content. Consult current code and tests for supported formats rather than assuming an arbitrary HLS playlist can be downloaded.
 
-Cloud validation: all 41 tests passed, debug APK built and Android lint passed. The host-rendered previews are in `docs/design-preview`. API 28 software-emulator checks also confirmed offline onboarding, guest Home and the downloads action with no active network and no fatal exception; runtime screenshots are in `docs/emulator-checks`. Signed-in offline playback and process-death restoration still need validation.
+The older screenshots in `docs/emulator-checks` verify offline guest onboarding/Home/download navigation only. They do not verify an authenticated paid account, downloaded playback, upgrade retention or process restart. Any newer runtime checks must record their exact APK, fixtures, connectivity state and results separately. A component test of proof restoration or local decoding is not a full signed-in application test.
 
-
-The October 2026 review builds use the new NetflixPro signing key supplied locally in ignored app/release.jks and app/release-signing.properties. They require uninstalling the previous differently signed APK once. Future release builds must retain this same new key. Signing files are private and must never be committed to GitHub.
+Before publishing a new release, run the relevant Node and Android checks, verify signed CI output and the original certificate, and increment the version. After publication verify the actual public APK bytes, manifest, signature and preservation of older downloads. Keep physical-phone upgrade, offline cold launch, extended offline playback and Wi-Fi loss/recovery distinct from automated checks until those scenarios have been exercised on a real device.

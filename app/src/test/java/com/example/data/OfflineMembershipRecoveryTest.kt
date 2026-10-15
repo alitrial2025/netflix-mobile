@@ -34,6 +34,7 @@ class OfflineMembershipRecoveryTest {
         var subscriptionReads = 0
         var bindingReads = 0
         var afterSubscription: () -> Unit = {}
+        var afterBinding: () -> Unit = {}
         override suspend fun subscription(uid: String): CachedOfflineSubscription? {
             assertEquals("account-a", uid)
             subscriptionReads++
@@ -43,6 +44,7 @@ class OfflineMembershipRecoveryTest {
         override suspend fun binding(uid: String): CachedOfflineBinding? {
             assertEquals("account-a", uid)
             bindingReads++
+            afterBinding()
             return cachedBinding
         }
     }
@@ -158,5 +160,76 @@ class OfflineMembershipRecoveryTest {
             assertFalse(store.isMigrationBlocked("account-a", "phone-a"))
             assertFalse(store.isMigrationBlocked("account-b", "phone-a"))
         }
+    }
+
+    @Test fun workerRevocationDuringCacheReadsCannotResurrectStoredOrLegacyMembership() = runBlocking {
+        for (existingProof in listOf(false, true)) {
+            store.clear()
+            // Fresh server verification is the only operation allowed to clear the previous marker.
+            if (existingProof) store.save(entry(), serverConfirmed = true)
+            else {
+                store.save(entry(), serverConfirmed = true)
+                store.clear()
+            }
+            val reader = CachedReader(cached()).apply {
+                afterSubscription = { store.blockMigration("account-a", "phone-a") }
+            }
+            assertNull(recover(reader))
+            assertTrue(store.isMigrationBlocked("account-a", "phone-a"))
+            assertNull(store.load("account-a", "phone-a", now))
+        }
+    }
+
+    @Test fun aNewerWorkerCheckpointWinsOverBothStaleCacheActivationAndDenial() = runBlocking {
+        val newer = entry(subscription.copy(planId = "plan_standard", planName = "Standard"), 200L)
+        for (cachedStatus in listOf("ACTIVE", "SUSPENDED")) {
+            store.save(entry(), serverConfirmed = true)
+            val reader = CachedReader(cached(subscription.copy(status = cachedStatus), 300L)).apply {
+                afterSubscription = { store.save(newer, serverConfirmed = true) }
+            }
+            assertEquals(newer, recover(reader))
+            assertEquals(newer, store.load("account-a", "phone-a", now))
+            assertFalse(store.isMigrationBlocked("account-a", "phone-a"))
+        }
+    }
+
+    @Test fun workerRevocationDuringSingleDeviceBindingReadCannotGrantThatDevice() = runBlocking {
+        val mobile = subscription.copy(planId = "plan_mobile", planName = "Mobile")
+        val reader = CachedReader(cached(mobile), CachedOfflineBinding("account-a", true, false, "phone-a")).apply {
+            afterBinding = { store.blockMigration("account-a", "phone-a") }
+        }
+        assertNull(recover(reader))
+        assertEquals(1, reader.bindingReads)
+        assertTrue(store.isMigrationBlocked("account-a", "phone-a"))
+        assertNull(store.load("account-a", "phone-a", now))
+    }
+
+    @Test fun supersededEntryExpectedTierCannotRevokeANewerWorkerTierBeforeOrDuringCacheRecovery() = runBlocking {
+        val newer = entry(subscription.copy(planId = "plan_standard", planName = "Standard"), 200L)
+        for (workerFinishesBeforeCacheRead in listOf(false, true)) {
+            store.save(entry(), serverConfirmed = true)
+            val entryGeneration = store.checkpointGeneration()
+            val reader = CachedReader(cached(subscription.copy(status = "SUSPENDED"), 300L))
+            if (workerFinishesBeforeCacheRead) store.save(newer, serverConfirmed = true)
+            else reader.afterSubscription = { store.save(newer, serverConfirmed = true) }
+
+            val checkpoint = recoverOfflineMembershipCheckpoint("account-a", "phone-a", now, subscription,
+                store, reader, Epoch(), expectedCheckpointGeneration = entryGeneration)
+
+            assertEquals(newer, checkpoint.entry)
+            assertEquals(newer, store.withCheckpoint(checkpoint, "account-a", "phone-a", now, { true }) { it })
+            assertEquals(newer, store.load("account-a", "phone-a", now))
+            assertFalse(store.isMigrationBlocked("account-a", "phone-a"))
+            assertEquals(if (workerFinishesBeforeCacheRead) 0 else 1, reader.subscriptionReads)
+        }
+    }
+
+    @Test fun currentEntryExpectedTierStillRejectsAMismatchedCachedMembership() = runBlocking {
+        store.save(entry(), serverConfirmed = true)
+        val checkpoint = recoverOfflineMembershipCheckpoint("account-a", "phone-a", now,
+            subscription.copy(planId = "plan_mobile"), store, CachedReader(cached()), Epoch(),
+            expectedCheckpointGeneration = store.checkpointGeneration())
+        assertNull(checkpoint.entry)
+        assertTrue(store.isMigrationBlocked("account-a", "phone-a"))
     }
 }

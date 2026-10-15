@@ -37,6 +37,7 @@ object DeviceAccessGuard {
     private data class Confirmation(val proof: MembershipProof, val snapshot: com.google.firebase.firestore.DocumentSnapshot?)
     private val confirmationState = AccessSessionState<Confirmation>()
     private val confirmationMutex = Mutex()
+    private val downloadCheckpointMutex = Mutex()
 
     fun deviceId(context: Context): String {
         val prefs = context.getSharedPreferences("device_access", Context.MODE_PRIVATE)
@@ -61,6 +62,45 @@ object DeviceAccessGuard {
     fun isConfirmed(uid: String, plan: String, expiry: Long, status: String): Boolean {
         val proof = confirmationState.snapshot().value?.proof ?: return false
         return proof.matches(uid, proof.device, plan, expiry, status, SubscriptionTime.now())
+    }
+
+    /** A worker may outlive app entry, so its fresh authorization also saves offline membership. */
+    internal suspend fun confirmDownload(context: Context): com.google.firebase.firestore.DocumentSnapshot = downloadCheckpointMutex.withLock {
+        val auth = FirebaseAuth.getInstance()
+        val uid = auth.currentUser?.takeUnless { it.isAnonymous }?.uid ?: throw MembershipCheckException()
+        val device = deviceId(context)
+        var confirmedGeneration: Long? = null
+        verifyDownloadMembershipAndCheckpoint(uid, device, OfflineEntryProofStore.get(context), SubscriptionTime::now,
+            isCurrent = { auth.currentUser?.uid == uid }, onDenial = { clear() },
+            onConfirmed = { snapshot, entry ->
+                // Entry may have restored an older proof after confirm released its mutex.
+                // Publish this verified result with its durable checkpoint under the store lock.
+                confirmedGeneration?.let { generation ->
+                    confirmationState.storeIfCurrent(generation, Confirmation(entry.proof, snapshot)) {
+                        auth.currentUser?.uid == uid
+                    }
+                }
+            }) {
+            // The helper acquired the shared verifier mutex before this transaction starts.
+            val generation = confirmationState.snapshot().generation
+            confirmedGeneration = generation
+            val snapshot = confirm(context, tv = false, forceRefresh = true)
+            if (confirmationState.snapshot().generation != generation) throw MembershipCheckException()
+            if (snapshot.metadata.hasPendingWrites()) throw MembershipCheckException()
+            val subscription = com.example.data.model.UserSubscription(
+                status = snapshot.getString("status") ?: "NONE",
+                planId = snapshot.getString("planId") ?: "plan_guest",
+                planName = snapshot.getString("planName") ?: "Guest",
+                amount = (snapshot.getLong("amount") ?: 0L).toInt(),
+                currency = snapshot.getString("currency") ?: "KES",
+                paymentReference = snapshot.getString("paymentReference") ?: "",
+                mpesaReceipt = snapshot.getString("mpesaReceipt") ?: "",
+                subscribedAt = snapshot.getLong("subscribedAt") ?: 0L,
+                expiresAt = snapshot.getLong("expiresAt") ?: 0L)
+            val entry = OfflineEntryProof(MembershipProof(uid, device, subscription.planId, subscription.expiresAt,
+                subscription.status), subscription, snapshot.getTimestamp("updatedAt")?.toDate()?.time ?: 0L)
+            snapshot to entry
+        }
     }
 
     suspend fun confirm(context: Context, tv: Boolean, forceRefresh: Boolean = false): com.google.firebase.firestore.DocumentSnapshot {

@@ -101,7 +101,7 @@ class FirebaseSyncManager(private val context: Context) {
     private val entryStateLock = Any()
     private var entryGeneration = 0L
     private val admission = EntrySessionAdmission()
-    private val offlineEntryProofs = OfflineEntryProofStore(java.io.File(context.noBackupFilesDir, "verified-entry.json"))
+    private val offlineEntryProofs = OfflineEntryProofStore.get(context)
     private val _onlineEntryReady = MutableStateFlow(false)
     val onlineEntryReady: StateFlow<Boolean> = _onlineEntryReady.asStateFlow()
     @Volatile private var offlineLibraryOwner: Pair<String, String>? = null
@@ -523,20 +523,27 @@ class FirebaseSyncManager(private val context: Context) {
         fun ensureCurrentEntry() {
             if (getUserId() != owner || entryGeneration != attempt) throw MembershipCheckException()
         }
-        var verifiedEntryProof: OfflineEntryProof? = null
-        suspend fun restoreOfflineEntry(): com.example.data.model.UserSubscription? {
-            val cached = verifiedEntryProof ?: recoverOfflineMembership(owner, attempt, expected) ?: return null
+        val device = DeviceAccessGuard.deviceId(context)
+        var offlineCheckpointGeneration = offlineEntryProofs.checkpointGeneration()
+        var verifiedEntryProof: OfflineMembershipCheckpoint? = null
+        fun applyOfflineCheckpoint(checkpoint: OfflineMembershipCheckpoint): com.example.data.model.UserSubscription? =
             synchronized(entryStateLock) {
                 ensureCurrentEntry()
-                if (!DeviceAccessGuard.restoreOfflineConfirmation(cached.proof)) return null
-                admission.admit(owner, cached.proof.device)
-                offlineLibraryOwner = owner to cached.proof.device
-                _onlineEntryReady.value = false
-                _entryError.value = null
-                startEntrySessionHeartbeat(owner, attempt)
-                _confirmedEntrySubscription.value = ConfirmedEntrySubscription(owner, attempt, cached.subscription)
+                offlineEntryProofs.withCheckpoint(checkpoint, owner, device, SubscriptionTime.now(),
+                    isCurrent = { getUserId() == owner && entryGeneration == attempt }) { cached ->
+                    if (!DeviceAccessGuard.restoreOfflineConfirmation(cached.proof)) return@withCheckpoint null
+                    admission.admit(owner, cached.proof.device)
+                    offlineLibraryOwner = owner to cached.proof.device
+                    _onlineEntryReady.value = false
+                    _entryError.value = null
+                    startEntrySessionHeartbeat(owner, attempt)
+                    _confirmedEntrySubscription.value = ConfirmedEntrySubscription(owner, attempt, cached.subscription)
+                    cached.subscription
+                }
             }
-            return cached.subscription
+        suspend fun restoreOfflineEntry(): com.example.data.model.UserSubscription? {
+            verifiedEntryProof?.let { checkpoint -> applyOfflineCheckpoint(checkpoint)?.let { return it } }
+            return applyOfflineCheckpoint(recoverOfflineMembership(owner, attempt, expected, offlineCheckpointGeneration))
         }
         fun enterLocalLibrary(): com.example.data.model.UserSubscription {
             synchronized(entryStateLock) {
@@ -554,46 +561,59 @@ class FirebaseSyncManager(private val context: Context) {
         }
         if (!hasValidatedNetwork()) return restoreOfflineEntry() ?: enterLocalLibrary()
         try {
-            val forceRefresh = !hasOnlineEntrySession() ||
-                (expected != null && !DeviceAccessGuard.isConfirmed(owner, expected.planId, expected.expiresAt, expected.status))
-            val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
-            synchronized(entryStateLock) { ensureCurrentEntry() }
-            val subscription = subscriptionFrom(snapshot)
-            val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
-            if (subscription.isActive) {
-                verifiedEntryProof = OfflineEntryProof(MembershipProof(owner, DeviceAccessGuard.deviceId(context),
-                    subscription.planId, subscription.expiresAt, subscription.status), subscription, serverVersion ?: 0L)
-            }
-            if (serverVersion != null && (confirmedEntryVersion?.first != owner || serverVersion >= confirmedEntryVersion!!.second)) {
-                confirmedEntryVersion = owner to serverVersion
-            }
-            if (subscription.isActive) {
-                synchronized(entryStateLock) {
-                    ensureCurrentEntry()
-                    // Offline authorization never depends on online concurrent-screen availability.
-                    persistOfflineEntry(owner, subscription, serverVersion ?: 0L)
+            val subscription = offlineEntryProofs.withServerVerification {
+                // Waiting for another verifier must not make this newer transaction look stale.
+                offlineCheckpointGeneration = offlineEntryProofs.checkpointGeneration()
+                val forceRefresh = !hasOnlineEntrySession() ||
+                    (expected != null && !DeviceAccessGuard.isConfirmed(owner, expected.planId, expected.expiresAt, expected.status))
+                val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
+                synchronized(entryStateLock) { ensureCurrentEntry() }
+                val subscription = subscriptionFrom(snapshot)
+                val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
+                if (serverVersion != null && (confirmedEntryVersion?.first != owner || serverVersion >= confirmedEntryVersion!!.second)) {
+                    confirmedEntryVersion = owner to serverVersion
                 }
-                if (!hasOnlineEntrySession()) {
-                    ScreenLease.acquire(context, tv = false)
+                if (subscription.isActive) {
                     synchronized(entryStateLock) {
                         ensureCurrentEntry()
-                        admission.admit(owner, DeviceAccessGuard.deviceId(context))
+                        // Offline authorization never depends on online concurrent-screen availability.
+                        verifiedEntryProof = persistOfflineEntry(owner, subscription, serverVersion ?: 0L, offlineCheckpointGeneration) {
+                            getUserId() == owner && entryGeneration == attempt
+                        }
+                        if (verifiedEntryProof == null) {
+                            // A worker or newer entry may have confirmed a different plan/denial meanwhile.
+                            verifiedEntryProof = null
+                            throw MembershipCheckException()
+                        }
+                        offlineCheckpointGeneration = verifiedEntryProof!!.generation
+                    }
+                } else {
+                    synchronized(entryStateLock) {
+                        ensureCurrentEntry()
+                        if (!offlineEntryProofs.blockIfCurrent(offlineCheckpointGeneration, owner, device,
+                            isCurrent = { getUserId() == owner && entryGeneration == attempt })) throw MembershipCheckException()
+                        endEntrySession()
                     }
                 }
-                synchronized(entryStateLock) {
-                    ensureCurrentEntry()
-                    _onlineEntryReady.value = true
-                    offlineLibraryOwner = null
-                    admissionRetryAfter = 0L
-                    startEntrySessionHeartbeat(owner, attempt)
-                    _entryError.value = null
-                    _confirmedEntrySubscription.value = ConfirmedEntrySubscription(owner, attempt, subscription)
+                subscription
+            }
+            if (subscription.isActive) {
+                if (!hasOnlineEntrySession()) {
+                    ScreenLease.acquire(context, tv = false)
                 }
-            } else {
                 synchronized(entryStateLock) {
                     ensureCurrentEntry()
-                    invalidateOfflineMembership(owner)
-                    endEntrySession()
+                    // A worker may have revoked/replaced membership while the screen claim awaited.
+                    offlineEntryProofs.withCheckpoint(verifiedEntryProof!!, owner, device, SubscriptionTime.now(),
+                        isCurrent = { getUserId() == owner && entryGeneration == attempt }) {
+                        admission.admit(owner, device)
+                        _onlineEntryReady.value = true
+                        offlineLibraryOwner = null
+                        admissionRetryAfter = 0L
+                        startEntrySessionHeartbeat(owner, attempt)
+                        _entryError.value = null
+                        _confirmedEntrySubscription.value = ConfirmedEntrySubscription(owner, attempt, subscription)
+                    } ?: throw MembershipCheckException()
                 }
             }
             return subscription
@@ -608,11 +628,19 @@ class FirebaseSyncManager(private val context: Context) {
                 }
                 return restoreOfflineEntry() ?: enterLocalLibrary()
             } else if (failure.isAuthoritativeAccessFailure()) {
-                synchronized(entryStateLock) {
+                val invalidated = synchronized(entryStateLock) {
                     ensureCurrentEntry()
-                    invalidateOfflineMembership(owner)
-                    DeviceAccessGuard.clear()
-                    endEntrySession(failure.accessFailureMessage())
+                    offlineEntryProofs.blockIfCurrent(offlineCheckpointGeneration, owner, device,
+                        isCurrent = { getUserId() == owner && entryGeneration == attempt }).also { applied ->
+                        if (applied) {
+                            DeviceAccessGuard.clear()
+                            endEntrySession(failure.accessFailureMessage())
+                        }
+                    }
+                }
+                if (!invalidated) {
+                    verifiedEntryProof = null
+                    return restoreOfflineEntry() ?: enterLocalLibrary()
                 }
             } else {
                 synchronized(entryStateLock) {
@@ -625,14 +653,16 @@ class FirebaseSyncManager(private val context: Context) {
         }
     }
 
-    private fun persistOfflineEntry(owner: String, subscription: com.example.data.model.UserSubscription, serverVersion: Long = 0L) {
+    private fun persistOfflineEntry(owner: String, subscription: com.example.data.model.UserSubscription, serverVersion: Long,
+        expectedGeneration: Long, isCurrent: () -> Boolean): OfflineMembershipCheckpoint? {
         val proof = MembershipProof(owner, DeviceAccessGuard.deviceId(context), subscription.planId, subscription.expiresAt, subscription.status)
-        runCatching { offlineEntryProofs.save(OfflineEntryProof(proof, subscription, serverVersion), serverConfirmed = true) }
-            .onFailure { Log.w("FirebaseSync", "Offline membership checkpoint could not be saved", it) }
+        return offlineEntryProofs.checkpointEntryServerResult(expectedGeneration, OfflineEntryProof(proof, subscription, serverVersion),
+            SubscriptionTime.now(), isCurrent, onStorageFailure = { Log.w("FirebaseSync", "Offline membership checkpoint could not be saved", it) })
     }
 
     /** Cache-only reads support existing installs without making offline startup contact Firestore. */
-    private suspend fun recoverOfflineMembership(owner: String, attempt: Long, expected: com.example.data.model.UserSubscription?): OfflineEntryProof? {
+    private suspend fun recoverOfflineMembership(owner: String, attempt: Long, expected: com.example.data.model.UserSubscription?,
+        expectedCheckpointGeneration: Long): OfflineMembershipCheckpoint {
         val epoch = object : OfflineEntryEpoch {
             override fun ensureCurrent() = synchronized(entryStateLock) {
                 if (getUserId() != owner || entryGeneration != attempt) throw MembershipCheckException()
@@ -661,8 +691,9 @@ class FirebaseSyncManager(private val context: Context) {
                 return CachedOfflineBinding(uid, snapshot.exists(), snapshot.metadata.hasPendingWrites(), snapshot.getString("deviceId"))
             }
         }
-        return recoverOfflineMembershipProof(owner, DeviceAccessGuard.deviceId(context), SubscriptionTime.now(), expected,
-            offlineEntryProofs, reader, epoch, onInvalidation = { DeviceAccessGuard.clear() })
+        return recoverOfflineMembershipCheckpoint(owner, DeviceAccessGuard.deviceId(context), SubscriptionTime.now(), expected,
+            offlineEntryProofs, reader, epoch, onInvalidation = { DeviceAccessGuard.clear() },
+            expectedCheckpointGeneration = expectedCheckpointGeneration)
     }
 
     fun listenToSubscription(onSubscriptionLoaded: (com.example.data.model.UserSubscription) -> Unit) {

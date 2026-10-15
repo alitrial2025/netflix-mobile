@@ -16,6 +16,7 @@ import com.example.R
 import com.example.data.CatalogData
 import com.example.data.NetMirrorResolver
 import com.example.data.AppCookieJar
+import com.example.data.isAuthoritativeAccessFailure
 import com.example.data.local.DownloadEntity
 import com.example.data.model.Episode
 import com.example.data.model.MediaItem
@@ -24,7 +25,6 @@ import com.example.data.repository.NetflixRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -323,27 +323,16 @@ class NetflixDownloadManager(
         val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
         if (user == null || user.isAnonymous || user.uid != accountId)
             throw DownloadMembershipException("Sign in to the account that started this download.")
-        val snapshot = try {
-            com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                .collection("users").document(accountId).collection("subscription").document("current")
-                .get(com.google.firebase.firestore.Source.SERVER).await()
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: com.google.firebase.firestore.FirebaseFirestoreException) {
-            if (error.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED)
-                throw DownloadMembershipException("Your membership could not be confirmed. Sign in again or contact support.")
-            throw IOException("Could not refresh membership", error)
+        val checked = try { com.example.data.DeviceAccessGuard.confirmDownload(application) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            if (error.isAuthoritativeAccessFailure())
+                throw DownloadMembershipException(error.message ?: "This device is not authorized for downloads.")
+            throw IOException("Could not confirm membership and save offline access", error)
         }
         currentCoroutineContext().ensureActive()
         if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid != accountId)
             throw DownloadMembershipException("Your account changed. Sign in again to continue.")
-        if (snapshot.metadata.hasPendingWrites()) throw IOException("Membership confirmation is pending")
-        val plan = com.example.data.model.SubscriptionPlans.PLANS.firstOrNull { it.id == snapshot.getString("planId") }
-        if (plan == null || !com.example.data.RenewalPolicy.grantsAccess(snapshot.getString("status").orEmpty(),
-            snapshot.getLong("expiresAt") ?: 0L, com.example.data.SubscriptionTime.now()))
-            throw DownloadMembershipException("Renew your membership to continue this download.")
-        val checked = try { com.example.data.DeviceAccessGuard.confirm(application, tv = false) }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { throw DownloadMembershipException(error.message ?: "This device is not authorized for downloads.") }
         val confirmedPlan = com.example.data.model.SubscriptionPlans.PLANS.firstOrNull { it.id == checked.getString("planId") }
         if (confirmedPlan == null || !com.example.data.RenewalPolicy.grantsAccess(checked.getString("status").orEmpty(),
             checked.getLong("expiresAt") ?: 0L, com.example.data.SubscriptionTime.now()))
