@@ -34,7 +34,7 @@ internal fun Throwable.accessFailureMessage(): String = generateSequence(this) {
 
 /** Login-device binding is separate from concurrent playback slots. Sign-out does not release a binding. */
 object DeviceAccessGuard {
-    private data class Confirmation(val proof: MembershipProof, val snapshot: com.google.firebase.firestore.DocumentSnapshot)
+    private data class Confirmation(val proof: MembershipProof, val snapshot: com.google.firebase.firestore.DocumentSnapshot?)
     private val confirmationState = AccessSessionState<Confirmation>()
     private val confirmationMutex = Mutex()
 
@@ -52,6 +52,12 @@ object DeviceAccessGuard {
     }
 
     fun clear() { confirmationState.clear() }
+
+    /** Only a previously server-admitted, installation-scoped record may restore offline access. */
+    internal fun restoreOfflineConfirmation(proof: MembershipProof): Boolean {
+        val current = confirmationState.snapshot()
+        return confirmationState.storeIfCurrent(current.generation, Confirmation(proof, null))
+    }
     fun isConfirmed(uid: String, plan: String, expiry: Long, status: String): Boolean {
         val proof = confirmationState.snapshot().value?.proof ?: return false
         return proof.matches(uid, proof.device, plan, expiry, status, SubscriptionTime.now())
@@ -69,7 +75,7 @@ object DeviceAccessGuard {
             if (current.generation != requestGeneration || auth.currentUser?.uid != user.uid) throw MembershipCheckException()
             val previous = current.value
             val proof = previous?.proof
-            if (!forceRefresh && proof?.matches(user.uid, device, proof.plan, proof.expiry, proof.status, SubscriptionTime.now()) == true) {
+            if (!forceRefresh && previous?.snapshot != null && proof?.matches(user.uid, device, proof.plan, proof.expiry, proof.status, SubscriptionTime.now()) == true) {
                 return@withLock previous.snapshot
             }
             val db = FirebaseFirestore.getInstance()

@@ -9,6 +9,8 @@ import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -26,11 +28,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.SSLException
 import kotlin.coroutines.coroutineContext
 
 enum class UpdatePhase { CHECKING, CONTINUE, DOWNLOADING, VERIFYING, READY, PERMISSION, INSTALLING, APPROVAL, ERROR }
@@ -62,21 +66,12 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         context.packageManager.getPackageInfo(context.packageName, 0)
     )
 
-    fun refreshWhenCurrent() {
-        if (_state.value.phase == UpdatePhase.CONTINUE && work?.isActive != true) checkOnLaunch(backgroundCheck = true)
-    }
-
-    private fun checkOnLaunch(backgroundCheck: Boolean = false) {
+    // Check at app entry only. A resume or a timer must never replace active playback
+    // (including downloaded video) with an update screen or a connection error.
+    private fun checkOnLaunch() {
         work?.cancel()
         checkTimeout?.cancel()
-        if (!backgroundCheck) _state.value = UpdateGateState()
-        checkTimeout = viewModelScope.launch {
-            delay(8000L)
-            if (_state.value.phase in listOf(UpdatePhase.CHECKING, UpdatePhase.CONTINUE) && work?.isActive == true) {
-                work?.cancel()
-                fail("Unable to check for updates. Connect to the internet and retry.")
-            }
-        }
+        _state.value = UpdateGateState()
         work = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val source = UpdateRelease.manifestUrl(context) ?: error("Update site not configured")
@@ -85,21 +80,49 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
                     runCatching { UpdateRelease.parse(it, source, context.packageName) }.getOrNull()
                 }
                 if (saved != null && saved.versionCode <= version) clearCompletedDownload()
+                if (!hasValidatedInternet()) {
+                    // Keep the pending release/download/install session for the next online
+                    // app entry. Offline downloads must remain reachable while disconnected.
+                    _state.value = UpdateGateState(UpdatePhase.CONTINUE)
+                    return@launch
+                }
                 if (saved != null && saved.versionCode > version) {
                     _state.value = UpdateGateState(UpdatePhase.CHECKING, saved)
+                }
+                // A timeout can coincide with losing the network. Defer only offline;
+                // a still-online device retains the known mandatory release.
+                checkTimeout = viewModelScope.launch {
+                    delay(8000L)
+                    if (_state.value.phase == UpdatePhase.CHECKING && work?.isActive == true) {
+                        work?.cancel()
+                        when (val decision = UpdateGatePolicy.decide(version, Build.VERSION.SDK_INT, null, saved, online = hasValidatedInternet())) {
+                            UpdateGatePolicy.Decision.Current,
+                            is UpdateGatePolicy.Decision.ContinueOffline -> _state.value = UpdateGateState(UpdatePhase.CONTINUE)
+                            is UpdateGatePolicy.Decision.Required -> {
+                                _state.value = UpdateGateState(UpdatePhase.CHECKING, decision.release)
+                                fail("Unable to download the required update. Connect to the internet and retry.")
+                            }
+                        }
+                    }
                 }
                 val latest = try {
                     UpdateRelease.parse(fetchManifest(source), source, context.packageName)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
+                } catch (security: SSLException) {
+                    throw security
+                } catch (_: IOException) {
                     null
                 }
+                checkTimeout?.cancel()
                 coroutineContext.ensureActive()
                 if (_state.value.phase !in listOf(UpdatePhase.CHECKING, UpdatePhase.CONTINUE)) return@launch
-                when (val decision = UpdateGatePolicy.decide(version, Build.VERSION.SDK_INT, latest, saved)) {
-                    UpdateGatePolicy.Decision.Current -> _state.value = UpdateGateState(UpdatePhase.CONTINUE)
-                    UpdateGatePolicy.Decision.Unavailable -> fail("Unable to check for updates. Connect to the internet and retry.")
+                when (val decision = UpdateGatePolicy.decide(
+                    version, Build.VERSION.SDK_INT, latest, saved,
+                    online = latest != null || hasValidatedInternet()
+                )) {
+                    UpdateGatePolicy.Decision.Current,
+                    is UpdateGatePolicy.Decision.ContinueOffline -> _state.value = UpdateGateState(UpdatePhase.CONTINUE)
                     is UpdateGatePolicy.Decision.Required -> {
                         val release = decision.release
                         // Never reuse a download/session belonging to a different release.
@@ -130,6 +153,14 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private fun hasValidatedInternet(): Boolean {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
     private fun fetchManifest(source: String): String {
         var url = UpdateRelease.secureUrl(source)
         repeat(4) {
@@ -147,7 +178,9 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
                     val target = connection.getHeaderField("Location") ?: error("Missing redirect")
                     url = UpdateRelease.secureUrl(URL(url, target).toString())
                 } else {
-                    require(status == 200)
+                    if (status != 200) {
+                        throw IOException("Update metadata unavailable ($status)")
+                    }
                     require(connection.contentLengthLong <= UpdateRelease.MAX_MANIFEST_BYTES)
                     val bytes = connection.inputStream.use { stream ->
                         stream.readBytesBounded(UpdateRelease.MAX_MANIFEST_BYTES)
@@ -179,6 +212,7 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
     )
 
     private suspend fun startDownload(release: UpdateRelease) {
+        if (deferDownloadWhenOffline()) return
         _state.value = UpdateGateState(UpdatePhase.DOWNLOADING, release, message = "Downloading your update…")
         val destination = downloadFile(release)
         require(destination.parentFile?.mkdirs() == true || destination.parentFile?.isDirectory == true)
@@ -202,7 +236,8 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         monitorDownload(release)
     }
 
-    private suspend fun monitorDownload(release: UpdateRelease) {
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal suspend fun monitorDownload(release: UpdateRelease) {
         try {
             monitorDownloadStatus(release)
         } catch (cancelled: CancellationException) {
@@ -226,6 +261,9 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         _state.value = UpdateGateState(UpdatePhase.DOWNLOADING, release, message = "Resuming your update…")
         while (true) {
             coroutineContext.ensureActive()
+            // DownloadManager may remain PAUSED indefinitely after connectivity drops.
+            // Keep its resumable bytes and required release, but let offline users enter.
+            if (deferDownloadWhenOffline()) return
             val result = downloads.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
                 require(cursor != null && cursor.moveToFirst()) { "Download no longer available" }
                 val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
@@ -250,11 +288,20 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
                 _state.value = UpdateGateState(UpdatePhase.VERIFYING, release, 1f, "Verifying your update…")
                 verifyDownload(release)
                 coroutineContext.ensureActive()
+                // If connectivity disappeared during verification, finish all integrity
+                // checks but defer installation rather than interrupting offline entry.
+                if (deferDownloadWhenOffline()) return
                 _state.value = UpdateGateState(UpdatePhase.READY, release, 1f, "Your update is ready.")
                 return
             }
             delay(800L)
         }
+    }
+
+    private fun deferDownloadWhenOffline(): Boolean {
+        if (hasValidatedInternet()) return false
+        _state.value = UpdateGateState(UpdatePhase.CONTINUE)
+        return true
     }
 
     private suspend fun verifyDownload(release: UpdateRelease) {
@@ -322,10 +369,9 @@ class UpdateGateViewModel(application: Application) : AndroidViewModel(applicati
         }.toSet()
     }
 
-    fun onResume(activity: Activity, checkForUpdates: Boolean = false) {
+    fun onResume(activity: Activity) {
         val owner = activity as? androidx.lifecycle.LifecycleOwner ?: return
         if (!owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
-        if (checkForUpdates) refreshWhenCurrent()
         if (_state.value.phase == UpdatePhase.READY || (_state.value.phase == UpdatePhase.PERMISSION && canInstall())) install(activity)
         if (_state.value.phase == UpdatePhase.APPROVAL && !approvalOpened) openApproval(activity)
     }

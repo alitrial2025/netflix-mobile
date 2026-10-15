@@ -47,8 +47,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.delay
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /** Wraps existing screens without changing their layout. Home starts after the launch check. */
@@ -61,7 +59,7 @@ fun UpdateGateHost(content: @Composable () -> Unit) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(gate, activity, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && activity != null) gate.onResume(activity, checkForUpdates = true)
+            if (event == Lifecycle.Event.ON_RESUME && activity != null) gate.onResume(activity)
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -69,14 +67,6 @@ fun UpdateGateHost(content: @Composable () -> Unit) {
     LaunchedEffect(state.phase, activity) {
         if (activity != null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             gate.onResume(activity)
-        }
-    }
-    LaunchedEffect(gate, lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) {
-                delay(15 * 60 * 1000L)
-                gate.refreshWhenCurrent()
-            }
         }
     }
     if (state.phase != UpdatePhase.CONTINUE) {

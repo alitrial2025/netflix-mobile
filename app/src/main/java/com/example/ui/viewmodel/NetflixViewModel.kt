@@ -153,10 +153,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val prepared = kotlinx.coroutines.withTimeoutOrNull(60_000L) {
                     startupCacheJob?.join()
+                    loadCachedCatalog()
                     val subscription = syncManager.prepareEntrySession()
                     setUserSubscription(subscription)
                     saveStoredSubscription(subscription)
-                    catalogRefreshJob?.join()
+                    awaitCatalogWhileOnline(catalogRefreshJob,
+                        observePlaybackNetwork(getApplication()).map { it.online })
                     if (subscription.isActive && !syncManager.hasAdmittedEntrySession()) {
                         throw com.example.data.MembershipCheckException()
                     }
@@ -198,10 +200,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun refreshCatalog() = fetchTmdbCatalog()
 
     private fun hasCatalogNetwork(): Boolean {
-        val connectivity = getApplication<Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-        val network = connectivity?.activeNetwork ?: return false
-        val caps = connectivity.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return playbackNetwork(getApplication()).online
+    }
+
+    private suspend fun loadCachedCatalog() {
+        val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+        if (_catalogMedia.value.isEmpty() && cached.isNotEmpty()) {
+            _catalogMedia.value = cached
+            CatalogData.allMedia = cached
+        }
     }
 
     private fun fetchTmdbCatalog() {
@@ -209,11 +216,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         catalogRefreshJob = viewModelScope.launch(Dispatchers.Default) {
             _isLoadingCatalog.value = true
             try {
-                val cached = withContext(Dispatchers.IO) { catalogCache.read() }
-                if (_catalogMedia.value.isEmpty() && cached.isNotEmpty()) {
-                    _catalogMedia.value = cached
-                    CatalogData.allMedia = cached
-                }
+                loadCachedCatalog()
                 if (!hasCatalogNetwork()) { setupOfflineFallbacks(); return@launch }
                 val requestSlots = kotlinx.coroutines.sync.Semaphore(4)
                 fun request(block: suspend () -> com.example.data.network.TmdbResponse) = async {
@@ -2010,6 +2013,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             if (offlineOnly) {
                 _playerState.update { it.copy(isResolving = false, isPlaying = false,
                     resolveError = "This download is missing from your device. Delete it in Downloads and download it again.") }
+                return@launch
+            }
+            if (!syncManager.hasOnlineEntrySession()) {
+                _playerState.update { it.copy(isResolving = false, isPlaying = false,
+                    resolveError = "Connect to the internet to prepare streaming, then try again. Your saved downloads are available offline.") }
                 return@launch
             }
             if (!MobilePlaybackPolicy.permitsStreaming(mobileSettings.cellularDataMode,

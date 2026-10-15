@@ -95,6 +95,9 @@ class FirebaseSyncManager(private val context: Context) {
     private val entryStateLock = Any()
     private var entryGeneration = 0L
     private val admission = EntrySessionAdmission()
+    private val offlineEntryProofs = OfflineEntryProofStore(java.io.File(context.noBackupFilesDir, "verified-entry.json"))
+    private val _onlineEntryReady = MutableStateFlow(false)
+    val onlineEntryReady: StateFlow<Boolean> = _onlineEntryReady.asStateFlow()
     private val _entryError = MutableStateFlow<String?>(null)
     val entryError: StateFlow<String?> = _entryError.asStateFlow()
     private val subscriptionGeneration = java.util.concurrent.atomic.AtomicLong()
@@ -118,9 +121,12 @@ class FirebaseSyncManager(private val context: Context) {
             }
             if (auth == null) {
                 auth = FirebaseAuth.getInstance()
+                observedUid = auth?.currentUser?.uid
                 auth?.addAuthStateListener { firebaseAuth ->
                     val user = firebaseAuth.currentUser
                     if (observedUid != user?.uid) {
+                        // The initial callback for the persisted Firebase account is not sign-out.
+                        if (observedUid != null || user == null) offlineEntryProofs.clear()
                         endEntrySession()
                         DeviceAccessGuard.clear()
                         cleanupListeners()
@@ -282,6 +288,7 @@ class FirebaseSyncManager(private val context: Context) {
     }
 
     fun signOutUser() {
+        offlineEntryProofs.clear()
         endEntrySession()
         DeviceAccessGuard.clear()
         cleanupListeners()
@@ -458,6 +465,15 @@ class FirebaseSyncManager(private val context: Context) {
     )
 
     fun hasAdmittedEntrySession(): Boolean = admission.isAdmitted(getUserId(), DeviceAccessGuard.deviceId(context))
+    fun hasOnlineEntrySession(): Boolean = hasAdmittedEntrySession() && _onlineEntryReady.value
+
+    private fun hasValidatedNetwork(): Boolean {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
 
     /** Membership/device verification and screen admission happen once at application entry. */
     suspend fun prepareEntrySession(expected: com.example.data.model.UserSubscription? = null): com.example.data.model.UserSubscription = entryMutex.withLock {
@@ -472,35 +488,71 @@ class FirebaseSyncManager(private val context: Context) {
         fun ensureCurrentEntry() {
             if (getUserId() != owner || entryGeneration != attempt) throw MembershipCheckException()
         }
-        val forceRefresh = !hasAdmittedEntrySession() ||
-            (expected != null && !DeviceAccessGuard.isConfirmed(owner, expected.planId, expected.expiresAt, expected.status))
-        val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
-        synchronized(entryStateLock) { ensureCurrentEntry() }
-        val subscription = subscriptionFrom(snapshot)
-        val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
-        if (serverVersion != null && (confirmedEntryVersion?.first != owner || serverVersion >= confirmedEntryVersion!!.second)) {
-            confirmedEntryVersion = owner to serverVersion
+        var verifiedSubscription: com.example.data.model.UserSubscription? = null
+        fun restoreOfflineEntry(): com.example.data.model.UserSubscription? {
+            val cached = offlineEntryProofs.load(owner, DeviceAccessGuard.deviceId(context), SubscriptionTime.now(), verifiedSubscription ?: expected) ?: return null
+            synchronized(entryStateLock) {
+                ensureCurrentEntry()
+                if (!DeviceAccessGuard.restoreOfflineConfirmation(cached.proof)) return null
+                admission.admit(owner, cached.proof.device)
+                _entryError.value = null
+                startEntrySessionHeartbeat(owner, attempt)
+            }
+            return cached.subscription
         }
-        if (subscription.isActive) {
-            if (!hasAdmittedEntrySession()) {
-                ScreenLease.acquire(context, tv = false)
+        if (!hasValidatedNetwork()) restoreOfflineEntry()?.let { return it }
+        try {
+            val forceRefresh = !hasOnlineEntrySession() ||
+                (expected != null && !DeviceAccessGuard.isConfirmed(owner, expected.planId, expected.expiresAt, expected.status))
+            val snapshot = DeviceAccessGuard.confirm(context, tv = false, forceRefresh = forceRefresh)
+            synchronized(entryStateLock) { ensureCurrentEntry() }
+            val subscription = subscriptionFrom(snapshot)
+            verifiedSubscription = subscription
+            val serverVersion = runCatching { snapshot.getTimestamp("updatedAt")?.toDate()?.time }.getOrNull()
+            if (serverVersion != null && (confirmedEntryVersion?.first != owner || serverVersion >= confirmedEntryVersion!!.second)) {
+                confirmedEntryVersion = owner to serverVersion
+            }
+            if (subscription.isActive) {
+                if (!hasOnlineEntrySession()) {
+                    ScreenLease.acquire(context, tv = false)
+                    synchronized(entryStateLock) {
+                        ensureCurrentEntry()
+                        admission.admit(owner, DeviceAccessGuard.deviceId(context))
+                    }
+                }
                 synchronized(entryStateLock) {
                     ensureCurrentEntry()
-                    admission.admit(owner, DeviceAccessGuard.deviceId(context))
+                    persistOfflineEntry(owner, subscription)
+                    _onlineEntryReady.value = true
+                    startEntrySessionHeartbeat(owner, attempt)
+                    _entryError.value = null
+                }
+            } else {
+                synchronized(entryStateLock) {
+                    ensureCurrentEntry()
+                    offlineEntryProofs.clear()
+                    endEntrySession()
                 }
             }
-            synchronized(entryStateLock) {
-                ensureCurrentEntry()
-                startEntrySessionHeartbeat(owner, attempt)
-                _entryError.value = null
+            return subscription
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            synchronized(entryStateLock) { ensureCurrentEntry() }
+            if (failure.isAuthoritativeAccessFailure()) {
+                offlineEntryProofs.clear()
+                DeviceAccessGuard.clear()
+                endEntrySession(failure.accessFailureMessage())
+            } else {
+                restoreOfflineEntry()?.let { return it }
             }
-        } else {
-            synchronized(entryStateLock) {
-                ensureCurrentEntry()
-                endEntrySession()
-            }
+            throw failure
         }
-        return subscription
+    }
+
+    private fun persistOfflineEntry(owner: String, subscription: com.example.data.model.UserSubscription) {
+        val proof = MembershipProof(owner, DeviceAccessGuard.deviceId(context), subscription.planId, subscription.expiresAt, subscription.status)
+        runCatching { offlineEntryProofs.save(OfflineEntryProof(proof, subscription)) }
+            .onFailure { Log.w("FirebaseSync", "Offline membership checkpoint could not be saved", it) }
     }
 
     fun listenToSubscription(onSubscriptionLoaded: (com.example.data.model.UserSubscription) -> Unit) {
@@ -521,6 +573,7 @@ class FirebaseSyncManager(private val context: Context) {
                                 if (auth?.currentUser?.uid != user.uid || listenerEpoch != subscriptionListenerEpoch.get() ||
                                     requestGeneration != subscriptionGeneration.get()) return@withLock
                                 pendingSubscriptionKey = null
+                                offlineEntryProofs.clear()
                                 DeviceAccessGuard.clear()
                                 endEntrySession()
                                 onSubscriptionLoaded(com.example.data.model.UserSubscription())
@@ -545,6 +598,7 @@ class FirebaseSyncManager(private val context: Context) {
                         if (serverVersion != null && confirmed?.first == user.uid && serverVersion < confirmed.second) return@withLock
                         if (!subscription.isActive) {
                             pendingSubscriptionKey = null
+                            offlineEntryProofs.clear()
                             DeviceAccessGuard.clear()
                             endEntrySession()
                             onSubscriptionLoaded(subscription)
@@ -558,9 +612,10 @@ class FirebaseSyncManager(private val context: Context) {
                             return@withLock
                         }
                         pendingSubscriptionKey = key
+                        offlineEntryProofs.clear()
                         DeviceAccessGuard.clear()
                         endEntrySession()
-                        onSubscriptionLoaded(subscription)
+                        // Do not publish a new active plan until device admission is verified.
                         try {
                             val checked = prepareEntrySessionLocked(subscription)
                             if (isCurrent()) {
@@ -943,12 +998,23 @@ class FirebaseSyncManager(private val context: Context) {
     private fun startEntrySessionHeartbeat(owner: String, attempt: Long) {
         if (streamHeartbeatJob?.isActive == true) return
         streamHeartbeatJob = scope.launch {
-            // Entry already acquired a slot. Do not immediately repeat that transaction.
+            // Renew an online entry's slot, or acquire one after offline restoration reconnects.
             while (isActive && auth?.currentUser?.uid == owner) {
-                kotlinx.coroutines.delay(20_000L)
+                kotlinx.coroutines.delay(if (_onlineEntryReady.value) 20_000L else 5_000L)
                 if (synchronized(entryStateLock) { entryGeneration != attempt || getUserId() != owner }) return@launch
+                // Offline playback uses its original verified expiry, without remote plan checks.
+                if (!hasValidatedNetwork()) continue
                 try {
-                    ScreenLease.acquire(context, tv = false)
+                    if (!_onlineEntryReady.value) {
+                        // A restored proof may have an old tier or expiry. Refresh the full
+                        // membership/device admission before enabling any new online stream.
+                        entryMutex.withLock {
+                            if (synchronized(entryStateLock) { entryGeneration != attempt || getUserId() != owner }) return@launch
+                            prepareEntrySessionLocked()
+                        }
+                    } else {
+                        ScreenLease.acquire(context, tv = false)
+                    }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {
                     synchronized(entryStateLock) {
@@ -956,6 +1022,8 @@ class FirebaseSyncManager(private val context: Context) {
                         val authoritative = failure.isAuthoritativeAccessFailure()
                         admission.onRefreshFailure(authoritative)
                         if (authoritative) {
+                            offlineEntryProofs.clear()
+                            DeviceAccessGuard.clear()
                             endEntrySession(failure.accessFailureMessage())
                             return@launch
                         }
@@ -974,6 +1042,7 @@ class FirebaseSyncManager(private val context: Context) {
         streamHeartbeatJob?.cancel()
         streamHeartbeatJob = null
         admission.clear()
+        _onlineEntryReady.value = false
         _entryError.value = error
         ScreenLease.releaseIn(scope)
     }

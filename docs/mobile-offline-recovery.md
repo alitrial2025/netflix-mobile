@@ -1,0 +1,11 @@
+# Mobile offline startup and playback
+
+Version 1.15 checks for application updates at entry. Resuming the activity or watching for 15 minutes does not run another check or replace playback with an update screen. Without validated Internet, entry defers a known pending update and keeps its manifest, resumable download and installation records for the next online entry. Losing connectivity during an update download also opens the app without discarding that download. APK verification still completes before installation; malformed metadata, TLS errors and invalid APKs are not accepted as updates.
+
+Membership/device/screen admission remains at app entry and in the app session's background refresh. After a successful online entry, an app-private checkpoint excluded from backup stores the verified account, installation, membership and original expiry. That checkpoint enables later offline entry and local downloaded playback. It is cleared on sign-out, account changes and authoritative denial. Transport failures preserve it; expiry and existing renewal-grace rules still apply. Updating from 1.14 requires one online app entry to create this checkpoint because 1.14 kept its proof only in memory.
+
+Restored offline access does not reserve a server streaming slot. On reconnection, the background app session refreshes membership/device authorization and acquires a screen before enabling a new remote stream. The player uses local admitted state and does not start membership transactions. A transport interruption to an already admitted session does not turn its paid membership into Guest.
+
+Startup loads the saved catalog and profiles. A remote catalog refresh stops holding the splash screen if Internet connectivity disappears, while the refresh can finish separately.
+
+Regression coverage includes offline entry with and without a pending upgrade, preserved download/install records, connection loss during a paused update download, online enforcement of retained upgrades, checkpoint recreation after process restart, full subscription metadata round trips, account/device mismatch, expiry/revocation, and a connection dropping during catalog preparation. Physical-device playback is not exercised by these headless tests.
