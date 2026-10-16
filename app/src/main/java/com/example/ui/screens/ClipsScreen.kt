@@ -4,12 +4,7 @@ import com.example.discovery.recommendationTitle
 
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -20,7 +15,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,11 +22,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -41,30 +33,21 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,6 +70,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem as Media3Item
 import androidx.media3.common.MimeTypes
@@ -100,6 +91,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.example.ui.components.referenceGlass
 import com.example.data.CatalogData
 import com.example.data.TrailerResolver
 import com.example.data.TrailerResolverCallback
@@ -109,8 +101,6 @@ import com.example.data.model.CastDevice
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.model.NotificationItem
-import com.example.ui.components.NFilmBadge
-import com.example.ui.components.NSeriesBadge
 import com.example.ui.components.NetflixSpinner
 import com.example.ui.theme.NetflixBlack
 import com.example.ui.theme.NetflixBorderGray
@@ -150,7 +140,9 @@ fun ClipsScreen(
     modifier: Modifier = Modifier
 ) {
     var clipsMode by remember { mutableStateOf(ClipsMode.VERTICAL_FEED) }
-    val clipItems = remember { CatalogData.getTrending() + CatalogData.getComingSoon() }
+    val clipItems = remember {
+        (CatalogData.getTrending() + CatalogData.getComingSoon()).distinctBy { "${it.type}:${it.id}" }
+    }
 
     Box(
         modifier = modifier
@@ -168,17 +160,10 @@ fun ClipsScreen(
                 TikTokVerticalVideoFeed(
                     items = clipItems,
                     likedMedia = likedMedia,
-                    connectedCastDevice = connectedCastDevice,
                     isWatchlistContains = isWatchlistContains,
                     onToggleLike = onToggleLike,
                     onWatchlistToggle = onWatchlistToggle,
                     onMediaClick = onMediaClick,
-                    onPlayClick = onPlayClick,
-                    onOpenCast = onOpenCast,
-                    onOpenSearch = onOpenSearch,
-                    onOpenNotifications = onOpenNotifications,
-                    unreadNotificationsCount = notifications.count { !it.isRead },
-                    onSelectMode = { clipsMode = it },
                     onShowToast = onShowToast,
                     streamingAllowed = streamingAllowed,
                     maxVideoHeight = maxVideoHeight,
@@ -223,17 +208,10 @@ fun ClipsScreen(
 private fun TikTokVerticalVideoFeed(
     items: List<MediaItem>,
     likedMedia: List<MediaItem>,
-    connectedCastDevice: CastDevice?,
     isWatchlistContains: (String) -> Boolean,
     onToggleLike: (String) -> Unit,
     onWatchlistToggle: (MediaItem) -> Unit,
     onMediaClick: (MediaItem) -> Unit,
-    onPlayClick: (MediaItem) -> Unit,
-    onOpenCast: () -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenNotifications: () -> Unit,
-    unreadNotificationsCount: Int,
-    onSelectMode: (ClipsMode) -> Unit,
     onShowToast: (String) -> Unit,
     streamingAllowed: Boolean,
     maxVideoHeight: Int,
@@ -241,18 +219,22 @@ private fun TikTokVerticalVideoFeed(
 ) {
     val pagerState = rememberPagerState(pageCount = { items.size })
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isForeground by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    var playbackRequested by remember { mutableStateOf(true) }
 
+    // A clip starts muted, matching the discovery feed and avoiding surprise audio.
     // Local mute states per page index
     val mutedMap = remember { mutableStateMapOf<Int, Boolean>() }
 
     // Stream URL memory cache to eliminate repeat network requests and enable instant preloading
-    val urlCache = remember { mutableStateMapOf<String, String>() }
+    val urlCache = remember { mutableStateMapOf<String, TrailerStream>() }
 
     // Single shared ExoPlayer instance with optimized load control for short video clips
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             repeatMode = Player.REPEAT_MODE_ALL
-            playWhenReady = true
+            playWhenReady = false
         }
     }
     LaunchedEffect(maxVideoHeight, spatialAudioEnabled) {
@@ -273,32 +255,54 @@ private fun TikTokVerticalVideoFeed(
 
     var isResolving by remember { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf<String?>(null) }
-    var progress by remember { mutableFloatStateOf(0f) }
 
     val currentPage = pagerState.currentPage
     val latestPage by androidx.compose.runtime.rememberUpdatedState(currentPage)
     val latestStreamingAllowed by androidx.compose.runtime.rememberUpdatedState(streamingAllowed)
-    val isMuted = mutedMap[currentPage] ?: false
+    val isMuted = mutedMap[currentPage] ?: true
 
     LaunchedEffect(isMuted) {
         exoPlayer.volume = if (isMuted) 0f else 1f
     }
 
+    val latestPlaybackRequested by rememberUpdatedState(playbackRequested)
+    val latestAllowed by rememberUpdatedState(streamingAllowed)
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    isForeground = true
+                    exoPlayer.playWhenReady = latestPlaybackRequested && latestAllowed
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    isForeground = false
+                    exoPlayer.pause()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Smart stream loader & preloader function
-    fun prepareAndPlay(url: String) {
+    fun prepareAndPlay(stream: TrailerStream) {
         if (!latestStreamingAllowed) return
+        val url = stream.url
         resolvedUrl = url
         isResolving = false
 
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
+            .setDefaultRequestProperties(stream.headers)
             .setConnectTimeoutMs(10000)
             .setReadTimeoutMs(10000)
 
+        val isHls = stream.type.equals("hls", ignoreCase = true) || url.contains(".m3u8", ignoreCase = true)
         val mediaItem = Media3Item.Builder()
             .setUri(url)
             .apply {
-                if (url.contains(".m3u8", ignoreCase = true)) {
+                if (isHls) {
                     setMimeType(MimeTypes.APPLICATION_M3U8)
                 } else if (url.contains(".mpd", ignoreCase = true)) {
                     setMimeType(MimeTypes.APPLICATION_MPD)
@@ -308,7 +312,7 @@ private fun TikTokVerticalVideoFeed(
             }
             .build()
 
-        val mediaSource = if (url.contains(".m3u8", ignoreCase = true)) {
+        val mediaSource = if (isHls) {
             HlsMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
         } else {
             ProgressiveMediaSource.Factory(httpDataSourceFactory).createMediaSource(mediaItem)
@@ -316,7 +320,7 @@ private fun TikTokVerticalVideoFeed(
 
         exoPlayer.setMediaSource(mediaSource)
         exoPlayer.prepare()
-        exoPlayer.play()
+        exoPlayer.playWhenReady = isForeground && playbackRequested
     }
 
     LaunchedEffect(currentPage, items, streamingAllowed) {
@@ -327,9 +331,11 @@ private fun TikTokVerticalVideoFeed(
                 val currentItem = items[currentPage]
                 isResolving = true
                 resolvedUrl = null
-                progress = 0f
+                playbackRequested = true
+                exoPlayer.stop()
 
-                val cachedUrl = urlCache[currentItem.id]
+                val currentKey = "${currentItem.type}:${currentItem.id}"
+                val cachedUrl = urlCache[currentKey]
                 if (cachedUrl != null) {
                     prepareAndPlay(cachedUrl)
                 } else {
@@ -340,8 +346,8 @@ private fun TikTokVerticalVideoFeed(
                         mediaType = mediaTypeStr,
                         callback = object : TrailerResolverCallback {
                             override fun onResolved(stream: TrailerStream) {
-                                urlCache[currentItem.id] = stream.url
-                                if (latestPage == currentPage && latestStreamingAllowed) prepareAndPlay(stream.url)
+                                urlCache[currentKey] = stream
+                                if (latestPage == currentPage && latestStreamingAllowed) prepareAndPlay(stream)
                             }
 
                             override fun onError(error: String) {
@@ -355,7 +361,7 @@ private fun TikTokVerticalVideoFeed(
 
                 // Pre-resolve next item stream URL into cache for instant TikTok-style swipe without bloating RAM/WiFi
                 val nextItem = items.getOrNull(currentPage + 1)
-                if (nextItem != null && urlCache[nextItem.id] == null) {
+                if (nextItem != null && urlCache["${nextItem.type}:${nextItem.id}"] == null) {
                     val nextMediaType = if (nextItem.type == MediaType.MOVIE) "movie" else "tv"
                     val prefetch = TrailerResolver(
                         context = context,
@@ -363,7 +369,7 @@ private fun TikTokVerticalVideoFeed(
                         mediaType = nextMediaType,
                         callback = object : TrailerResolverCallback {
                             override fun onResolved(stream: TrailerStream) {
-                                urlCache[nextItem.id] = stream.url
+                                urlCache["${nextItem.type}:${nextItem.id}"] = stream
                             }
                             override fun onError(error: String) {}
                         }
@@ -372,15 +378,9 @@ private fun TikTokVerticalVideoFeed(
                     prefetch.start()
                 }
 
-                // Smooth timeline progress loop
-                while (true) {
-                    kotlinx.coroutines.delay(200)
-                    val duration = exoPlayer.duration
-                    val current = exoPlayer.currentPosition
-                    if (duration > 0) {
-                        progress = (current.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-                    }
-                }
+                // Keep resolution jobs alive until this page leaves; callbacks are cancelled
+                // with the effect rather than requesting another plan or update check.
+                kotlinx.coroutines.awaitCancellation()
             }
         } finally { pending.forEach { it.cancel() } }
     }
@@ -389,13 +389,13 @@ private fun TikTokVerticalVideoFeed(
         VerticalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
-            key = { page -> items[page].id },
+            key = { page -> "${items[page].type}:${items[page].id}" },
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val item = items[page]
             val isLiked = likedMedia.any { it.id == item.id }
             val isInList = isWatchlistContains(item.id)
-            val pageMuted = mutedMap[page] ?: false
+            val pageMuted = mutedMap[page] ?: true
             val isCurrent = pagerState.currentPage == page
 
             TikTokClipItemView(
@@ -404,7 +404,6 @@ private fun TikTokVerticalVideoFeed(
                 exoPlayer = exoPlayer,
                 isResolving = if (isCurrent) isResolving else false,
                 resolvedUrl = if (isCurrent) resolvedUrl else null,
-                progress = if (isCurrent) progress else 0f,
                 isLiked = isLiked,
                 isInList = isInList,
                 isMuted = pageMuted,
@@ -419,108 +418,19 @@ private fun TikTokVerticalVideoFeed(
                     onWatchlistToggle(item)
                 },
                 onShare = {
-                    val sendIntent = Intent().apply {
-                        action = Intent.ACTION_SEND
-                        putExtra(
-                            Intent.EXTRA_TEXT,
-                            "Check out '${item.title}' on NetflixPro Clips! https://www.themoviedb.org/${if (item.type == com.example.data.model.MediaType.MOVIE) "movie" else "tv"}/${item.id}"
-                        )
-                        type = "text/plain"
-                    }
+                    val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
+                    val titleUrl = "https://www.themoviedb.org/$mediaType/${item.id}"
+                    val sendIntent = Intent(Intent.ACTION_SEND)
+                    sendIntent.type = "text/plain"
+                    sendIntent.putExtra(
+                        Intent.EXTRA_TEXT,
+                        "Check out '${item.title}' on NetflixPro Clips! $titleUrl"
+                    )
                     context.startActivity(Intent.createChooser(sendIntent, "Share Clip"))
                 },
                 onMediaClick = { onMediaClick(item) },
-                onPlayClick = { onPlayClick(item) }
+                onPlaybackRequested = { playbackRequested = it }
             )
-        }
-
-        // Top Floating Header Navigation Bar Overlay
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Mode Selector Tabs (Clips | Coming Soon | Top 10)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Clips",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier
-                        .clickable { onSelectMode(ClipsMode.VERTICAL_FEED) }
-                        .padding(vertical = 4.dp)
-                )
-
-                Text(
-                    text = "Coming Soon",
-                    color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clickable { onSelectMode(ClipsMode.COMING_SOON) }
-                        .padding(vertical = 4.dp)
-                )
-
-                Text(
-                    text = "Top 10",
-                    color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clickable { onSelectMode(ClipsMode.TOP_10) }
-                        .padding(vertical = 4.dp)
-                )
-            }
-
-            // Top Right Quick Actions (Cast, Notifications, Search)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                IconButton(onClick = onOpenCast, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = if (connectedCastDevice != null) Icons.Default.CastConnected else Icons.Default.Cast,
-                        contentDescription = "Cast",
-                        tint = if (connectedCastDevice != null) Color(0xFF4CAF50) else Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                IconButton(onClick = onOpenNotifications, modifier = Modifier.size(36.dp)) {
-                    Box {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = "Notifications",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        if (unreadNotificationsCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(8.dp)
-                                    .background(NetflixRed, CircleShape)
-                            )
-                        }
-                    }
-                }
-
-                IconButton(onClick = onOpenSearch, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
         }
     }
 }
@@ -533,7 +443,6 @@ private fun TikTokClipItemView(
     exoPlayer: ExoPlayer,
     isResolving: Boolean,
     resolvedUrl: String?,
-    progress: Float,
     isLiked: Boolean,
     isInList: Boolean,
     isMuted: Boolean,
@@ -542,40 +451,22 @@ private fun TikTokClipItemView(
     onToggleWatchlist: () -> Unit,
     onShare: () -> Unit,
     onMediaClick: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlaybackRequested: (Boolean) -> Unit
 ) {
-    val context = LocalContext.current
     // Double tap heart animation state
     var showHeartAnimation by remember { mutableStateOf(false) }
-    var isPlaying by remember { mutableStateOf(exoPlayer.isPlaying) }
     var showPlayPauseControls by remember { mutableStateOf(false) }
     var centerIconRes by remember { mutableStateOf<Int?>(null) }
 
-    DisposableEffect(exoPlayer, isCurrentPage) {
-        val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) {
-                if (isCurrentPage) {
-                    isPlaying = playing
-                }
-            }
-        }
-        exoPlayer.addListener(listener)
-        if (isCurrentPage) {
-            isPlaying = exoPlayer.isPlaying
-        }
-        onDispose {
-            exoPlayer.removeListener(listener)
-        }
-    }
 
     fun togglePlayPause() {
-        if (exoPlayer.isPlaying) {
+        if (exoPlayer.playWhenReady) {
+            onPlaybackRequested(false)
             exoPlayer.pause()
-            isPlaying = false
             centerIconRes = R.drawable.ic_netflix_pause
         } else {
+            onPlaybackRequested(true)
             exoPlayer.play()
-            isPlaying = true
             centerIconRes = R.drawable.ic_netflix_play
         }
         showPlayPauseControls = true
@@ -585,17 +476,17 @@ private fun TikTokClipItemView(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
+            .pointerInput(isLiked, isCurrentPage, resolvedUrl, onToggleLike, onPlaybackRequested) {
                 detectTapGestures(
                     onDoubleTap = {
                         if (!isLiked) onToggleLike()
                         showHeartAnimation = true
                     },
-                    onTap = { togglePlayPause() }
+                    onTap = { if (isCurrentPage && resolvedUrl != null) togglePlayPause() }
                 )
             }
     ) {
-        // Ambient Background Image & Gradient Scrim for non-portrait video letterboxing
+        // Real title artwork stays visible until its genuine trailer is ready.
         Box(modifier = Modifier.fillMaxSize()) {
             AsyncImage(
                 model = item.backdropUrl ?: item.posterUrl ?: item.bannerDrawableRes,
@@ -606,21 +497,22 @@ private fun TikTokClipItemView(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f))
+                    .background(Color.Black.copy(alpha = 0.35f))
             )
         }
 
-        // Video Player Stream View (Fits video completely without cutting off edges)
+        // Fill the portrait viewport exactly as the reference feed does.
         if (resolvedUrl != null) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         player = exoPlayer
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                update = { view -> view.player = if (isCurrentPage) exoPlayer else null }
             )
         } else if (isResolving) {
             Box(
@@ -630,18 +522,11 @@ private fun TikTokClipItemView(
                 NetflixSpinner(size = 44.dp)
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(item.primaryColorHex),
-                                Color(item.secondaryColorHex),
-                                Color.Black
-                            )
-                        )
-                    )
+            Text(
+                text = "This clip is unavailable. Swipe up for the next title.",
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp)
             )
         }
 
@@ -652,10 +537,10 @@ private fun TikTokClipItemView(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = 0.60f),
                             Color.Transparent,
-                            Color.Black.copy(alpha = 0.40f),
-                            Color.Black.copy(alpha = 0.90f)
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.12f),
+                            Color.Black.copy(alpha = 0.82f)
                         )
                     )
                 )
@@ -714,193 +599,187 @@ private fun TikTokClipItemView(
             }
         }
 
-        // 2 & 3. Bottom Overlay Row: Left Title & Metadata (Weighted) + Right Vertical Action Column
-        Row(
+        ClipDiscoveryOverlay(
+            item = item,
+            isInList = isInList,
+            isMuted = isMuted,
+            onToggleMute = onToggleMute,
+            onToggleWatchlist = onToggleWatchlist,
+            onShare = onShare,
+            onMediaClick = onMediaClick,
+            modifier = Modifier.fillMaxSize(),
+            isLiked = isLiked,
+            onToggleLike = onToggleLike
+        )
+    }
+}
+
+/** The reference's caption and action rail, separated from playback for accessible interaction tests. */
+@Composable
+internal fun ClipDiscoveryOverlay(
+    item: MediaItem,
+    isInList: Boolean,
+    isMuted: Boolean,
+    onToggleMute: () -> Unit,
+    onToggleWatchlist: () -> Unit,
+    onShare: () -> Unit,
+    onMediaClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isLiked: Boolean = false,
+    onToggleLike: () -> Unit = {}
+) {
+    Box(modifier) {
+        Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, bottom = 112.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
+                .padding(start = 14.dp, end = 74.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // Left Caption & Title Metadata Overlay (weight 1f prevents long title from pushing right vertical icons)
-            Column(
+            Text(
+                text = item.title,
+                color = Color.White,
+                fontSize = 18.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Title
-                Text(
-                    text = item.title,
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                // Genre Bullets Subtitle Line (e.g. "Period Piece • Notable Soundtrack • Keeping Secrets")
-                val formattedGenres = item.genres.ifEmpty { listOf("Featured", "Trending") }.joinToString(" • ")
-                Text(
-                    text = formattedGenres,
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                // Description Hook Snippet with clickable "more"
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { onMediaClick() }
-                ) {
-                    Text(
-                        text = item.description.take(48) + "... ",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "more",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Right Side Stacked Action Column (2026 Netflix Clips Glass Circular Buttons)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Mute / Unmute Glass Circle Button
-                GlassCircleActionButton(
-                    icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = if (isMuted) "Unmute" else "Mute",
-                    onClick = onToggleMute,
-                    testTag = "clip_mute_btn"
-                )
-
-                // Add / My List Glass Circle Button
-                GlassCircleActionButton(
-                    icon = if (isInList) Icons.Default.Check else Icons.Default.Add,
-                    contentDescription = "My List",
-                    tint = if (isInList) Color(0xFF4CAF50) else Color.White,
-                    onClick = onToggleWatchlist,
-                    testTag = "clip_add_btn"
-                )
-
-                // Send / Share Glass Circle Button
-                GlassCircleActionButton(
-                    painter = painterResource(id = R.drawable.ic_netflix_share),
-                    contentDescription = "Share Clip",
-                    onClick = onShare,
-                    testTag = "clip_send_btn"
-                )
-
-                // Poster Disc Circle Thumbnail with ALL CAPS Title
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable { onMediaClick() }
-                        .testTag("clip_disc_btn")
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
-                            .background(Color.DarkGray)
-                    ) {
-                        AsyncImage(
-                            model = item.posterUrl ?: item.backdropUrl ?: item.bannerDrawableRes,
-                            contentDescription = item.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                    .clickable(onClick = onMediaClick)
+                    .semantics {
+                        stateDescription = if (isLiked) "Liked" else "Not liked"
+                        customActions = listOf(
+                            CustomAccessibilityAction(
+                                label = if (isLiked) "Unlike ${item.title}" else "Like ${item.title}"
+                            ) {
+                                onToggleLike()
+                                true
+                            }
                         )
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    .testTag("clip_title")
+            )
+            if (item.genres.isNotEmpty()) {
+                Text(
+                    text = item.genres.joinToString(" • "),
+                    color = Color.White.copy(alpha = 0.95f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (item.description.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClickLabel = "More about ${item.title}", onClick = onMediaClick)
+                        .testTag("clip_description"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = item.title.uppercase(),
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
+                        text = item.description,
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.width(52.dp)
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(
+                        text = " more",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         }
 
-        // 4. Clip Auto Playback Timeline Progress Bar
-        ClipProgressBar(
-            progress = progress,
-            durationText = "14:00",
+        Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 88.dp, start = 16.dp, end = 16.dp)
-        )
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 158.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(13.dp)
+        ) {
+            ClipCircleActionButton(
+                icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (isMuted) "Unmute clip" else "Mute clip",
+                onClick = onToggleMute,
+                testTag = "clip_mute_btn"
+            )
+            ClipCircleActionButton(
+                icon = if (isInList) Icons.Default.Check else Icons.Default.Add,
+                contentDescription = if (isInList) "Remove from My List" else "Add to My List",
+                onClick = onToggleWatchlist,
+                testTag = "clip_add_btn",
+                modifier = Modifier.semantics { stateDescription = if (isInList) "Saved" else "Not saved" }
+            )
+            ClipCircleActionButton(
+                painter = painterResource(id = R.drawable.ic_netflix_share),
+                contentDescription = "Share clip",
+                onClick = onShare,
+                testTag = "clip_send_btn"
+            )
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF252525))
+                    .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                    .clickable(role = Role.Button, onClick = onMediaClick)
+                    .testTag("clip_disc_btn")
+            ) {
+                AsyncImage(
+                    model = item.posterUrl ?: item.backdropUrl ?: item.bannerDrawableRes,
+                    contentDescription = "Details for ${item.title}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun GlassCircleActionButton(
+private fun ClipCircleActionButton(
     painter: androidx.compose.ui.graphics.painter.Painter,
     contentDescription: String,
     onClick: () -> Unit,
-    tint: Color = Color.White,
-    testTag: String
+    testTag: String,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = Modifier
-            .size(52.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.25f))
-            .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
-            .clickable { onClick() }
+        modifier = modifier
+            .size(48.dp)
+            .referenceGlass(CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            painter = painter,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(24.dp)
-        )
+        Icon(painter = painter, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
-private fun GlassCircleActionButton(
+private fun ClipCircleActionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
-    tint: Color = Color.White,
-    testTag: String
+    testTag: String,
+    modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = Modifier
-            .size(52.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.25f))
-            .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
-            .clickable { onClick() }
+        modifier = modifier
+            .size(48.dp)
+            .referenceGlass(CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(24.dp)
-        )
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -1210,66 +1089,6 @@ private fun Top10RankCard(
                 contentDescription = "Play",
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ClipProgressBar(
-    progress: Float,
-    durationText: String = "14:00",
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .weight(1f)
-                .height(16.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            val totalWidth = maxWidth
-            val activeWidth = totalWidth * progress.coerceIn(0f, 1f)
-            val thumbRadius = 8.dp
-
-            // Inactive Track: #4B4B4B, height 4.dp, rx 2.dp (matches SVG)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0xFF4B4B4B))
-            )
-
-            // Active Track: #D22F26 (NetflixRed), height 4.dp, rx 2.dp
-            Box(
-                modifier = Modifier
-                    .width(activeWidth)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(NetflixRed)
-            )
-
-            // Red Circle Thumb Knob: r = 8.dp (size 16.dp), fill #D22F26
-            val thumbOffset = (activeWidth - thumbRadius).coerceIn(0.dp, (totalWidth - thumbRadius * 2).coerceAtLeast(0.dp))
-            Box(
-                modifier = Modifier
-                    .offset(x = thumbOffset)
-                    .size(thumbRadius * 2)
-                    .background(NetflixRed, CircleShape)
-            )
-        }
-
-        if (durationText.isNotEmpty()) {
-            Text(
-                text = durationText,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
             )
         }
     }

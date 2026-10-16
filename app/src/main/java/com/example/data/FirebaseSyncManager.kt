@@ -94,6 +94,8 @@ class FirebaseSyncManager(private val context: Context) {
 
     private val _currentUserEmail = MutableStateFlow<String?>(null)
     val currentUserEmail: StateFlow<String?> = _currentUserEmail.asStateFlow()
+    private val _authenticatedUserId = MutableStateFlow<String?>(null)
+    val authenticatedUserId: StateFlow<String?> = _authenticatedUserId.asStateFlow()
     private val _isAccountAuthenticated = MutableStateFlow(false)
     val isAccountAuthenticated: StateFlow<Boolean> = _isAccountAuthenticated.asStateFlow()
 
@@ -147,6 +149,7 @@ class FirebaseSyncManager(private val context: Context) {
                         }
                     }
                     observedUid = user?.uid
+                    _authenticatedUserId.value = user?.takeUnless { it.isAnonymous }?.uid
                     _currentUserEmail.value = user?.email
                     _isAccountAuthenticated.value = user?.isAnonymous == false
                     if (user != null) {
@@ -159,6 +162,7 @@ class FirebaseSyncManager(private val context: Context) {
                 }
             }
             isFirebaseReady = true
+            _authenticatedUserId.value = auth?.currentUser?.takeUnless { it.isAnonymous }?.uid
             _currentUserEmail.value = auth?.currentUser?.email
             _isAccountAuthenticated.value = auth?.currentUser?.isAnonymous == false
             _isCloudSyncEnabled.value = true
@@ -310,6 +314,7 @@ class FirebaseSyncManager(private val context: Context) {
         }
         cleanupListeners()
         auth?.signOut()
+        _authenticatedUserId.value = null
         _currentUserEmail.value = null
         _isAccountAuthenticated.value = false
         _lastSyncStatus.value = "Signed out"

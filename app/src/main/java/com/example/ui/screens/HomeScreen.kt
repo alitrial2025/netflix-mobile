@@ -5,13 +5,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.ReminderEntity
 import com.example.data.local.WatchProgressEntity
 import com.example.data.model.MediaItem
+import com.example.data.model.GameItem
 import com.example.data.model.MediaSection
 import com.example.data.model.MediaType
 import com.example.data.model.UserProfile
@@ -44,6 +46,7 @@ import com.example.ui.components.HomeBackdrop
 import com.example.ui.components.homeBackdropOffset
 import com.example.ui.components.HeroBanner
 import com.example.ui.components.MediaSectionRow
+import com.example.ui.components.HomeGamesRow
 import com.example.ui.components.NetflixSpinner
 import com.example.ui.theme.NetflixBlack
 import com.example.ui.viewmodel.CategoryFilter
@@ -72,7 +75,10 @@ fun HomeScreen(
     onOpenDownloads: () -> Unit = {},
     onContinueWatchingOptionsClick: (MediaItem, WatchProgressEntity) -> Unit = { _, _ -> },
     onAmbientColorChange: (Color) -> Unit = {},
-    listState: LazyListState = rememberLazyListState()
+    listState: LazyListState = rememberLazyListState(),
+    games: List<GameItem> = emptyList(),
+    onGameClick: (GameItem) -> Unit = {},
+    onOpenGames: () -> Unit = {}
 ) {
     // Determine Hero and Catalog Sections based on category reactively
     val heroMedia = remember(catalogMedia, categoryFilter, selectedGenre) {
@@ -145,6 +151,7 @@ fun HomeScreen(
 
     val currentTopColor = extractedTopColor ?: defaultTop
     val currentBottomColor = extractedBottomColor ?: defaultBottom
+    val showGames = games.isNotEmpty() && userSubscription.isGamesAllowed && categoryFilter == CategoryFilter.ALL
 
     // Ambient color propagation for bottom navigation bar blend (called once on settle, not per-frame)
     LaunchedEffect(heroMedia.id, extractedBottomColor) {
@@ -153,10 +160,22 @@ fun HomeScreen(
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
-    // Dynamically scale hero card with comfortable height across all screen devices
-    val heroCardHeight = remember(configuration.screenWidthDp) {
-        ((configuration.screenWidthDp - 52) * 1.50f).dp.coerceIn(420.dp, 650.dp)
+    var viewportHeightDp by remember(configuration.screenHeightDp) {
+        mutableStateOf(configuration.screenHeightDp.toFloat())
     }
+    var viewportWidthDp by remember(configuration.screenWidthDp) {
+        mutableStateOf(configuration.screenWidthDp.toFloat())
+    }
+    val statusBarHeightDp = WindowInsets.statusBars.getTop(density) / density.density
+    // Header + hero occupy 85% of the actual viewport. The first rail's title
+    // and the top of its posters peek above the floating navigation, like the
+    // reference. Width alone made the card too short on taller phones.
+    val heroCardHeight = remember(viewportHeightDp, statusBarHeightDp, configuration.fontScale) {
+        val minimumHeight = 320f + (configuration.fontScale - 1f).coerceAtLeast(0f) * 64f
+        (viewportHeightDp * .85f - statusBarHeightDp - 116f - 14f)
+            .coerceAtLeast(minimumHeight).dp
+    }
+    val railCardWidth = ((viewportWidthDp - 48) / 3.35f).dp.coerceAtLeast(92.dp)
 
     val gradientEndPx = remember(heroCardHeight, density) {
         with(density) { (134.dp + heroCardHeight + 580.dp).toPx() }
@@ -164,7 +183,7 @@ fun HomeScreen(
 
     // Cache categorized rows for performance and consistency (Offloaded to Dispatchers.Default to prevent UI thread lag)
     val uiSections by produceState(emptyList<MediaSection>(), catalogMedia, personalizedMedia,
-        categoryFilter, selectedGenre, activeProfile.name) {
+        categoryFilter, selectedGenre, activeProfile.name, railCardWidth) {
         value = withContext(Dispatchers.Default) {
             val rawSections = mutableListOf<Triple<String, String, List<MediaItem>>>()
             val movies = catalogMedia.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
@@ -173,6 +192,14 @@ fun HomeScreen(
             val trending = catalogMedia.filter { it.isTrending && !it.isComingSoon }
             val originals = catalogMedia.filter { it.isOriginal && !it.isComingSoon }
             val comingSoon = catalogMedia.filter { it.isComingSoon }
+            val podcasts = catalogMedia.filter { media ->
+                !media.isComingSoon && media.genres.any { genre ->
+                    genre.equals("Podcast", ignoreCase = true) || genre.equals("Podcasts", ignoreCase = true)
+                }
+            }
+            val newReleases = catalogMedia.filter {
+                !it.isComingSoon && com.example.discovery.ReleasePolicy.isNew(it.releaseDate)
+            }.sortedByDescending { it.releaseDate }
 
             val usedMediaIds = mutableSetOf<String>()
             heroMedia?.let { usedMediaIds.add(it.id) }
@@ -186,12 +213,21 @@ fun HomeScreen(
 
             when (categoryFilter) {
                 CategoryFilter.ALL, CategoryFilter.GAMES -> {
+                    // The reference starts with a compact release rail under the
+                    // hero. Only actual dated releases can receive that label.
+                    if (newReleases.isNotEmpty()) {
+                        rawSections.add(Triple("section_new_releases", "New on NetflixPro", filterFresh(newReleases)))
+                    }
+                    if (podcasts.isNotEmpty()) {
+                        rawSections.add(Triple("section_podcasts", "Podcasts: Now on NetflixPro", filterFresh(podcasts)))
+                    }
+                    if (personalizedMedia.isNotEmpty()) {
+                        rawSections.add(Triple("section_personalized", "Your next watch", filterFresh(personalizedMedia)))
+                    }
                     if (top10.isNotEmpty()) {
                         rawSections.add(Triple("section_top10", "Top 10 Today in Your Country", top10))
                         top10.take(5).forEach { usedMediaIds.add(it.id) }
                     }
-                    val picks = personalizedMedia
-                    if (picks.isNotEmpty()) rawSections.add(Triple("section_personalized", "Top Picks for ${activeProfile.name}", filterFresh(picks)))
                     if (trending.isNotEmpty()) rawSections.add(Triple("section_trending", "Trending Now", filterFresh(trending)))
                     if (comingSoon.isNotEmpty()) rawSections.add(Triple("section_coming_soon", "Worth the Wait / Coming Soon", comingSoon))
                     if (originals.isNotEmpty()) rawSections.add(Triple("section_originals", "Only on NetflixPro", filterFresh(originals)))
@@ -207,9 +243,6 @@ fun HomeScreen(
 
                     val comedy = catalogMedia.filter { it.matchesGenre("Comedy") }
                     if (comedy.isNotEmpty()) rawSections.add(Triple("section_comedy", "Comedies & Feel-Good", filterFresh(comedy)))
-
-                    val newReleases = catalogMedia.filter { com.example.discovery.ReleasePolicy.isNew(it.releaseDate) }.sortedByDescending { it.releaseDate }
-                    if (newReleases.isNotEmpty()) rawSections.add(Triple("section_new_releases", "New Releases & Fresh Arrivals", filterFresh(newReleases)))
 
                     val anime = catalogMedia.filter { it.matchesGenre("Anime") || it.matchesGenre("Animation") }
                     if (anime.isNotEmpty()) rawSections.add(Triple("section_anime", "Anime & Animation Hits", filterFresh(anime)))
@@ -339,14 +372,13 @@ fun HomeScreen(
             
             rawSections.filter { it.third.isNotEmpty() }.map { (key, title, items) ->
                 val isTop10 = key.contains("top10")
-                val isOriginals = key.contains("originals")
                 MediaSection(
                     id = key,
                     title = title,
                     items = items,
                     isTop10 = isTop10,
-                    cardWidth = if (isOriginals) 210.dp else 115.dp,
-                    cardHeight = if (isOriginals) 330.dp else 165.dp
+                    cardWidth = railCardWidth,
+                    cardHeight = railCardWidth * 1.5f
                 )
             }
         }
@@ -361,8 +393,11 @@ fun HomeScreen(
     val setItemHeight = remember(itemHeights) { { key: String, height: Int ->
         if (itemHeights[key] != height) itemHeights[key] = height
     } }
-    val itemKeys = remember(uiSections, continueWatchingList.isNotEmpty()) {
-        listOf("hero") + (if (continueWatchingList.isNotEmpty()) listOf("continue_watching") else emptyList()) + uiSections.map { it.id }
+    val itemKeys = remember(uiSections, continueWatchingList.isNotEmpty(), showGames) {
+        listOf("hero") + (if (continueWatchingList.isNotEmpty()) listOf("continue_watching") else emptyList()) +
+            uiSections.flatMapIndexed { index, section ->
+                if (showGames && index == 0) listOf(section.id, "mobile_games") else listOf(section.id)
+            } + if (showGames && uiSections.isEmpty()) listOf("mobile_games") else emptyList()
     }
     val backdropOffset = remember(itemKeys, gradientEndPx, categoryFilter, selectedGenre) {
         derivedStateOf {
@@ -373,7 +408,12 @@ fun HomeScreen(
     val isMediaLocked = remember(userSubscription) {
         { media: MediaItem -> userSubscription.isMediaLocked(media.id, media.title) }
     }
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = modifier.fillMaxSize().background(Color.Black).onSizeChanged {
+        val measuredHeight = it.height / density.density
+        val measuredWidth = it.width / density.density
+        if (measuredHeight > 0f && measuredHeight != viewportHeightDp) viewportHeightDp = measuredHeight
+        if (measuredWidth > 0f && measuredWidth != viewportWidthDp) viewportWidthDp = measuredWidth
+    }) {
         // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
         HomeBackdrop(currentTopColor, currentBottomColor, gradientEndPx, { backdropOffset.value })
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = 110.dp)) {
@@ -381,7 +421,7 @@ fun HomeScreen(
             Column(Modifier.onSizeChanged { setItemHeight("hero", it.height) }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
             Spacer(modifier = Modifier.statusBarsPadding())
-            Spacer(modifier = Modifier.height(136.dp))
+            Spacer(modifier = Modifier.height(116.dp))
 
             // Hero Banner with poster color extraction and adaptive phone height
             val onHeroPlay = remember(heroMedia, onPlayClick) { { onPlayClick(heroMedia) } }
@@ -436,7 +476,8 @@ fun HomeScreen(
             }
 
             // Catalog Section Rows based on selected category filter
-            items(uiSections, key = { it.id }, contentType = { if (it.isTop10) "ranked_row" else "poster_row" }) { section ->
+            uiSections.forEachIndexed { index, section ->
+              item(key = section.id, contentType = if (section.isTop10) "ranked_row" else "poster_row") {
                 val rowState = rememberLazyListState()
                 MediaSectionRow(
                     section = section,
@@ -447,6 +488,19 @@ fun HomeScreen(
                     onMediaClick = onMediaClick,
                     modifier = Modifier.onSizeChanged { setItemHeight(section.id, it.height) }
                 )
+              }
+              if (showGames && index == 0) {
+                  item(key = "mobile_games", contentType = "games_row") {
+                      HomeGamesRow(games, onGameClick, onOpenGames,
+                          Modifier.onSizeChanged { setItemHeight("mobile_games", it.height) })
+                  }
+              }
+            }
+            if (showGames && uiSections.isEmpty()) {
+                item(key = "mobile_games", contentType = "games_row") {
+                    HomeGamesRow(games, onGameClick, onOpenGames,
+                        Modifier.onSizeChanged { setItemHeight("mobile_games", it.height) })
+                }
             }
         }
     }

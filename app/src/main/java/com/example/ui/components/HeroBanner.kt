@@ -22,7 +22,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -51,24 +50,31 @@ fun HeroBanner(
 ) {
     val colors by rememberPosterColors(media)
     LaunchedEffect(media.id, colors) { onColorsExtracted(colors.first, colors.second) }
-    val shape = remember { RoundedCornerShape(16.dp) }
-    val footerColor = lerp(colors.second, Color.Black, .32f)
+    val shape = remember { RoundedCornerShape(12.dp) }
+    val footerColor = colors.second
     val rim = remember { Brush.verticalGradient(listOf(
-        Color.White.copy(alpha = .38f), Color.White.copy(alpha = .12f), Color.White.copy(alpha = .24f)
+        Color.White.copy(alpha = .16f), Color.White.copy(alpha = .04f), Color.White.copy(alpha = .10f)
     )) }
     val heroWidth = (LocalConfiguration.current.screenWidthDp - 52).coerceIn(1, 540).dp
     val posterRequest = rememberPosterRequest(posterModel(media), heroWidth, cardHeight)
-    val logoRequest = rememberPosterRequest(media.logoUrl, heroWidth * .85f, 62.dp)
-    val footerBrush = remember(footerColor, colors.second) { Brush.verticalGradient(
-        0f to Color.Black.copy(alpha = .10f), .45f to Color.Transparent,
-        .62f to footerColor.copy(alpha = .35f), .72f to footerColor.copy(alpha = .99f),
-        .78f to footerColor, .90f to footerColor, 1f to colors.second
+    val logoHeight = (cardHeight * .18f).coerceIn(64.dp, 104.dp)
+    val logoRequest = rememberPosterRequest(media.logoUrl, heroWidth * .82f, logoHeight)
+    var logoFailed by remember(media.id, media.logoUrl) { mutableStateOf(false) }
+    // Regular catalog posters already contain their title artwork. A second
+    // overlaid wordmark duplicates it, especially with the reference's soft scrim.
+    val needsTitleOverlay = media.posterUrl.isNullOrBlank() && media.bannerDrawableRes == null
+    val footerBrush = remember(footerColor) { Brush.verticalGradient(
+        0f to Color.Transparent, .62f to Color.Transparent,
+        .76f to footerColor.copy(alpha = .10f), .88f to footerColor.copy(alpha = .38f),
+        1f to footerColor.copy(alpha = .68f)
     ) }
-    val genreLabel = remember(media.genres) { media.genres.take(4).joinToString(" • ") }
+    val genreLabel = remember(media.genres) {
+        media.genres.filter { it.isNotBlank() }.distinct().take(3).joinToString(" • ")
+    }
     Box(modifier.fillMaxWidth().padding(start = 26.dp, end = 26.dp, top = 12.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
         Box(
-            Modifier.fillMaxWidth().widthIn(max = 540.dp).height(cardHeight)
-                .shadow(8.dp, shape, clip = false, ambientColor = colors.first.copy(alpha = .25f), spotColor = Color.Black.copy(alpha = .55f))
+            Modifier.widthIn(max = 540.dp).fillMaxWidth().height(cardHeight)
+                .shadow(5.dp, shape, clip = false, ambientColor = colors.first.copy(alpha = .15f), spotColor = Color.Black.copy(alpha = .40f))
                 .clip(shape).border(1.dp, rim, shape)
                 .background(colors.second).clickable(onClick = onInfoClick).testTag("hero_banner_card")
         ) {
@@ -78,23 +84,26 @@ fun HeroBanner(
                 modifier = Modifier.fillMaxSize().graphicsLayer { translationY = parallaxOffsetProvider().coerceIn(-12f, 12f) }
             )
             Box(Modifier.fillMaxSize().background(footerBrush))
-            if (media.isOriginal) NetflixNLogo(size = 27.dp, modifier = Modifier.padding(14.dp).align(Alignment.TopStart))
+            if (media.isOriginal) NetflixNLogo(size = 26.dp, modifier = Modifier.padding(10.dp).align(Alignment.TopStart))
             Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (!media.logoUrl.isNullOrBlank()) {
+                if (needsTitleOverlay && !media.logoUrl.isNullOrBlank() && !logoFailed) {
                     AsyncImage(model = logoRequest, contentDescription = media.title,
-                        contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth(.85f).height(62.dp))
-                } else {
+                        contentScale = ContentScale.Fit, onError = { logoFailed = true },
+                        modifier = Modifier.fillMaxWidth(.82f).height(logoHeight))
+                } else if (needsTitleOverlay) {
                     Text(media.title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                Spacer(Modifier.height(20.dp))
-                Text(genreLabel, color = Color.White.copy(alpha = .8f),
-                    fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(18.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                if (genreLabel.isNotEmpty()) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(genreLabel, color = Color.White.copy(alpha = .92f),
+                        fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onPlayClick, modifier = Modifier.weight(1f).height(44.dp).testTag("hero_play"),
                         shape = RoundedCornerShape(4.dp), contentPadding = PaddingValues(horizontal = 10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {

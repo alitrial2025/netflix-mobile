@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.LightMode
@@ -171,6 +172,7 @@ fun VideoPlayerScreen(
     onPlayNextEpisode: () -> Unit,
     onSelectEpisode: (Episode) -> Unit,
     onOpenCast: (() -> Unit)? = null,
+    onSaveMoment: (() -> Unit)? = null,
     onSetRating: ((String) -> Unit)? = null,
     currentRating: String? = null,
     onUpdateProgress: ((Int, Int) -> Unit)? = null,
@@ -1203,12 +1205,22 @@ fun VideoPlayerScreen(
                             }
                         }
 
-                        // Right: Cast & Close
+                        // Right: saved playback moment, Cast and Close.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.align(Alignment.CenterEnd)
                         ) {
+                            if (onSaveMoment != null && playerState.sourceId != "Trailer") {
+                                IconButton(
+                                    onClick = { reportProgress(); onSaveMoment() },
+                                    enabled = !playerState.isResolving && playerState.resolvedUrl != null,
+                                    modifier = Modifier.testTag("player_save_moment_button")
+                                ) {
+                                    Icon(Icons.Default.BookmarkAdd, "Save moment",
+                                        tint = Color.White, modifier = Modifier.size(24.dp))
+                                }
+                            }
                             IconButton(
                                 onClick = { onOpenCast?.invoke() },
                                 modifier = Modifier.testTag("player_cast_button")

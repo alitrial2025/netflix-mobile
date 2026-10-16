@@ -153,6 +153,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val downloadsForYouEnabled by viewModel.downloadsForYouEnabled.collectAsStateWithLifecycle()
     val profileDownloadAllocations by viewModel.profileDownloadAllocations.collectAsStateWithLifecycle()
     val watchlist by viewModel.watchlist.collectAsStateWithLifecycle()
+    val savedMoments by viewModel.savedMoments.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val watchHistory by viewModel.watchHistory.collectAsStateWithLifecycle()
     val continueWatchingOptions by viewModel.continueWatchingOptions.collectAsStateWithLifecycle()
@@ -303,11 +304,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                             val stableOnNewAndHotClick = remember(viewModel) { { viewModel.selectTab(NavigationTab.NEW_HOT) } }
                             val stableOnDownloadsClick = remember(viewModel) { { viewModel.openDownloadsScreen(true) } }
                             val stableOnNotificationsClick = remember(viewModel) { { viewModel.openNotificationsSheet(true) } }
+                            var selectedGame by remember { mutableStateOf<com.example.data.model.GameItem?>(null) }
 
-                            Box(modifier = Modifier.fillMaxSize()) {
+                            com.example.ui.components.MobileHomeViewport {
                                 if (categoryFilter == CategoryFilter.GAMES) {
-                                    var selectedGame by remember { mutableStateOf<com.example.data.model.GameItem?>(null) }
-
                                     com.example.ui.screens.GamesScreen(
                                         games = games,
                                         onGameClick = { selectedGame = it },
@@ -315,12 +315,6 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                         listState = homeListState
                                     )
 
-                                    selectedGame?.let { game ->
-                                        com.example.ui.screens.GameDetailSheet(
-                                            game = game,
-                                            onDismiss = { selectedGame = null }
-                                        )
-                                    }
                                 } else {
                                     HomeScreen(
                                         catalogMedia = catalogMedia,
@@ -341,7 +335,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                         onWatchlistToggle = stableOnWatchlistToggle,
                                         onContinueWatchingOptionsClick = stableOnContinueWatchingOptionsClick,
                                         onAmbientColorChange = stableOnAmbientColorChange,
-                                        listState = homeListState
+                                        listState = homeListState,
+                                        games = games,
+                                        onGameClick = { selectedGame = it },
+                                        onOpenGames = { viewModel.setCategoryFilter(CategoryFilter.GAMES, null) }
                                     )
                                 }
 
@@ -357,8 +354,15 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                     isGamesAllowed = userSubscription.isGamesAllowed,
                                     unreadNotificationCount = notifications.count { !it.isRead },
                                     modifier = Modifier.align(Alignment.TopCenter),
-                                    scrollFractionProvider = { scrollFractionState.value }
+                                    scrollFractionProvider = { scrollFractionState.value },
+                                    onCastClick = { viewModel.openCastDialog(true) }
                                 )
+                                selectedGame?.let { game ->
+                                    com.example.ui.screens.GameDetailSheet(
+                                        game = game,
+                                        onDismiss = { selectedGame = null }
+                                    )
+                                }
                             }
                         }
 
@@ -399,7 +403,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 notifications = notifications,
                                 connectedCastDevice = connectedCastDevice,
                                 onToggleReminder = { viewModel.toggleReminder(it) },
-                                onToggleLike = { viewModel.setRating(it, "LIKE") },
+                                onToggleLike = viewModel::toggleLike,
                                 onMediaClick = { viewModel.openDetail(it) },
                                 onPlayClick = { viewModel.playTrailer(it, "Teaser: ${it.title}") },
                                 onWatchlistToggle = { viewModel.toggleWatchlist(it) },
@@ -465,7 +469,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 userSubscription = userSubscription,
                                 isAuthenticated = isAccountAuthenticated,
                                 onOpenSubscription = { viewModel.openSubscriptionSheet(true) },
-                                onOpenAuth = { viewModel.openAuthScreen(true) }
+                                onOpenAuth = { viewModel.openAuthScreen(true) },
+                                savedMoments = savedMoments,
+                                onPlayMoment = viewModel::playSavedMoment,
+                                onRemoveMoment = viewModel::removeSavedMoment
                             )
                         }
                     }
@@ -1009,6 +1016,7 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
                 playerState.media?.let { media -> viewModel.playMedia(media, ep) }
             },
             onOpenCast = { viewModel.openCastDialog(true) },
+            onSaveMoment = viewModel::saveCurrentMoment,
             onSetRating = { rating ->
                 playerState.media?.let { media -> viewModel.setRating(media.id, rating) }
             },

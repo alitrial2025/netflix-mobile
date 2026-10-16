@@ -10,6 +10,8 @@
 }
 # Catalog/offline models use Moshi's Kotlin reflection adapter.
 -keep class com.example.data.model.MediaItem { *; }
+-keep class com.example.data.model.SavedMoment { *; }
+-keep class com.example.data.SavedMomentsDocument { *; }
 -keep class com.example.data.model.Episode { *; }
 -keep class com.example.data.model.MediaType { *; }
 -keep class com.example.data.download.SavedDownloadRequest { *; }

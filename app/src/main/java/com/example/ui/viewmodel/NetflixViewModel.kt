@@ -32,6 +32,8 @@ import com.example.data.model.GameItem
 import com.example.discovery.recommendationTitle
 import com.example.discovery.toDiscoveryMedia
 import com.example.data.model.MediaItem
+import com.example.data.model.SavedMoment
+import com.example.data.SavedMomentsRepository
 import com.example.data.model.MediaType
 import com.example.data.model.NotificationIconType
 import com.example.data.model.NotificationItem
@@ -81,6 +83,8 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 
 enum class NavigationTab {
@@ -857,7 +861,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     // Player State
     private val _playerState = MutableStateFlow(PlayerState())
+    private val ratingActionsMutex = Mutex()
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
+
+    private val momentsRepository = SavedMomentsRepository.get(application)
+    val savedMoments: StateFlow<List<SavedMoment>> = combine(
+        syncManager.authenticatedUserId, _activeProfile
+    ) { uid, profile -> uid to profile.id }
+        .flatMapLatest { (uid, profileId) -> momentsRepository.observe(uid, profileId) }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var playerTickerJob: Job? = null
 
@@ -1925,6 +1938,21 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun toggleLike(mediaId: String) {
+        if (_userSubscription.value.isGuest) { setRating(mediaId, "LIKE"); return }
+        val uid = syncManager.authenticatedUserId.value ?: return
+        val profileId = _activeProfile.value.id
+        viewModelScope.launch {
+            ratingActionsMutex.withLock {
+                if (syncManager.authenticatedUserId.value != uid || _activeProfile.value.id != profileId) return@withLock
+                val existing = repository.getRating(profileId, mediaId).firstOrNull()?.ratingType
+                if (syncManager.authenticatedUserId.value != uid || _activeProfile.value.id != profileId) return@withLock
+                if (existing == "LIKE" || existing == "DOUBLE_LIKE") repository.clearRating(profileId, mediaId)
+                else repository.setRating(profileId, mediaId, "LIKE")
+            }
+        }
+    }
+
     // Playback Controls
     private var resolveJob: Job? = null
     private var playbackRequestGeneration = 0L
@@ -1946,7 +1974,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         replacement?.invoke()
     }
 
-    fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false) {
+    fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false,
+                  initialPositionSeconds: Int? = null, initialDurationSeconds: Int? = null) {
         val pending = _playerState.value
         if (resolveJob?.isActive == true && pending.media?.id == media.id &&
             (episode == null || pending.episode?.id == episode.id)) return
@@ -1977,7 +2006,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         nextEpisodeJob?.cancel()
         val latestProgress = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
         val targetEpisode = initialPlaybackEpisode(media, episode, latestProgress)
-        val totalSec = targetEpisode?.durationMinutes?.times(60) ?: 7200
+        val totalSec = initialDurationSeconds?.takeIf { it > 0 }
+            ?: targetEpisode?.durationMinutes?.times(60) ?: 7200
 
         _playerState.value = PlayerState(
             media = media,
@@ -1991,7 +2021,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             nextEpisodeMedia = media,
             isPlaying = false,
             isResolving = true,
-            currentPositionSec = 0,
+            currentPositionSec = initialPositionSeconds?.coerceAtLeast(0) ?: 0,
             durationSec = totalSec,
             playbackSpeed = 1.0f,
             showControls = true,
@@ -2016,7 +2046,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 _membershipPrompt.value = media
                 return@launch
             }
-            if (progressEntity != null) {
+            if (progressEntity != null && initialPositionSeconds == null) {
                 if (targetEpisode == null || episodeCoordinates(targetEpisode.id) ==
                     episodeCoordinates(progressEntity.episodeId, progressEntity.season, progressEntity.episode)) {
                     if (progressEntity.canResume() && progressEntity.positionSeconds > 10) {
@@ -2217,6 +2247,70 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         // Do not resolve/download the next episode while the current stream or its
         // countdown is active. A transition keeps this pending until the player closes.
         pendingSmartReplacement = replacement
+    }
+
+    fun saveCurrentMoment() {
+        val uid = syncManager.authenticatedUserId.value ?: run {
+            showToast("Sign in to save moments to your profile."); return
+        }
+        val profileId = _activeProfile.value.id
+        val state = _playerState.value
+        val media = state.media ?: return
+        if (state.sourceId == "Trailer" || state.isResolving || state.resolvedUrl == null ||
+            state.currentPositionSec !in 0 until state.durationSec) return
+        val coordinates = state.episode?.let { episode ->
+            Regex("(?:_S|^s)(\\d+)(?:_e|_)(\\d+)$", RegexOption.IGNORE_CASE)
+                .find(episode.id)?.let { it.groupValues[1].toInt() to it.groupValues[2].toInt() }
+        }
+        if (media.type == MediaType.TV_SHOW && coordinates == null) {
+            showToast("This episode's details are not ready to save a moment."); return
+        }
+        val moment = SavedMoment(
+            id = java.util.UUID.randomUUID().toString(), media = media,
+            positionSeconds = state.currentPositionSec,
+            durationSeconds = minOf(15, state.durationSec - state.currentPositionSec),
+            createdAt = System.currentTimeMillis(), episodeId = state.episode?.id,
+            episodeNumber = coordinates?.second, seasonNumber = coordinates?.first,
+            episodeTitle = state.episode?.title, titleDurationSeconds = state.durationSec
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            if (syncManager.authenticatedUserId.value != uid || _activeProfile.value.id != profileId) return@launch
+            val saved = momentsRepository.save(uid, profileId, moment)
+            withContext(Dispatchers.Main) {
+                if (syncManager.authenticatedUserId.value == uid && _activeProfile.value.id == profileId) {
+                    showToast(if (saved) "Moment saved in My Netflix." else "Couldn't save this moment. Check device storage.")
+                }
+            }
+        }
+    }
+
+    fun playSavedMoment(moment: SavedMoment) {
+        val uid = syncManager.authenticatedUserId.value ?: return
+        val saved = momentsRepository.get(uid, _activeProfile.value.id).firstOrNull { it.id == moment.id } ?: return
+        val media = _catalogMedia.value.firstOrNull { it.id == saved.media.id && it.type == saved.media.type }
+            ?: saved.media
+        val episode = if (media.type == MediaType.TV_SHOW) {
+            media.episodes.firstOrNull { it.id == saved.episodeId } ?: Episode(
+                id = saved.episodeId ?: return, episodeNumber = saved.episodeNumber ?: return,
+                title = saved.episodeTitle.orEmpty(),
+                durationMinutes = ((saved.titleDurationSeconds ?: 7_200) + 59) / 60,
+                description = ""
+            )
+        } else null
+        // Bookmarks supply a start position only; the normal local/online admission
+        // and download selection below still decide whether this title can play.
+        playMedia(media, episode, initialPositionSeconds = saved.positionSeconds,
+            initialDurationSeconds = saved.titleDurationSeconds)
+    }
+
+    fun removeSavedMoment(moment: SavedMoment) {
+        val uid = syncManager.authenticatedUserId.value ?: return
+        val profileId = _activeProfile.value.id
+        viewModelScope.launch(Dispatchers.IO) {
+            if (syncManager.authenticatedUserId.value != uid || _activeProfile.value.id != profileId) return@launch
+            val removed = momentsRepository.remove(uid, profileId, moment.id)
+            if (!removed) withContext(Dispatchers.Main) { showToast("Couldn't remove this moment. Check device storage.") }
+        }
     }
 
     fun togglePlayPause() {

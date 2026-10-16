@@ -98,7 +98,7 @@ fun MediaSectionRow(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 17.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.SansSerif,
                 letterSpacing = (-0.3).sp
@@ -146,7 +146,7 @@ fun MediaSectionRow(
             LazyRow(
                 state = lazyListState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(rowHeight)
