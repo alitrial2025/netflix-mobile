@@ -316,7 +316,7 @@ https://cdn.example/video/720.m3u8?in=provider-issued
         }
         val seen = mutableListOf<Request>()
         val http = client(seen) { request -> when (request.url.encodedPath) {
-            "/mobile/hs/post.php" -> Fixture("""{"status":"y","title":"Lanterns","type":"t","year":"2026","episodes":[{"id":"1271684191","s":"S1","ep":"E1"},{"id":"1271684192","s":"S1","ep":"E2"}]}""")
+            "/newtv/post.php" -> Fixture("""{"status":"y","title":"Lanterns","type":"t","year":"2026","episodes":[{"id":"1271684191","s":"S1","ep":"E1"},{"id":"1271684192","s":"S1","ep":"E2"}]}""")
             "/checknewtv.php" -> discovery()
             "/newtv/player.php" -> Fixture("""{"video_link":"https://cdn.example/${request.url.queryParameter("id")}.m3u8"}""")
             "/1271684191.m3u8", "/1271684192.m3u8" -> media
@@ -332,6 +332,7 @@ https://cdn.example/video/720.m3u8?in=provider-issued
         assertEquals("1271684192", next.contentId)
         assertEquals(1, seen.count { it.url.encodedPath.endsWith("post.php") })
         assertEquals(2, seen.count { it.url.encodedPath == "/newtv/player.php" })
+        assertFalse(seen.any { it.url.host == "net52.cc" || it.url.host == "www.netflix.com" })
     }
 
     @Test fun legacyCooldownRevisionKeepsPrimaryCacheAndItsVerifiedManifestHandoff() = runBlocking {
