@@ -27,22 +27,7 @@ import org.robolectric.annotation.GraphicsMode
 class MobileRefinementTest {
     @get:Rule val rule = createComposeRule()
 
-    private var previousFramePause = false
-    private var previousFrameDelay = java.time.Duration.ZERO
 
-    // Foundation 1.7 prefetch can repost forever with synchronous zero-delay
-    // Robolectric vsync. Keep real frame intervals; UI assertions stay intact.
-    @org.junit.Before fun useBoundedNativeFrames() {
-        previousFramePause = org.robolectric.shadows.ShadowChoreographer.isPaused()
-        previousFrameDelay = org.robolectric.shadows.ShadowChoreographer.getFrameDelay()
-        org.robolectric.shadows.ShadowChoreographer.setPaused(true)
-        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(java.time.Duration.ofMillis(16))
-    }
-
-    @org.junit.After fun restoreNativeFrames() {
-        org.robolectric.shadows.ShadowChoreographer.setFrameDelay(previousFrameDelay)
-        org.robolectric.shadows.ShadowChoreographer.setPaused(previousFramePause)
-    }
 
     private val premium = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE)
     private fun media(type: MediaType = MediaType.TV_SHOW) = MediaItem("mr_robot", "Mr. Robot", type,
