@@ -249,8 +249,13 @@ class NetflixDownloadManager(
     private fun observeScheduledWork(request: SavedDownloadRequest) {
         scope.launch {
             val finished = workManager.getWorkInfosForUniqueWorkFlow(downloadWorkName(request.task.downloadKey))
-                .first { infos -> infos.any { request.token in it.tags && it.state.isFinished } }
-                .first { request.token in it.tags && it.state.isFinished }
+                .first { infos ->
+                    val current = requests[request.task.downloadKey]
+                    current?.token != request.token || current.task.status !in setOf(
+                        DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING) ||
+                        infos.any { request.token in it.tags && it.state.isFinished }
+                }
+                .firstOrNull { request.token in it.tags && it.state.isFinished } ?: return@launch
             synchronized(this@NetflixDownloadManager) {
                 val current = requests[request.task.downloadKey]
                 if (current?.token == request.token && current.task.status in setOf(
