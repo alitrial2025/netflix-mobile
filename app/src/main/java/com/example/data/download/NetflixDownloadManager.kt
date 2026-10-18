@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -157,6 +159,18 @@ class NetflixDownloadManager(
                 updateTask(task)
                 _downloadingProgress.update { it + (task.downloadKey to task.progress) }
                 if (task.status == DownloadTaskStatus.PAUSED) _pausedDownloadKeys.update { it + task.downloadKey }
+                if (task.status in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) {
+                    // Replace old UNMETERED jobs once so an update also unblocks already queued hotspots.
+                    if (request.schedulerVersion < 1) scope.launch {
+                        try {
+                            synchronized(this@NetflixDownloadManager) {
+                                requests[task.downloadKey]?.takeIf { it.token == request.token && it.task.status == DownloadTaskStatus.QUEUED }
+                                    ?.let { enqueue(it) }
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { markFailed(task.downloadKey, request.token, "Could not resume this download. Check storage and retry.") }
+                    } else observeScheduledWork(request)
+                }
             }
         }
     }
@@ -206,14 +220,48 @@ class NetflixDownloadManager(
     }
 
     private fun enqueue(request: SavedDownloadRequest) {
-        val constraints = Constraints.Builder().setRequiredNetworkType(
-            if (request.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
-            .setRequiresStorageNotLow(true).build()
-        val work = OneTimeWorkRequestBuilder<VideoDownloadWorker>()
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)
+            .setRequiresStorageNotLow(true)
+        if (request.wifiOnly && Build.VERSION.SDK_INT >= 28) {
+            // A hotspot is Wi-Fi even when Android marks it metered.
+            constraints.setRequiredNetworkRequest(NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET).build(), NetworkType.CONNECTED)
+        }
+        val builder = OneTimeWorkRequestBuilder<VideoDownloadWorker>()
             .setInputData(workDataOf("key" to request.task.downloadKey, "token" to request.token))
-            .setConstraints(constraints).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-            .addTag(WORK_TAG).build()
-        workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, work)
+            .setConstraints(constraints.build()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .addTag(WORK_TAG).addTag(request.token)
+        if (!request.automatic) builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+        val scheduled = request.copy(schedulerVersion = 1)
+        requestStore.put(scheduled)
+        requests[request.task.downloadKey] = scheduled
+        val operation = workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, builder.build())
+        scope.launch {
+            try { operation.result.get() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { markFailed(request.task.downloadKey, request.token, "Android could not queue this download. Retry to continue.") }
+        }
+        observeScheduledWork(scheduled)
+    }
+
+    private fun observeScheduledWork(request: SavedDownloadRequest) {
+        scope.launch {
+            val finished = workManager.getWorkInfosForUniqueWorkFlow(downloadWorkName(request.task.downloadKey))
+                .first { infos -> infos.any { request.token in it.tags && it.state.isFinished } }
+                .first { request.token in it.tags && it.state.isFinished }
+            synchronized(this@NetflixDownloadManager) {
+                val current = requests[request.task.downloadKey]
+                if (current?.token == request.token && current.task.status in setOf(
+                        DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) {
+                    markFailed(request.task.downloadKey, request.token, when (finished.state) {
+                        WorkInfo.State.CANCELLED -> "Android stopped this download. Retry to resume your saved progress."
+                        else -> "Download could not finish. Retry to resume your saved progress."
+                    })
+                }
+            }
+        }
     }
 
     /** Reapply network constraints without losing checkpoints or starting paused work. */
@@ -300,7 +348,7 @@ class NetflixDownloadManager(
                     return@withLock DownloadRunResult.RETRY
                 }
                 val retry = DownloadRetryPolicy.shouldRetry(error, attempt)
-                if (retry) markWaiting(key, token, "Connection interrupted. Your saved progress will resume automatically.")
+                if (retry) markWaiting(key, token, DownloadRetryPolicy.retryMessage(error))
                 else if (isCurrentRequest(key, token)) _downloadTasks.value[key]?.let {
                     updateTask(it.copy(status = DownloadTaskStatus.ERROR, errorMessage = DownloadRetryPolicy.userMessage(error)))
                 }
@@ -328,7 +376,7 @@ class NetflixDownloadManager(
         catch (error: Exception) {
             if (error.isAuthoritativeAccessFailure())
                 throw DownloadMembershipException(error.message ?: "This device is not authorized for downloads.")
-            throw IOException("Could not confirm membership and save offline access", error)
+            throw DownloadVerificationUnavailableException(error)
         }
         currentCoroutineContext().ensureActive()
         if (com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid != accountId)
@@ -364,7 +412,9 @@ class NetflixDownloadManager(
         if (saved?.task?.downloadedBytes?.let { it > 0 } == true)
             netMirrorResolver.evictCachedStream(media.id, type, season, number)
         for (renewal in 0..1) {
-            val stream = netMirrorResolver.resolveNet52(media.id, type, season, number)
+            val stream = resolveDownloadSource {
+                netMirrorResolver.resolveNet52(media.id, type, season, number, media.title, media.releaseYear.toString())
+            }
             currentCoroutineContext().ensureActive()
             try {
                 executeResolvedDownload(profileId, media, episode, key, episodeTitle, isHighQuality, stream, maxVideoHeight)

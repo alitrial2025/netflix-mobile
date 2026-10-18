@@ -1,6 +1,8 @@
 package com.example.data.download
 
 import android.app.Application
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.NetMirrorResolver
@@ -9,6 +11,8 @@ import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.repository.NetflixRepository
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.*
 import okio.Buffer
@@ -17,6 +21,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowNetworkCapabilities
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -26,6 +32,9 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import androidx.work.testing.SynchronousExecutor
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.ExistingWorkPolicy
+import androidx.work.Constraints
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -49,7 +58,7 @@ class BackgroundDownloadTest {
             manager.startOrResumeDownload("profile", item, isWifiOnly = true)
             val queued = wm.getWorkInfosForUniqueWork(name).get().single()
             assertEquals(WorkInfo.State.ENQUEUED, queued.state)
-            assertEquals(NetworkType.UNMETERED, queued.constraints.requiredNetworkType)
+            assertAcceptsHotspotButNotCellular(queued)
             assertTrue(queued.constraints.requiresStorageNotLow())
             manager.pauseDownload(item.id)
             assertEquals(WorkInfo.State.CANCELLED, wm.getWorkInfoById(queued.id).get()!!.state)
@@ -145,8 +154,69 @@ class BackgroundDownloadTest {
             assertEquals(DownloadTaskStatus.PAUSED, paused.task.status)
             assertTrue(work.getWorkInfosForUniqueWork(name).get().all { it.state == WorkInfo.State.CANCELLED })
             assertTrue(manager.resumeSavedDownload(item.id, "profile"))
-            assertEquals(NetworkType.UNMETERED, work.getWorkInfosForUniqueWork(name).get().last { it.state == WorkInfo.State.ENQUEUED }
-                .constraints.requiredNetworkType)
+            assertAcceptsHotspotButNotCellular(work.getWorkInfosForUniqueWork(name).get().last { it.state == WorkInfo.State.ENQUEUED })
         } finally { runBlocking { manager.cancelAndJoinTransfers() }; manager.close(); database.close(); work.cancelAllWork().result.get(); store.remove(item.id) }
+    }
+
+    private fun assertAcceptsHotspotButNotCellular(info: WorkInfo) {
+        val network = info.constraints.requiredNetworkRequest!!
+        fun capabilities(transport: Int) = ShadowNetworkCapabilities.newInstance().also {
+            shadowOf(it).addTransportType(transport)
+            shadowOf(it).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            // Include Android's default trusted-network capabilities (including API 31's VCN flag).
+            NetworkRequest.Builder().build().capabilities.forEach { capability -> shadowOf(it).addCapability(capability) }
+            shadowOf(it).removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
+        val hotspot = capabilities(NetworkCapabilities.TRANSPORT_WIFI)
+        assertTrue("Metered Wi-Fi hotspots must be eligible: $network vs $hotspot", network.canBeSatisfiedBy(hotspot))
+        val cellular = capabilities(NetworkCapabilities.TRANSPORT_CELLULAR)
+        assertFalse("Wi-Fi only must still exclude cellular", network.canBeSatisfiedBy(cellular))
+        val ethernet = capabilities(NetworkCapabilities.TRANSPORT_ETHERNET)
+        assertTrue(network.canBeSatisfiedBy(ethernet))
+    }
+
+    @Test fun appUpdateRequeuesPreviouslyBlockedHotspotJobsWithoutLosingProgressOrStartingPausedTitles() = runBlocking {
+        WorkManagerTestInitHelper.initializeTestWorkManager(app,
+            Configuration.Builder().setExecutor(SynchronousExecutor()).setTaskExecutor(SynchronousExecutor()).build())
+        val database = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java).build()
+        val store = DownloadRequestStore(File(app.noBackupFilesDir, "download-requests"))
+        val item = media().copy(id = "hotspot_migration")
+        val pausedItem = media().copy(id = "hotspot_paused")
+        val saved = SavedDownloadRequest("old-token", "account", "profile", item, null, true, true,
+            DownloadTaskInfo(item.id, item.id, item.title, progress = .4f, downloadedBytes = 400, profileId = "profile"))
+        val paused = saved.copy(token = "paused-token", media = pausedItem,
+            task = saved.task.copy(downloadKey = pausedItem.id, mediaId = pausedItem.id, status = DownloadTaskStatus.PAUSED))
+        val work = WorkManager.getInstance(app)
+        val old = OneTimeWorkRequestBuilder<VideoDownloadWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).build()).build()
+        store.put(saved)
+        store.put(paused)
+        work.enqueueUniqueWork(downloadWorkName(item.id), ExistingWorkPolicy.REPLACE, old).result.get()
+        val manager = NetflixDownloadManager(app, NetflixRepository(database.netflixDao()), NetMirrorResolver(app), accountIdProvider = { "account" })
+        try {
+            val migrated = withTimeout(5_000) {
+                var found: WorkInfo? = null
+                while (found == null) {
+                    found = work.getWorkInfosForUniqueWork(downloadWorkName(item.id)).get()
+                        .firstOrNull { it.id != old.id && it.state == WorkInfo.State.ENQUEUED }
+                    if (found == null) delay(10)
+                }
+                found
+            }
+            assertAcceptsHotspotButNotCellular(migrated)
+            // REPLACE may prune the cancelled predecessor from WorkManager's database.
+            assertTrue(work.getWorkInfoById(old.id).get()?.state.let { it == null || it == WorkInfo.State.CANCELLED })
+            assertEquals(.4f, manager.downloadTasks.value[item.id]!!.progress, 0f)
+            assertEquals(400L, manager.downloadTasks.value[item.id]!!.downloadedBytes)
+            assertEquals(1, store.all().first { it.task.downloadKey == item.id }.schedulerVersion)
+            assertEquals(DownloadTaskStatus.PAUSED, manager.downloadTasks.value[pausedItem.id]!!.status)
+            assertTrue(work.getWorkInfosForUniqueWork(downloadWorkName(pausedItem.id)).get().isEmpty())
+            // A scheduler cancellation must become retryable instead of remaining permanently queued.
+            work.cancelUniqueWork(downloadWorkName(item.id)).result.get()
+            withTimeout(5_000) {
+                while (manager.downloadTasks.value[item.id]?.status != DownloadTaskStatus.ERROR) delay(10)
+            }
+            assertTrue(manager.downloadTasks.value[item.id]!!.errorMessage!!.contains("Retry"))
+        } finally { manager.cancelAndJoinTransfers(); manager.close(); database.close(); work.cancelAllWork().result.get(); store.remove(item.id); store.remove(pausedItem.id) }
     }
 }

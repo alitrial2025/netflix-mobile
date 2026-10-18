@@ -22,7 +22,8 @@ internal data class SavedDownloadRequest(
     val localCaptionsJson: String = "[]",
     val isForYou: Boolean = false,
     val mediaBytes: Long = 0,
-    val automatic: Boolean = isForYou
+    val automatic: Boolean = isForYou,
+    val schedulerVersion: Int = 0
 )
 
 /** Persist intent and display state, never expiring stream URLs, cookies or headers. */
