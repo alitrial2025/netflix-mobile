@@ -51,7 +51,7 @@ object PayheroVerifier {
         val key = "$userId:$planId"
         val prefix = referencePrefix(userId, planId)
         val stored = prefs.getString(key, null)
-        if (stored != null && stored.startsWith(prefix)) return stored
+        if (stored != null && stored.startsWith(prefix) && Regex("[a-f0-9]{32}").matches(stored.removePrefix(prefix))) return stored
         return (prefix + UUID.randomUUID().toString().replace("-", "")).also {
             prefs.edit().putString(key, it).apply()
         }
@@ -105,12 +105,15 @@ object PayheroVerifier {
                     val saved = json?.optJSONObject("subscription")
                         ?: return@withContext VerificationResult.Error("The membership service returned an incomplete result. Retry the same code; do not pay again.")
                     if (saved.optString("planId") != planId || saved.optString("mpesaReceipt") != code ||
-                        saved.optString("status") != "ACTIVE" || saved.optLong("expiresAt") <= 0)
+                        saved.optString("status") !in setOf("ACTIVE", "GRACE_PERIOD") || saved.optLong("expiresAt") <= 0)
                         return@withContext VerificationResult.Error("The membership service could not confirm this payment. Contact support; do not pay again.")
+                    json?.optLong("serverNow")?.takeIf { it in 1L..8_640_000_000_000_000L }?.let(com.example.data.SubscriptionTime::synchronize)
                     val subscription = UserSubscription(status = saved.getString("status"), planId = planId,
                         planName = saved.optString("planName", plan.name), amount = saved.optInt("amount", plan.priceKes),
                         currency = saved.optString("currency", "KES"), paymentReference = saved.optString("paymentReference"),
                         mpesaReceipt = code, subscribedAt = saved.optLong("subscribedAt"), expiresAt = saved.getLong("expiresAt"))
+                    if (!subscription.isActive) return@withContext VerificationResult.Error(
+                        "This payment was already applied and its membership period has ended. Make a new payment to renew; this code cannot add more time.")
                     return@withContext VerificationResult.Success(subscription, json?.optInt("amountPaid", subscription.amount) ?: subscription.amount,
                         json?.optString("message", "Payment verified. Your membership is active.") ?: "Payment verified. Your membership is active.")
                 }

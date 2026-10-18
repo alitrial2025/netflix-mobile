@@ -334,9 +334,7 @@ class FirebaseSyncManager(private val context: Context) {
                 val user = auth?.currentUser
                 if (db != null && isFirebaseReady && ownerUid != null && user?.uid == ownerUid) {
                     val uid = ownerUid
-                    val batch = db.batch()
-                    profiles.forEach { profile ->
-                        val docRef = db.collection("users").document(uid).collection("profiles").document(profile.id)
+                    val profilesData = profiles.map { profile ->
                         val data = hashMapOf(
                             "id" to profile.id,
                             "name" to profile.name,
@@ -356,26 +354,26 @@ class FirebaseSyncManager(private val context: Context) {
                             "gameHandle" to (profile.gameHandle ?: ""),
                             "updatedAt" to System.currentTimeMillis()
                         )
-                        batch.set(docRef, data, SetOptions.merge())
-                    }
-                    if (activeProfileId != null) {
-                        val userDoc = db.collection("users").document(uid)
-                        batch.set(userDoc, mapOf("activeProfileId" to activeProfileId, "lastSync" to System.currentTimeMillis()), SetOptions.merge())
+                        data
                     }
                     if (auth?.currentUser?.uid != ownerUid) return@launch
-                    batch.commit().await()
+                    TrustedProfileSync.save(uid, profilesData, activeProfileId)
+                    if (auth?.currentUser?.uid != ownerUid) return@launch
                     _lastSyncStatus.value = "Profiles Synced (${profiles.size})"
                     Log.d("FirebaseSync", "✅ Successfully synced ${profiles.size} profiles to Firestore")
                 } else {
                     _lastSyncStatus.value = "Profiles Saved Locally (${profiles.size})"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                if (auth?.currentUser?.uid != ownerUid) return@launch
                 if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                     Log.d("FirebaseSync", "Firestore permission denied for profiles sync (offline mode active)")
                 } else {
                     Log.w("FirebaseSync", "Profiles sync note: ${e.message}")
                 }
-                _lastSyncStatus.value = "Profiles Saved Locally (${profiles.size})"
+                _lastSyncStatus.value = if (e is ProfileSyncException) e.message ?: "Profile sync failed" else "Profiles Saved Locally (${profiles.size})"
             }
         }
     }
@@ -743,6 +741,8 @@ class FirebaseSyncManager(private val context: Context) {
                     entryMutex.withLock {
                         fun isCurrent() = auth?.currentUser?.uid == user.uid &&
                             listenerEpoch == subscriptionListenerEpoch.get() && requestGeneration == subscriptionGeneration.get()
+                        if (!isCurrent()) return@withLock
+                        SubscriptionTime.refreshFromServer(context)
                         if (!isCurrent()) return@withLock
                         val confirmed = confirmedEntryVersion
                         if (serverVersion != null && confirmed?.first == user.uid && serverVersion < confirmed.second) return@withLock

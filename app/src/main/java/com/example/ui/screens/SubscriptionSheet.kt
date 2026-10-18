@@ -14,6 +14,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,8 +61,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,12 +119,37 @@ fun SubscriptionSheet(
         mutableStateOf(if (canPay) PayheroVerifier.checkoutReference(context, userId, selectedPlanId) else "")
     }
 
-    var mpesaCodeInput by remember { mutableStateOf("") }
-    var isVerifying by remember { mutableStateOf(false) }
-    var verificationError by remember { mutableStateOf<String?>(null) }
-    var showSuccessBanner by remember { mutableStateOf(false) }
-    var successMessage by remember { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
-    var showPaySubWebView by remember { mutableStateOf(false) }
+    var mpesaCodeInput by remember(userId, selectedPlanId) { mutableStateOf("") }
+    var isVerifying by remember(userId) { mutableStateOf(false) }
+    var verificationError by remember(userId, selectedPlanId) { mutableStateOf<String?>(null) }
+    var showSuccessBanner by remember(userId, selectedPlanId) { mutableStateOf(false) }
+    var successMessage by remember(userId, selectedPlanId) { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
+    var showPaySubWebView by remember(userId) { mutableStateOf(false) }
+
+    val minuteTick by produceState(0L) {
+        while (true) { kotlinx.coroutines.delay(60_000L); value += 1L }
+    }
+    val currentStatusLabel = remember(currentSubscription, minuteTick) { currentSubscription.statusLabel }
+    val currentSummary = remember(currentSubscription, minuteTick) {
+        when {
+            currentSubscription.isGuest -> "Free guest preview • Upgrade for full playback"
+            currentSubscription.isInRenewalGrace -> "Renewal overdue • Access ends after the two-day allowance"
+            currentSubscription.status.equals("SUSPENDED", true) -> "Membership suspended • Contact support before paying"
+            !currentSubscription.isActive -> "Membership inactive • Choose a plan or renew to watch"
+            else -> "KES ${currentSubscription.amount} / 30 days • ${currentSubscription.daysRemaining} days remaining"
+        }
+    }
+    var pendingActivation by remember(userId, selectedPlanId) { mutableStateOf<UserSubscription?>(null) }
+    LaunchedEffect(currentSubscription, pendingActivation, canPay) {
+        val pending = pendingActivation ?: return@LaunchedEffect
+        if (canPay && currentSubscription.isActive && currentSubscription.planId == pending.planId &&
+            currentSubscription.mpesaReceipt == pending.mpesaReceipt && currentSubscription.paymentReference == pending.paymentReference) {
+            PayheroVerifier.clearCheckoutReference(context, userId, pending.planId, paymentReference)
+            paymentReference = PayheroVerifier.checkoutReference(context, userId, pending.planId)
+            mpesaCodeInput = ""
+            pendingActivation = null
+        }
+    }
 
     Surface(
         modifier = modifier
@@ -195,7 +224,7 @@ fun SubscriptionSheet(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = if (currentSubscription.isActive) "ACTIVE" else if (currentSubscription.isGuest) "GUEST" else "UNPAID",
+                                    text = currentStatusLabel,
                                     color = if (currentSubscription.isActive) Color(0xFF46D369) else NetflixRed,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
@@ -210,7 +239,7 @@ fun SubscriptionSheet(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (currentSubscription.isGuest) "Free guest preview • Upgrade for 4K & TV access" else if (currentSubscription.isInRenewalGrace) "Renewal overdue • Access ends after the two-day allowance" else "KES ${currentSubscription.amount} / 30 days • ${currentSubscription.daysRemaining} days remaining",
+                            text = currentSummary,
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 13.sp
                         )
@@ -234,7 +263,7 @@ fun SubscriptionSheet(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
-            if (currentSubscription.isActive && selectedPlanId != currentSubscription.planId) {
+            if (currentSubscription.isActive && currentSubscription.daysRemaining > 0 && selectedPlanId != currentSubscription.planId) {
                 Text("Changing plans now replaces your remaining ${currentSubscription.daysRemaining} days. Renew your current plan to keep that time.",
                     color = Color(0xFFFFD166), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             }
@@ -314,7 +343,7 @@ fun SubscriptionSheet(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00AA85)),
                         shape = RoundedCornerShape(8.dp),
-                        enabled = canPay && !isVerifying,
+                        enabled = canPay && !isVerifying && pendingActivation == null && !currentSubscription.status.equals("SUSPENDED", true),
                         modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         Icon(imageVector = Icons.Default.CreditCard, contentDescription = null, tint = Color.White)
@@ -341,7 +370,7 @@ fun SubscriptionSheet(
                     OutlinedTextField(
                         value = mpesaCodeInput,
                         onValueChange = {
-                            mpesaCodeInput = it.uppercase()
+                            mpesaCodeInput = it.uppercase(Locale.ROOT)
                             verificationError = null
                         },
                         placeholder = { Text("e.g. SKL892HJ9K", color = Color.Gray) },
@@ -370,6 +399,7 @@ fun SubscriptionSheet(
                     val coroutineScope = rememberCoroutineScope()
                     Button(
                         onClick = {
+                            if (isVerifying) return@Button
                             val code = mpesaCodeInput.trim().uppercase(Locale.ROOT)
                             if (!Regex("^[A-Z0-9]{8,12}$").matches(code)) {
                                 verificationError = "Enter the 8–12 character M-Pesa code from your confirmation SMS."
@@ -395,11 +425,9 @@ fun SubscriptionSheet(
                                                 verificationError = "Sign in to the account used for this payment to see its membership."
                                                 return@launch
                                             }
-                                            PayheroVerifier.clearCheckoutReference(context, ownerToVerify, planToVerify.id, referenceToVerify)
-                                            paymentReference = PayheroVerifier.checkoutReference(context, ownerToVerify, planToVerify.id)
+                                            pendingActivation = result.subscription
                                             onPlanSelected(result.subscription)
                                             successMessage = result.message
-                                            mpesaCodeInput = "" // Clear input to prevent re-submission
                                             showSuccessBanner = true
                                         }
                                         is com.example.data.network.VerificationResult.Error -> {
@@ -426,7 +454,7 @@ fun SubscriptionSheet(
                             Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Activate ${selectedPlan.name} Membership",
+                                text = if (pendingActivation != null) "Retry membership refresh" else "Activate ${selectedPlan.name} Membership",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = Color.White
@@ -448,7 +476,7 @@ fun SubscriptionSheet(
                                 Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF46D369))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = successMessage,
+                                    text = if (pendingActivation != null) "Payment verified. Refreshing membership access. Reconnect and retry this same code if needed; do not pay again." else successMessage,
                                     color = Color.White,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
@@ -663,6 +691,7 @@ fun PaySubWebBottomSheet(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlanCard(
     plan: SubscriptionPlan,
@@ -736,10 +765,15 @@ private fun PlanCard(
                 color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             Spacer(modifier = Modifier.height(12.dp))
 
+            if (plan.id in setOf("plan_mobile", "plan_basic")) Text(
+                "One registered device. Contact support before changing devices.",
+                color = Color.LightGray, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp)
+            )
             // Details Grid
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Column {
                     Text("Quality", color = Color.Gray, fontSize = 11.sp)

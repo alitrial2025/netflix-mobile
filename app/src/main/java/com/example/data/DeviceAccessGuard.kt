@@ -107,6 +107,7 @@ object DeviceAccessGuard {
         val requestGeneration = confirmationState.snapshot().generation
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser?.takeUnless { it.isAnonymous } ?: throw MembershipCheckException()
+        SubscriptionTime.refreshFromServer(context)
         val device = deviceId(context)
         val coroutine = currentCoroutineContext()
         return confirmationMutex.withLock {
@@ -176,6 +177,7 @@ object ScreenLease {
         val requestGeneration = leaseState.snapshot().generation
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser?.takeUnless { it.isAnonymous } ?: throw MembershipCheckException()
+        SubscriptionTime.refreshFromServer(context)
         val device = DeviceAccessGuard.deviceId(context)
         val coroutine = currentCoroutineContext()
         acquisitionMutex.withLock {

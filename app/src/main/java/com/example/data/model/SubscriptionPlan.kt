@@ -99,7 +99,7 @@ object SubscriptionPlans {
     )
 
     fun getById(id: String): SubscriptionPlan {
-        return PLANS.find { it.id == id } ?: PLANS[2]
+        return requireNotNull(PLANS.find { it.id == id }) { "Unknown membership plan" }
     }
 
     const val PERIOD_MS = 30L * 24 * 60 * 60 * 1000
@@ -136,6 +136,18 @@ data class UserSubscription(
             com.example.data.RenewalPolicy.grantsAccess(status, expiresAt, clock())
 
     val accessEndsAt: Long get() = com.example.data.RenewalPolicy.accessEndsAt(expiresAt)
+    val statusLabel: String get() = when {
+        isGuest -> "GUEST"
+        SubscriptionPlans.PLANS.none { it.id == planId } -> "UNAVAILABLE"
+        isInRenewalGrace -> "RENEWAL DUE"
+        isActive -> "ACTIVE"
+        status.equals("SUSPENDED", true) -> "SUSPENDED"
+        status.equals("CANCELLED", true) -> "CANCELLED"
+        status.equals("PAST_DUE", true) -> "PAYMENT DUE"
+        status.equals("PENDING", true) || status.equals("PENDING_ACTIVATION", true) -> "PAYMENT PENDING"
+        expiresAt > 0L -> "EXPIRED"
+        else -> "INACTIVE"
+    }
     val isInRenewalGrace: Boolean get() = isActive && expiresAt <= clock()
     val renewalReminderDue: Boolean get() = isActive && com.example.data.RenewalPolicy.reminderDue(expiresAt, clock())
 

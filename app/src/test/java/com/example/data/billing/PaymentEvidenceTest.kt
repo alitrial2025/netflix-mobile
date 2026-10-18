@@ -5,8 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
+@Config(manifest = Config.NONE, sdk = [28])
+@GraphicsMode(GraphicsMode.Mode.LEGACY)
 class PaymentEvidenceTest {
     private fun payment() = JSONObject().put("provider_reference", "TEST123456").put("status", "SUCCESS")
         .put("provider", "M-PESA").put("currency", "KES").put("external_reference", "fixture-checkout")
