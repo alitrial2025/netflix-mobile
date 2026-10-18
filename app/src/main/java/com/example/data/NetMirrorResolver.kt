@@ -54,7 +54,7 @@ data class Caption(
     val url: String,
     val language: String,
     val type: String,
-    val languageCode: String = "en"
+    val languageCode: String = "und"
 )
 
 data class WarmSession(
@@ -1151,14 +1151,14 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
                                 .ifBlank { t.optString("language") }
                                 .ifBlank { t.optString("name") }
                                 .ifBlank { t.optString("lang") }
-                                .ifBlank { "English" }
+                                .ifBlank { "Unknown language" }
                             val langCode = t.optString("language")
                                 .ifBlank { t.optString("srclang") }
                                 .ifBlank { t.optString("lang") }
                                 .ifBlank { t.optString("code") }
-                                .ifBlank { "en" }
+                                .ifBlank { "und" }
                             val type = if (kind == "thumbnails") "thumbnails" else if (fileUrl.contains(".srt", ignoreCase = true)) "srt" else "vtt"
-                            captions.add(Caption(fileUrl, label, type, langCode))
+                            captions.add(SubtitleLanguage.normalize(Caption(fileUrl, label, type, langCode)))
                         }
                     }
                 }

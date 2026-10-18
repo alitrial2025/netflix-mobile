@@ -250,6 +250,9 @@ fun VideoPlayerScreen(
 
     var availableAudioTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
     var availableSubtitleTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
+    var subtitlePreference by remember(media.id, playerState.episode?.id) { mutableStateOf(playerState.subtitleTrack) }
+    var exactSubtitleChoice by remember(media.id, playerState.episode?.id) { mutableStateOf<com.example.data.SubtitleTrackSelection.Choice?>(null) }
+
 
     // Initialize ExoPlayer
     val exoPlayer = remember(context) {
@@ -262,9 +265,19 @@ fun VideoPlayerScreen(
             repeatMode = Player.REPEAT_MODE_OFF
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
-                .setPreferredTextLanguage(com.example.data.model.playbackLanguageCode(playerState.subtitleLanguage))
+                .setPreferredTextLanguage(com.example.data.SubtitleLanguage.code(playerState.subtitleLanguage))
+                .setSelectUndeterminedTextLanguage(false)
+                .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleLanguage == "Off")
                 .build()
+        }
+    }
+
+    LaunchedEffect(playerState.subtitleTrack) {
+        if (subtitlePreference != playerState.subtitleTrack) {
+            subtitlePreference = playerState.subtitleTrack
+            exactSubtitleChoice = null
+            com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference)
         }
     }
 
@@ -357,6 +370,7 @@ fun VideoPlayerScreen(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference, exactSubtitleChoice)
                 val audioList = mutableListOf<PlayerTrackOption>()
                 val subList = mutableListOf<PlayerTrackOption>()
 
@@ -400,12 +414,8 @@ fun VideoPlayerScreen(
                             val format = group.getTrackFormat(i)
                             val lang = format.language ?: ""
                             val rawLabel = format.label?.takeIf { it.isNotBlank() }
-                            val displayLang = if (lang.isNotBlank()) {
-                                try {
-                                    java.util.Locale.forLanguageTag(lang).getDisplayLanguage(java.util.Locale.ENGLISH).ifBlank { lang }
-                                } catch (_: Exception) { lang }
-                            } else "English"
-                            val label = rawLabel ?: displayLang
+                            val identity = com.example.data.SubtitleLanguage.identity(rawLabel.orEmpty(), lang)
+                            val label = identity.label
                             val isSelected = group.isTrackSelected(i)
                             val id = "sub_${group.mediaTrackGroup.id}_$i"
 
@@ -414,7 +424,7 @@ fun VideoPlayerScreen(
                                     PlayerTrackOption(
                                         id = id,
                                         name = label,
-                                        language = lang,
+                                        language = identity.code,
                                         isSelected = isSelected,
                                         group = group,
                                         trackIndex = i
@@ -435,7 +445,7 @@ fun VideoPlayerScreen(
                 )
 
                 if (latestPlayerState.captions.isNotEmpty()) {
-                    latestPlayerState.captions.filter { it.type !in setOf("thumbnails", "chapters") }.forEachIndexed { idx, cap ->
+                    latestPlayerState.captions.map(com.example.data.SubtitleLanguage::normalize).filter { it.type !in setOf("thumbnails", "chapters") }.forEachIndexed { idx, cap ->
                         val label = cap.language
                         if (subList.none { it.name.equals(label, ignoreCase = true) }) {
                             subList.add(
@@ -487,7 +497,7 @@ fun VideoPlayerScreen(
                 android.net.Uri.parse(url)
             }
 
-            val subtitleConfigs = playerState.captions
+            val subtitleConfigs = playerState.captions.map(com.example.data.SubtitleLanguage::normalize)
                 .filter { it.type !in setOf("thumbnails", "chapters") }
                 .map { caption ->
                     val mimeType = if (caption.type == "srt" || caption.url.endsWith(".srt", ignoreCase = true)) {
@@ -497,9 +507,9 @@ fun VideoPlayerScreen(
                     }
                     Media3Item.SubtitleConfiguration.Builder(android.net.Uri.parse(caption.url))
                         .setMimeType(mimeType)
-                        .setLanguage(caption.languageCode.ifEmpty { "en" })
+                        .setLanguage(caption.languageCode.ifEmpty { "und" })
                         .setLabel(caption.language)
-                        .setSelectionFlags(if (caption.language.contains("English", ignoreCase = true)) C.SELECTION_FLAG_DEFAULT else 0)
+                        .setSelectionFlags(0)
                         .build()
                 }
 
@@ -520,7 +530,9 @@ fun VideoPlayerScreen(
             exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT)
                 .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
-                .setPreferredTextLanguage(com.example.data.model.playbackLanguageCode(playerState.subtitleLanguage))
+                .setPreferredTextLanguage(com.example.data.SubtitleLanguage.code(playerState.subtitleLanguage))
+                .setSelectUndeterminedTextLanguage(false)
+                .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleTrack == "Off").build()
             exoPlayer.setMediaSource(mediaSource)
             if (streamingAllowed) exoPlayer.prepare()
@@ -793,7 +805,10 @@ fun VideoPlayerScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
+                                            subtitlePreference = track.name
+                                            exactSubtitleChoice = track.group?.let { com.example.data.SubtitleTrackSelection.Choice(it.mediaTrackGroup, track.trackIndex) }
                                             if (track.id == "off" || track.name == "Off") {
+                                                exactSubtitleChoice = null
                                                 exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                                                     .buildUpon()
                                                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -814,7 +829,7 @@ fun VideoPlayerScreen(
                                                                 listOf(track.trackIndex)
                                                             )
                                                         )
-                                                        .setPreferredTextLanguage(track.language.ifEmpty { "en" })
+                                                        .setPreferredTextLanguage(track.language.ifEmpty { "und" })
                                                         .build()
                                                 } else if (track.language.isNotEmpty()) {
                                                     exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
@@ -828,6 +843,7 @@ fun VideoPlayerScreen(
                                                     it.copy(isSelected = it.id == track.id)
                                                 }
                                                 onSetSubtitle(track.name)
+                                                com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference, exactSubtitleChoice)
                                             }
                                         }
                                         .padding(vertical = 6.dp),

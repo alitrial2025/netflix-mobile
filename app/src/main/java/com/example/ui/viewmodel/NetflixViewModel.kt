@@ -3154,7 +3154,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         url = obj.optString("url"),
                         language = obj.optString("language"),
                         type = obj.optString("type"),
-                        languageCode = obj.optString("languageCode", "en")
+                        languageCode = obj.optString("languageCode", "und")
                     )
                 )
             }

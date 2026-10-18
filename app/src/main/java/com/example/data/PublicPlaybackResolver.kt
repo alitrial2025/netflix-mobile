@@ -767,15 +767,7 @@ internal class PublicPlaybackResolver(client: OkHttpClient, baseUrl: String = "h
                 val index = lines.indexOfFirst { it.startsWith("#EXT-X-STREAM-INF:") }
                 if (index < 0) {
                     if (!response.body.contains("#EXTINF:")) throw IOException("Media playlist unavailable")
-                    val tracks = item.optJSONArray("tracks") ?: item.optJSONArray("captions") ?: item.optJSONArray("subtitles") ?: JSONArray()
-                    val captions = objects(tracks).mapNotNull { track ->
-                        val file = field(track, "file", "src", "url").takeIf(String::isNotBlank) ?: return@mapNotNull null
-                        val absolute = base.resolve(file)?.takeIf { it.isHttps } ?: return@mapNotNull null
-                        val kind = track.optString("kind")
-                        if (kind.isNotBlank() && kind !in listOf("subtitles", "captions", "vtt", "thumbnails")) return@mapNotNull null
-                        Caption(absolute.toString(), field(track, "label", "language", "name", "lang").ifBlank { "English" },
-                            if (kind == "thumbnails") kind else if (file.contains(".srt")) "srt" else "vtt", field(track, "srclang", "language", "lang", "code").ifBlank { "en" })
-                    }
+                    val captions = PlaybackMetadataTracks.parse(item, base)
                     if (response.body.lineSequence().any { it.trim() == "#EXT-X-ENDLIST" }) {
                         verifiedManifests.forEach { (url, body) -> VerifiedManifestHandoff.offer(url, mediaHeaders, body, validatedVod = true) }
                     }
