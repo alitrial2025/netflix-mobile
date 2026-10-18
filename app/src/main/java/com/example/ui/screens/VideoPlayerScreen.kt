@@ -250,8 +250,14 @@ fun VideoPlayerScreen(
 
     var availableAudioTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
     var availableSubtitleTracks by remember { mutableStateOf<List<PlayerTrackOption>>(emptyList()) }
-    var subtitlePreference by remember(media.id, playerState.episode?.id) { mutableStateOf(playerState.subtitleTrack) }
-    var exactSubtitleChoice by remember(media.id, playerState.episode?.id) { mutableStateOf<com.example.data.SubtitleTrackSelection.Choice?>(null) }
+    val subtitlePreferenceState = remember(media.id, playerState.episode?.id) { mutableStateOf(playerState.subtitleTrack) }
+    val exactSubtitleChoiceState = remember(media.id, playerState.episode?.id) { mutableStateOf<com.example.data.SubtitleTrackSelection.Choice?>(null) }
+    var subtitlePreference by subtitlePreferenceState
+    var exactSubtitleChoice by exactSubtitleChoiceState
+    // The player listener survives episode changes, but must read the current state's
+    // values immediately, including a menu click before the next composition frame.
+    val latestSubtitlePreferenceState by rememberUpdatedState(subtitlePreferenceState)
+    val latestExactSubtitleChoiceState by rememberUpdatedState(exactSubtitleChoiceState)
 
 
     // Initialize ExoPlayer
@@ -370,7 +376,7 @@ fun VideoPlayerScreen(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
-                com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference, exactSubtitleChoice)
+                com.example.data.SubtitleTrackSelection.apply(exoPlayer, latestSubtitlePreferenceState.value, latestExactSubtitleChoiceState.value)
                 val audioList = mutableListOf<PlayerTrackOption>()
                 val subList = mutableListOf<PlayerTrackOption>()
 
