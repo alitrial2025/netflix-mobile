@@ -182,7 +182,7 @@ fun HomeScreen(
     }
 
     // Cache categorized rows for performance and consistency (Offloaded to Dispatchers.Default to prevent UI thread lag)
-    val uiSections by produceState(emptyList<MediaSection>(), catalogMedia, personalizedMedia,
+    val sectionState = produceState(emptyList<MediaSection>(), catalogMedia, personalizedMedia,
         categoryFilter, selectedGenre, activeProfile.name, railCardWidth) {
         value = withContext(Dispatchers.Default) {
             val rawSections = mutableListOf<Triple<String, String, List<MediaItem>>>()
@@ -383,6 +383,10 @@ fun HomeScreen(
             }
         }
     }
+
+    // Read once per composition: lazy interval counts, keys and game placement
+    // must share the same catalog snapshot while background row building completes.
+    val uiSections = sectionState.value
 
     // Heights change only on layout, not on each scroll frame. Retain the hero's
     // height after lazy disposal so its gradient continues through the first rows.

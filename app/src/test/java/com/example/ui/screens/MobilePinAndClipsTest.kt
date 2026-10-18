@@ -55,7 +55,7 @@ class MobilePinAndClipsTest {
     }
 
     @Test fun clipsSitsBetweenHomeAndSearchOnlyWhilePremiumIsActive() {
-        val membership = mutableStateOf(UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE))
+        val membership = mutableStateOf(UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L))
         var selected: NavigationTab? = null
         rule.setContent { NetflixTheme {
             NetflixBottomNav(NavigationTab.HOME, UserProfile("p", "Alex"), { selected = it },

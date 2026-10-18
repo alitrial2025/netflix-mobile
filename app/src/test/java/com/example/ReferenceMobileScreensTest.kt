@@ -67,7 +67,7 @@ class ReferenceMobileScreensTest {
     private val loadedArtwork = ConcurrentHashMap.newKeySet<String>()
     private val artworkSuccesses = ConcurrentHashMap<String, AtomicInteger>()
     private val profile = UserProfile("reference-profile", "Mike", avatarColorHex = 0xFFE50914L)
-    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE)
+    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L)
 
     @Before fun localArtworkLoaderBelongsToTheCurrentApplication() {
         val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()

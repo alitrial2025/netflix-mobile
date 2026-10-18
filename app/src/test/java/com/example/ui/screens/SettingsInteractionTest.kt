@@ -32,7 +32,7 @@ class SettingsInteractionTest {
                 onRunDiagnosticTest = { events += "diagnostic" }, onClearAllDownloads = { events += "delete" },
                 onSwitchProfile = { events += "switch" }, onOpenTvPair = { events += "tv" },
                 currentEmail = "member@example.test", userSubscription = UserSubscription(planId = if (paid) "plan_premium" else "plan_basic",
-                    status = "ACTIVE", expiresAt = Long.MAX_VALUE),
+                    status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L),
                 onOpenSubscription = { events += "membership" }, onEditProfile = { events += "edit" },
                 onOpenSmartDownloads = { events += "downloads" }, onSignOut = { events += "signout" },
                 onResetPassword = { events += "reset" }, hasActiveDownloads = hasActiveDownloads)

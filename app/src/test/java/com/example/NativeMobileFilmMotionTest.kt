@@ -66,7 +66,7 @@ class NativeMobileFilmMotionTest {
     private val show by lazy { MediaItem("42", "Squid Game", MediaType.TV_SHOW, "", "", 96, "16+", 2026, "3 Seasons",
         top10Rank = 1, genres = listOf("Violent", "Suspenseful", "Thriller", "Korean"), cast = emptyList(), director = "",
         posterUrl = fixture("squid-game.jpg"), logoUrl = fixture("squid-game-logo.png"), isTrending = true, episodes = listOf(com.example.data.model.Episode("42_S1_E1",1,"The Invitation",55,"A new game begins.", stillUrl=fixture("squid-game.jpg")),com.example.data.model.Episode("42_S1_E2",2,"A New Chapter",52,"The story continues.", stillUrl=fixture("squid-game.jpg")))) }
-    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE)
+    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L)
 
     private fun capture(name: String) {
         val directory = File(System.getProperty("screenshot.output", "/workspace/artifacts/netflixpro-cinematic/assets/native-mobile"))

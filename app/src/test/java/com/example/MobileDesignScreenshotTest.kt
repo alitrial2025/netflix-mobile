@@ -63,7 +63,7 @@ class MobileDesignScreenshotTest {
     private val show by lazy { MediaItem("42", "Squid Game", MediaType.TV_SHOW, "", "", 96, "16+", 2026, "3 Seasons",
         top10Rank = 1, genres = listOf("Violent", "Suspenseful", "Thriller", "Korean"), cast = emptyList(), director = "",
         posterUrl = fixture("squid-game.jpg"), logoUrl = fixture("squid-game-logo.png"), isTrending = true) }
-    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE)
+    private val membership = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L)
 
     private fun capture(name: String) {
         val directory = File(System.getProperty("screenshot.output", "build/reports/design-screenshots"))

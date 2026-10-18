@@ -29,7 +29,7 @@ class MobileRefinementTest {
 
 
 
-    private val premium = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = Long.MAX_VALUE)
+    private val premium = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = UserSubscription.clock() + 30L * 86_400_000L)
     private fun media(type: MediaType = MediaType.TV_SHOW) = MediaItem("mr_robot", "Mr. Robot", type,
         "A cybersecurity engineer becomes involved in a hidden world.", "Every revolution starts somewhere.", 96, "16+", 2015,
         if (type == MediaType.TV_SHOW) "4 Seasons" else "2h 10m", genres = listOf("Drama", "Thriller"), cast = listOf("Rami Malek"), director = "Sam Esmail",
