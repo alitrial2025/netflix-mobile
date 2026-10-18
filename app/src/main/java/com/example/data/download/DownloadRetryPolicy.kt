@@ -40,6 +40,7 @@ internal object DownloadRetryPolicy {
     }
     fun userMessage(error: Exception): String = if (isStorageFailure(error)) "Free up device storage, then continue the download." else when (error) {
         is DownloadMembershipException -> error.message ?: "Renew your membership to continue."
+        is DownloadWifiRequiredException -> "Connect to Wi-Fi, then continue the download."
         is DownloadVerificationUnavailableException -> "Could not verify download access. Check your connection and retry."
         is DownloadSourceUnavailableException -> "The download service is unavailable. Retry to request a download link."
         is PlaybackRateLimitedException -> "The download service is busy. Wait a little, then retry."
@@ -53,6 +54,7 @@ internal object DownloadRetryPolicy {
     }
 
     fun retryMessage(error: Exception): String = when (error) {
+        is DownloadWifiRequiredException -> "Waiting for Wi-Fi. Your saved progress will resume automatically."
         is DownloadVerificationUnavailableException -> "Waiting to verify download access. Your membership has not changed."
         is DownloadSourceUnavailableException -> "Waiting for a download link. Retrying automatically."
         is PlaybackRateLimitedException -> "The download service is busy. Retrying automatically after a wait."

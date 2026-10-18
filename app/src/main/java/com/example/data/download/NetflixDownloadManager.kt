@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Network
 import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
@@ -186,6 +187,17 @@ class NetflixDownloadManager(
         }
     }
 
+    private fun observeDownloadNetwork(onChange: () -> Unit): () -> Unit {
+        val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = onChange()
+            override fun onLost(network: Network) = onChange()
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = onChange()
+        }
+        connectivity.registerDefaultNetworkCallback(callback)
+        return { runCatching { connectivity.unregisterNetworkCallback(callback) }; Unit }
+    }
+
     @Synchronized
     fun startOrResumeDownload(
         profileId: String, media: MediaItem, episode: Episode? = null,
@@ -336,9 +348,11 @@ class NetflixDownloadManager(
                     val completedDownloads = repository.getDownloadsOnce(request.profileId)
                     if (completedDownloads.none { it.downloadKey == key } && completedDownloads.size >= plan.maxDownloads)
                         throw DownloadMembershipException("Your plan's offline title limit is reached. Delete a download to continue.")
-                    withContext(AutomaticDownloadContext(request.automatic)) {
-                        automaticPlaybackGate.requirePermission(request.automatic)
-                        executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+                    withDownloadNetwork(request.wifiOnly, ::isWifiConnected, ::observeDownloadNetwork) {
+                        withContext(AutomaticDownloadContext(request.automatic)) {
+                            automaticPlaybackGate.requirePermission(request.automatic)
+                            executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+                        }
                     }
                     removeSavedRequest(key, token)
                     DownloadRunResult.COMPLETE
