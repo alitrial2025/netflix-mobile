@@ -1,5 +1,6 @@
 package com.example.ui.viewmodel
 
+import com.example.data.SeriesEpisodeOrder
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Context
@@ -1646,7 +1647,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         detailGeneration++
         seasonGeneration++
         val latest = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
-        val season = latest?.takeIf { it.canResume() }?.season ?: 1
+        val season = latest?.takeIf { it.canResume() }?.let { SeriesEpisodeOrder.displaySeason(media.id, it.season, it.episode) } ?: 1
         _detailLoadState.value = DetailLoadState(loading = true, season = season)
         _selectedMedia.value = media
         fetchMediaDetails(media)
@@ -1693,10 +1694,10 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         seasonCache[key]?.let { return it }
         val id = resolveTmdbId(media.id) ?: error("Title metadata is unavailable")
         val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) {
-            TmdbClient.service.getTvSeasonDetails(id, season, TmdbClient.apiKey)
+            TmdbClient.service.getTvSeasonDetails(id, SeriesEpisodeOrder.sourceSeason(media.id, season), TmdbClient.apiKey)
         } ?: throw java.io.IOException("Season lookup timed out")
-        val episodes = details.episodes.map { ep ->
-            Episode("ep_${media.id}_S${season}_${ep.episodeNumber}", ep.episodeNumber,
+        val episodes = details.episodes.filter { ep -> SeriesEpisodeOrder.contains(media.id, season, ep.episodeNumber) }.map { ep ->
+            Episode("ep_${media.id}_S${SeriesEpisodeOrder.sourceSeason(media.id, season)}_${ep.episodeNumber}", ep.episodeNumber,
                 ep.name.ifEmpty { "Episode ${ep.episodeNumber}" }, ep.runtime ?: 45,
                 ep.overview.orEmpty(), ep.stillPath?.let { "https://image.tmdb.org/t/p/w500$it" })
         }.sortedBy { it.episodeNumber }
@@ -1785,8 +1786,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                         ?: details.credits?.crew?.firstOrNull()?.name
                         ?: "Unknown Creator"
 
-                    val numSeasons = details.numberOfSeasons ?: 1
-                    val numEpisodes = details.numberOfEpisodes ?: 0
+                    val numSeasons = SeriesEpisodeOrder.seasons(media.id)?.size ?: details.numberOfSeasons ?: 1
+                    val numEpisodes = if (SeriesEpisodeOrder.applies(media.id)) 170 else details.numberOfEpisodes ?: 0
                     val seasonsStr = "$numSeasons ${if (numSeasons == 1) "Season" else "Seasons"}" +
                         if (numEpisodes > 0) " ($numEpisodes Ep)" else ""
 
@@ -2393,17 +2394,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         _playerState.update { it.copy(nextEpisodeLoading = true, nextEpisodeError = null) }
         nextEpisodeJob = viewModelScope.launch {
             try {
-                val season = episodeCoordinates(episode.id).first
+                val season = episodeCoordinates(episode.id).let { SeriesEpisodeOrder.displaySeason(media.id, it.first, it.second) }
                 val loaded = media.episodes.takeIf { list -> list.any { it.id == episode.id } } ?: loadSeasonEpisodes(media, season)
                 var targetMedia = media.copy(episodes = loaded)
                 var next = nextLoadedEpisode(episode, loaded)
                 if (next == null) {
-                    if (loaded.any { episodeCoordinates(it.id).first == season && it.episodeNumber > episode.episodeNumber }) {
+                    if (loaded.any { episodeCoordinates(it.id).let { coordinates -> SeriesEpisodeOrder.displaySeason(media.id, coordinates.first, coordinates.second) } == season && it.episodeNumber > episode.episodeNumber }) {
                         throw java.io.IOException("Episode metadata is incomplete")
                     }
                     val id = resolveTmdbId(media.id) ?: error("Title metadata is unavailable")
                     val details = kotlinx.coroutines.withTimeoutOrNull(12_000L) { TmdbClient.service.getTvShowDetails(id, TmdbClient.apiKey) } ?: throw java.io.IOException("Series lookup timed out")
-                    val seasons = details.numberOfSeasons ?: media.totalSeasons
+                    val seasons = SeriesEpisodeOrder.seasons(media.id)?.size ?: details.numberOfSeasons ?: media.totalSeasons
                     targetMedia = targetMedia.copy(totalSeasons = seasons)
                     if (season < seasons) {
                         val nextSeason = loadSeasonEpisodes(media, season + 1)

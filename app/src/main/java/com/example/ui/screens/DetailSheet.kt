@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.data.SeriesEpisodeOrder
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -72,7 +73,7 @@ fun DetailScreen(
     val context = LocalContext.current
     val latestProgress = remember(media.id, watchProgressList) { watchProgressList.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp } }
     val resume = latestProgress?.takeIf { it.canResume() }
-    var localSeason by rememberSaveable(media.id) { mutableIntStateOf(resume?.season ?: 1) }
+    var localSeason by rememberSaveable(media.id) { mutableIntStateOf(resume?.let { SeriesEpisodeOrder.displaySeason(media.id, it.season, it.episode) } ?: 1) }
     val season = loadState?.season ?: localSeason
     var seasonMenu by remember(media.id) { mutableStateOf(false) }
     var seasonInfo by remember(media.id) { mutableStateOf(false) }
@@ -81,7 +82,7 @@ fun DetailScreen(
     val series = media.type == MediaType.TV_SHOW
     val tabs = if (series) listOf("Episodes", "More Like This", "Trailers & More") else listOf("More Like This", "Trailers & More")
     val tabIndex = tab.coerceIn(tabs.indices)
-    val episodes = remember(media.episodes, season) { media.episodes.filter { episodeCoordinates(it.id).first == season }.sortedBy { it.episodeNumber } }
+    val episodes = remember(media.episodes, season) { media.episodes.filter { episodeCoordinates(it.id).let { coordinates -> SeriesEpisodeOrder.displaySeason(media.id, coordinates.first, coordinates.second) } == season }.sortedBy { it.episodeNumber } }
     val progressByEpisode = remember(media.id, watchProgressList) { watchProgressList.filter { it.mediaId == media.id }.groupBy { it.episodeId }.mapValues { (_, entries) -> entries.maxBy { it.lastWatchedTimestamp } } }
     val target = if (series) episodes.firstOrNull { it.id == resume?.episodeId } ?: episodes.firstOrNull() else null
     val recommendations = remember(media.similarMedia, media.id, kidMaxAge) { media.similarMedia.filter { it.id != media.id && !it.isComingSoon && (kidMaxAge == null || it.isKidSafe(kidMaxAge)) }.distinctBy { it.type to it.id }.take(12) }
@@ -168,7 +169,7 @@ fun DetailScreen(
                                 Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White)
                             }
                             DropdownMenu(seasonMenu, onDismissRequest = { seasonMenu = false }) {
-                                (1..maxOf(1, media.totalSeasons, season)).forEach { value ->
+                                (SeriesEpisodeOrder.seasons(media.id) ?: (1..maxOf(1, media.totalSeasons, season)).toList()).forEach { value ->
                                     DropdownMenuItem(text = { Text("Season $value") }, onClick = { seasonMenu = false; localSeason = value; onSeasonSelect(value) })
                                 }
                             }

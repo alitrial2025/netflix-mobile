@@ -57,4 +57,15 @@ class MediaPlaybackPolicyTest {
         // Unfiltered related metadata must never expand the profile's permitted pool.
         assertEquals(listOf(allowed), postPlayCandidates(current.copy(similarMedia = listOf(show("restricted"))), listOf(current, allowed, future)))
     }
+    @Test fun splitSeasonPresentationPreservesDownloadedEpisodeIdsAndResumeProgress() {
+        val media = show("73223")
+        val saved = progress().copy(mediaId = "73223", episodeId = "ep_73223_S1_103", season = 1, episode = 103)
+        val resumed = initialPlaybackEpisode(media, null, saved)!!
+        assertEquals("ep_73223_S1_103", resumed.id)
+        assertEquals(3, com.example.data.SeriesEpisodeOrder.displaySeason(media.id, saved.season, saved.episode))
+        assertEquals(1 to 103, episodeCoordinates(resumed.id))
+        val next = Episode("ep_73223_S1_104", 104, "Next", 23, "")
+        assertEquals(next, nextLoadedEpisode(resumed, listOf(next, resumed)))
+    }
+
 }
