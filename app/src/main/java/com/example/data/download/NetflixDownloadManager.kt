@@ -9,7 +9,6 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Network
-import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -169,8 +168,8 @@ class NetflixDownloadManager(
                     val current = requests[request.task.downloadKey]
                     if (current?.token != request.token || current.accountId != accountIdProvider() ||
                         current.task.status !in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) return@synchronized
-                    if (current.schedulerVersion < 2 || scheduled.none { current.token in it.tags && !it.state.isFinished }) {
-                        // Recover old expedited work and orphaned requests after an OS/app restart.
+                    if (current.schedulerVersion < 3 || scheduled.none { current.token in it.tags && !it.state.isFinished }) {
+                        // Replace old custom-network jobs and recover orphaned requests after restart.
                         // A new token prevents a late callback from the old worker changing this task.
                         enqueue(current.copy(token = UUID.randomUUID().toString()))
                     } else observeScheduledWork(current)
@@ -239,19 +238,17 @@ class NetflixDownloadManager(
     private fun enqueue(request: SavedDownloadRequest) {
         val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresStorageNotLow(true)
-        if (request.wifiOnly && Build.VERSION.SDK_INT >= 28) {
-            // A hotspot is Wi-Fi even when Android marks it metered.
-            constraints.setRequiredNetworkRequest(NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET).build(), NetworkType.CONNECTED)
-        }
+        // WorkManager 2.10.1 loses the initial network state when foreground tracking
+        // subscribes to an already-tracked custom NetworkRequest, then stops the worker
+        // after one second. CONNECTED replays state correctly to both subscriptions.
+        // withDownloadNetwork enforces Wi-Fi-only before and throughout the transfer,
+        // including metered hotspots; UNMETERED would incorrectly exclude those.
         val builder = OneTimeWorkRequestBuilder<VideoDownloadWorker>()
             .setInputData(workDataOf("key" to request.task.downloadKey, "token" to request.token))
             .setConstraints(constraints.build()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_TAG).addTag(request.token)
         // A long foreground transfer must not depend on the short expedited-job quota.
-        val scheduled = request.copy(schedulerVersion = 2)
+        val scheduled = request.copy(schedulerVersion = 3)
         requestStore.put(scheduled)
         requests[request.task.downloadKey] = scheduled
         val operation = workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, builder.build())

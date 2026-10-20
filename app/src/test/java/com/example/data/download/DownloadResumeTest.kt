@@ -1,6 +1,10 @@
 package com.example.data.download
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.NetworkInfo
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
@@ -29,6 +33,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowNetworkCapabilities
+import org.robolectric.shadows.ShadowNetworkInfo
 import androidx.concurrent.futures.ResolvableFuture
 
 @RunWith(RobolectricTestRunner::class)
@@ -38,6 +45,22 @@ class DownloadResumeTest {
     private val plan = SubscriptionPlans.getById("plan_premium")
     private fun media() = MediaItem("resume_movie", "Resume movie", MediaType.MOVIE, "", "", 90, "16+", 2026, "2h",
         genres = emptyList(), cast = emptyList(), director = "")
+
+    private fun network(wifi: Boolean) {
+        val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val shadow = shadowOf(connectivity)
+        shadow.setActiveNetworkInfo(ShadowNetworkInfo.newInstance(NetworkInfo.DetailedState.CONNECTED,
+            if (wifi) ConnectivityManager.TYPE_WIFI else ConnectivityManager.TYPE_MOBILE, 0, true, true))
+        val caps = ShadowNetworkCapabilities.newInstance().also {
+            shadowOf(it).addTransportType(if (wifi) NetworkCapabilities.TRANSPORT_WIFI else NetworkCapabilities.TRANSPORT_CELLULAR)
+            shadowOf(it).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            shadowOf(it).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            shadowOf(it).removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
+        val active = connectivity.activeNetwork!!
+        shadow.setNetworkCapabilities(active, caps)
+        shadow.networkCallbacks.toList().forEach { it.onCapabilitiesChanged(active, caps) }
+    }
 
     private fun fixture(test: suspend (NetflixDownloadManager, DownloadRequestStore, WorkManager) -> Unit) = runBlocking {
         WorkManagerTestInitHelper.initializeTestWorkManager(app,
@@ -160,5 +183,34 @@ class DownloadResumeTest {
             assertEquals(400L, restored.downloadTasks.value[media().id]!!.downloadedBytes)
             assertEquals(.4f, restored.downloadTasks.value[media().id]!!.progress, 0f)
         } finally { restored.cancelAndJoinTransfers(); restored.close(); db.close() }
+    }
+
+    @Test fun wifiOnlyStillBlocksCellularBeforeMembershipOrSourceRequests() = fixture { manager, store, _ ->
+        network(wifi = false)
+        manager.startOrResumeDownload("profile", media(), isWifiOnly = true)
+        val saved = store.all().single()
+        assertEquals(DownloadRunResult.RETRY, manager.runSavedDownload(media().id, saved.token, 0,
+            confirmPlan = { error("Must wait for Wi-Fi before membership requests") },
+            transfer = { _, _ -> fail("Wi-Fi-only must never transfer on cellular") }))
+        assertEquals("Waiting for Wi-Fi", manager.downloadTasks.value[media().id]!!.errorMessage)
+    }
+
+    @Test fun leavingHotspotForCellularStopsTheActiveTransferAndWaitsForWifi() = fixture { manager, store, _ ->
+        network(wifi = true)
+        manager.startOrResumeDownload("profile", media(), isWifiOnly = true)
+        val saved = store.all().single()
+        val started = CompletableDeferred<Unit>()
+        var stopped = false
+        val download = CoroutineScope(currentCoroutineContext()).async {
+            manager.runSavedDownload(media().id, saved.token, 0, confirmPlan = { plan }, transfer = { _, _ ->
+                try { started.complete(Unit); awaitCancellation() }
+                finally { stopped = true }
+            })
+        }
+        started.await()
+        network(wifi = false)
+        assertEquals(DownloadRunResult.RETRY, withTimeout(5_000) { download.await() })
+        assertTrue(stopped)
+        assertTrue(manager.downloadTasks.value[media().id]!!.errorMessage!!.contains("Waiting for Wi-Fi"))
     }
 }
