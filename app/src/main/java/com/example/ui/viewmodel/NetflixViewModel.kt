@@ -2096,21 +2096,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             try {
-                val tmdbId = media.id
-                val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
-                val season = if (targetEpisode != null) {
-                    val idParts = targetEpisode.id.split("_S")
-                    if (idParts.size > 1) {
-                        idParts[1].split("_").firstOrNull()?.toIntOrNull() ?: 1
-                    } else 1
-                } else if (media.type == MediaType.TV_SHOW) 1 else 0
-                val epNum = if (targetEpisode != null) targetEpisode.episodeNumber else if (media.type == MediaType.TV_SHOW) 1 else 0
-
                 showToast("Loading video...")
                 // A rapid tap sequence settles before contacting the playback provider.
                 kotlinx.coroutines.delay(250L)
                 val streamResult = kotlinx.coroutines.withTimeoutOrNull(35_000L) {
-                    netMirrorResolver.resolveNet52(tmdbId, type, season, epNum, media.title, media.releaseYear.toString())
+                    netMirrorResolver.resolvePlayback(media, targetEpisode)
                 } ?: throw java.io.IOException("Playback took too long. Please try again.")
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (requestGeneration != playbackRequestGeneration) return@launch
@@ -2160,10 +2150,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         val state = _playerState.value
         val media = state.media ?: return
         if (state.sourceId?.startsWith("Offline") == true || state.sourceId == "Trailer") return
-        val season = state.episode?.id?.substringAfter("_S", "")?.substringBefore('_')?.toIntOrNull()
-            ?: if (media.type == MediaType.TV_SHOW) 1 else 0
-        netMirrorResolver.evictCachedStream(media.id, if (media.type == MediaType.MOVIE) "movie" else "tv",
-            season, state.episode?.episodeNumber ?: if (media.type == MediaType.TV_SHOW) 1 else 0)
+        netMirrorResolver.evictPlayback(media, state.episode)
     }
 
     fun updatePlayerProgress(currentSec: Int, totalDurationSec: Int) {

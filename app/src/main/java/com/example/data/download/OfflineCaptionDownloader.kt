@@ -45,7 +45,7 @@ internal class OfflineCaptionDownloader(
                             catch (error: Exception) {
                                 // Never log signed URLs, cookie values or response bodies.
                                 Log.w("DownloadManager", "Subtitle unavailable: ${error.javaClass.simpleName}")
-                                if (error !is IOException || (error is DownloadHttpException &&
+                                if (error is com.example.data.PlaybackRateLimitedException || error !is IOException || (error is DownloadHttpException &&
                                     error.code !in setOf(408, 429) && error.code < 500)) break
                             }
                             if (attempt == 0) delay(500L)

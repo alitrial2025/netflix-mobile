@@ -30,9 +30,5 @@ internal fun nextEpisodeIndex(currentId: String, episodeIds: List<String>): Int?
 
 /** TV uses s2_e3; mobile uses ep_<title>_S2_3. Both identify the same episode. */
 internal fun episodeCoordinates(id: String?, fallbackSeason: Int = 1, fallbackEpisode: Int = 1): Pair<Int, Int> {
-    val match = Regex("(?:_S|^s)(\\d+)(?:_e|_)(\\d+)$", RegexOption.IGNORE_CASE).find(id.orEmpty())
-    return if (match != null) {
-        (match.groupValues[1].toIntOrNull()?.coerceAtLeast(1) ?: fallbackSeason.coerceAtLeast(1)) to
-            (match.groupValues[2].toIntOrNull()?.coerceAtLeast(1) ?: fallbackEpisode.coerceAtLeast(1))
-    } else fallbackSeason.coerceAtLeast(1) to fallbackEpisode.coerceAtLeast(1)
+    return com.example.data.PlaybackTarget.episodeCoordinates(id, fallbackSeason, fallbackEpisode)
 }

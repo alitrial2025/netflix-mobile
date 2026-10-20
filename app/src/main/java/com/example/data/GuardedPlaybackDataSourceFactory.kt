@@ -44,13 +44,7 @@ internal class GuardedPlaybackDataSourceFactory(
     private class GuardedSource(private val delegate: DataSource, private val sourceId: String?,
         private val newTvGate: CookieFreePlaybackGate,
         private val manifestHeaders: Map<String, String>) : DataSource by delegate {
-        private val newTv = sourceId?.contains("[NewTV]", ignoreCase = true) == true
-        private fun remainingMs() = if (newTv) newTvGate.remainingMs() else PlaybackServiceGate.remainingMs()
-        private fun check() = if (newTv) newTvGate.check() else PlaybackServiceGate.check()
-        private fun checkResponse(code: Int, body: String, retryAfter: String?, url: String) {
-            if (newTv) newTvGate.checkResponse(code, body, retryAfter, url)
-            else PlaybackServiceGate.checkResponse(code, body, retryAfter, url)
-        }
+        private val policy = PlaybackManifestPolicy(sourceId, newTvGate)
         private var cachedUri: android.net.Uri? = null
         private var delegateOpened = false
         override fun getUri(): android.net.Uri? = cachedUri ?: delegate.uri
@@ -62,21 +56,10 @@ internal class GuardedPlaybackDataSourceFactory(
             delegateOpened = false
             val url = dataSpec.uri.toString()
             val isManifest = dataSpec.uri.path?.endsWith(".m3u8", true) == true
-            val providerHost = dataSpec.uri.host.orEmpty()
-            val usesPlaybackProvider = newTv || providerHost.contains("freecdn", true) ||
-                providerHost in listOf("net52.cc", "netmirror.app", "netmirror.gg", "mobidetects.com", "mobidetect.art") ||
-                dataSpec.uri.path?.startsWith("/files/") == true
-            if (isManifest) {
-                if (usesPlaybackProvider) check()
-                // A cached waiting URL is not a fresh provider response. Reject
-                // it for eviction without creating or extending a cooldown.
-                if (StreamSessionPolicy.isWaitingVideo(url)) throw PlaybackRateLimitedException(remainingMs())
-            }
+            if (isManifest) policy.beforeRequest(url)
             if (isManifest && dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong() &&
                 dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET) {
-                VerifiedManifestHandoff.take(url, manifestHeaders + dataSpec.httpRequestHeaders, sourceId)?.let { data ->
-                    if (StreamSessionPolicy.isRateLimited(200, data.toString(Charsets.UTF_8)))
-                        throw PlaybackRateLimitedException(remainingMs())
+                policy.takeVerified(url, manifestHeaders + dataSpec.httpRequestHeaders)?.let { data ->
                     cachedUri = dataSpec.uri
                     manifest = ByteArrayInputStream(data)
                     return data.size.toLong()
@@ -92,22 +75,20 @@ internal class GuardedPlaybackDataSourceFactory(
                     val n = delegate.read(chunk, 0, chunk.size)
                     if (n == C.RESULT_END_OF_INPUT) break
                     bytes.write(chunk, 0, n)
-                    if (bytes.size() > 8 * 1024 * 1024) throw IOException("Playback manifest is too large")
+                    if (bytes.size() > PlaybackManifestPolicy.MAX_BYTES) throw IOException("Playback manifest is too large")
                 }
                 val data = bytes.toByteArray()
                 val retryAfter = delegate.responseHeaders.entries.firstOrNull {
                     it.key.equals("Retry-After", true)
                 }?.value?.firstOrNull()
-                checkResponse(200, data.toString(Charsets.UTF_8), retryAfter, url)
+                policy.checkManifest(data.toString(Charsets.UTF_8), retryAfter, url)
                 manifest = ByteArrayInputStream(data)
                 return data.size.toLong()
             } catch (error: HttpDataSource.InvalidResponseCodeException) {
-                if (usesPlaybackProvider && error.responseCode == 429) {
-                    val retryAfter = error.headerFields.entries.firstOrNull {
-                        it.key.equals("Retry-After", true)
-                    }?.value?.firstOrNull()
-                    checkResponse(429, "", retryAfter, url)
-                }
+                val retryAfter = error.headerFields.entries.firstOrNull {
+                    it.key.equals("Retry-After", true)
+                }?.value?.firstOrNull()
+                policy.checkHttpFailure(error.responseCode, retryAfter, url)
                 throw error
             } catch (error: IOException) {
                 // The loader also closes on failure; early close stops any pending audio.

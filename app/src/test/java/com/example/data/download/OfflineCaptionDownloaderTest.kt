@@ -87,4 +87,17 @@ class OfflineCaptionDownloaderTest {
             assertTrue(root.listFiles()!!.isEmpty())
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun providerCooldownDoesNotTriggerAnImmediateCaptionRetry() = runBlocking {
+        val root = directory()
+        val attempts = AtomicInteger()
+        try {
+            val saved = OfflineCaptionDownloader(root) {
+                attempts.incrementAndGet()
+                throw com.example.data.PlaybackRateLimitedException(120_000)
+            }.download(listOf(Caption("https://provider.test/en", "English", "vtt")))
+            assertTrue(saved.isEmpty())
+            assertEquals(1, attempts.get())
+        } finally { root.deleteRecursively() }
+    }
 }

@@ -17,7 +17,9 @@ import com.example.MainActivity
 import com.example.R
 import com.example.data.CatalogData
 import com.example.data.NetMirrorResolver
-import com.example.data.AppCookieJar
+import com.example.data.ScopedPlaybackHttp
+import com.example.data.PlaybackManifestPolicy
+import com.example.data.PlaybackTarget
 import com.example.data.isAuthoritativeAccessFailure
 import com.example.data.local.DownloadEntity
 import com.example.data.model.Episode
@@ -47,8 +49,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Cookie
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -112,14 +112,8 @@ class NetflixDownloadManager(
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val transferSlots = kotlinx.coroutines.sync.Semaphore(2)
-    private val cookieJar = AppCookieJar()
 
-    private val httpClient: OkHttpClient = (clientOverride ?: OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .followSslRedirects(false)
-        .build()).newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
+    private val httpClient = ScopedPlaybackHttp.client(clientOverride)
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val automaticPlaybackGate = AutomaticDownloadPlaybackGate()
@@ -424,15 +418,13 @@ class NetflixDownloadManager(
                 return@withContext
             }
         }
-        val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
-        val season = episode?.let { com.example.ui.viewmodel.episodeCoordinates(it.id).first } ?: 0
-        val number = episode?.episodeNumber ?: 0
+        val target = PlaybackTarget.from(media, episode)
         // A resume must resolve current signed URLs, not reuse the failed segment's credentials.
         if (saved?.task?.downloadedBytes?.let { it > 0 } == true)
-            netMirrorResolver.evictCachedStream(media.id, type, season, number)
+            netMirrorResolver.evictPlayback(media, episode)
         for (renewal in 0..1) {
             val stream = resolveDownloadSource {
-                netMirrorResolver.resolveNet52(media.id, type, season, number, media.title, media.releaseYear.toString())
+                netMirrorResolver.resolvePlayback(media, episode)
             }
             currentCoroutineContext().ensureActive()
             try {
@@ -440,7 +432,7 @@ class NetflixDownloadManager(
                 return@withContext
             } catch (error: DownloadHttpException) {
                 if (error.code !in setOf(401, 403) || renewal == 1) throw error
-                netMirrorResolver.invalidateDownloadSession(media.id, type, season, number, error.usedProviderSession)
+                netMirrorResolver.invalidateDownloadSession(target.tmdbId, target.type, target.season, target.episode, error.usedProviderSession)
             }
         }
     }
@@ -448,7 +440,7 @@ class NetflixDownloadManager(
     internal suspend fun executeResolvedDownload(
         profileId: String, media: MediaItem, episode: Episode?, key: String, episodeTitle: String?,
         isHighQuality: Boolean, resolvedStream: com.example.data.NetMirrorStream, maxVideoHeight: Int = Int.MAX_VALUE
-    ) = withContext(Dispatchers.IO) {
+    ) = withContext(Dispatchers.IO + DownloadSourceContext(resolvedStream.sourceId)) {
         val itemTitle = if (episodeTitle != null) "${media.title} ($episodeTitle)" else media.title
         val targetUrl = resolvedStream.url
         val targetHeaders = resolvedStream.headers
@@ -480,7 +472,8 @@ class NetflixDownloadManager(
             media = media,
             episodeTitle = episodeTitle,
             isHighQuality = isHighQuality,
-            maxVideoHeight = maxVideoHeight
+            maxVideoHeight = maxVideoHeight,
+            sourceId = resolvedStream.sourceId
         )
 
         // If paused or cancelled, retain .part file for instant resumption
@@ -528,12 +521,9 @@ class NetflixDownloadManager(
 
     /** Keep actual caption files offline; missing optional captions never invalidate the video. */
     internal suspend fun downloadCaptions(key: String, stream: com.example.data.NetMirrorStream): List<com.example.data.Caption> {
-        // Simultaneous titles may select different OTT cookies. Their captions must
-        // not overwrite one another's provider session or the video transfer's jar.
-        val captionCookies = AppCookieJar()
-        val captionClient = httpClient.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
+        // Caption and media requests use the player's cookie-free HTTP policy.
         return OfflineCaptionDownloader(File(downloadsDir, "$key.captions")) { caption ->
-            withResponse(downloadRequest(caption.url, stream.captionHeaders, stream.url, captionCookies), captionClient) { response ->
+            withResponse(downloadRequest(caption.url, stream.captionHeaders)) { response ->
                 if (!response.isSuccessful) throw DownloadHttpException(response.code,
                     response.request.header("Cookie")?.contains("t_hash_t=") == true)
                 val body = response.body ?: throw IOException("Empty subtitles")
@@ -561,29 +551,23 @@ class NetflixDownloadManager(
         media: MediaItem,
         episodeTitle: String?,
         isHighQuality: Boolean,
-        maxVideoHeight: Int
+        maxVideoHeight: Int,
+        sourceId: String?
     ): Boolean = withContext(Dispatchers.IO) {
         val isHls = DownloadTransferPolicy.isHls(streamUrl)
 
         if (isHls) {
-            downloadHlsStream(streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality, maxVideoHeight)
+            downloadHlsStream(streamUrl, headers, partFile, key, media, episodeTitle, isHighQuality, maxVideoHeight, sourceId)
         } else {
             downloadDirectStream(streamUrl, headers, partFile, key, media, episodeTitle)
         }
     }
 
-    private fun downloadRequest(url: String, headers: Map<String, String>, sourceUrl: String, jar: AppCookieJar = cookieJar): Request {
-        return Request.Builder().url(url).apply {
-            headers.forEach { (name, value) ->
-                val allowed = !name.equals("Cookie", true) &&
-                    !name.equals("Authorization", true)
-                if (allowed) {
-                    header(name, value)
-                }
-            }
+    private fun downloadRequest(url: String, headers: Map<String, String>): Request =
+        Request.Builder().url(url).apply {
+            ScopedPlaybackHttp.requestHeaders(headers).forEach { (name, value) -> header(name, value) }
             header("Accept-Encoding", "identity")
         }.build()
-    }
 
     private suspend fun <T> withResponse(request: Request, client: OkHttpClient = httpClient, block: suspend (okhttp3.Response) -> T): T = coroutineScope {
         automaticPlaybackGate.requirePermission(currentCoroutineContext()[AutomaticDownloadContext]?.automatic == true)
@@ -592,7 +576,13 @@ class NetflixDownloadManager(
         val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         }
-        try { call.execute().use { block(it) } } finally { cancellation.cancel() }
+        try {
+            call.execute().use { response ->
+                PlaybackManifestPolicy(currentCoroutineContext()[DownloadSourceContext]?.sourceId)
+                    .checkHttpFailure(response.code, response.header("Retry-After"), request.url.toString())
+                block(response)
+            }
+        } finally { cancellation.cancel() }
     }
 
     private suspend fun downloadDirectStream(
@@ -606,7 +596,7 @@ class NetflixDownloadManager(
         val existingBytes = if (partFile.exists()) partFile.length() else 0L
         val validatorFile = File(downloadsDir, "$key.validator")
         val validator = validatorFile.takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }
-        val request = downloadRequest(streamUrl, headers, streamUrl).newBuilder().apply {
+        val request = downloadRequest(streamUrl, headers).newBuilder().apply {
             if (existingBytes > 0L) {
                 header("Range", "bytes=$existingBytes-")
                 if (validator != null) header("If-Range", validator)
@@ -669,23 +659,30 @@ class NetflixDownloadManager(
 
     internal suspend fun downloadHlsStream(
         streamUrl: String, headers: Map<String, String>, partFile: File, key: String,
-        media: MediaItem, episodeTitle: String?, isHighQuality: Boolean, maxVideoHeight: Int = Int.MAX_VALUE
-    ): Boolean = withContext(Dispatchers.IO) {
-        suspend fun fetchPlaylist(url: String): String = withResponse(downloadRequest(url, headers, streamUrl)) {
-            if (!it.isSuccessful) throw DownloadHttpException(it.code)
-            val body = it.body ?: throw IOException("Empty playlist")
-            body.byteStream().use { input ->
-                val saved = ByteArrayOutputStream()
-                val buffer = ByteArray(16 * 1024)
-                while (saved.size() <= 2 * 1024 * 1024) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    saved.write(buffer, 0, count)
-                }
-                val bytes = saved.toByteArray()
-                require(bytes.size <= 2 * 1024 * 1024) { "Playlist exceeds supported size" }
-                bytes.toString(Charsets.UTF_8).also { text ->
-                    if (!text.trimStart().startsWith("#EXTM3U") && text.contains("<html", true)) throw DownloadHttpException(401)
+        media: MediaItem, episodeTitle: String?, isHighQuality: Boolean, maxVideoHeight: Int = Int.MAX_VALUE,
+        sourceId: String? = null
+    ): Boolean = withContext(Dispatchers.IO + DownloadSourceContext(sourceId)) {
+        val policy = PlaybackManifestPolicy(sourceId)
+        suspend fun fetchPlaylist(url: String): String {
+            policy.beforeRequest(url)
+            policy.takeVerified(url, headers)?.let { return it.toString(Charsets.UTF_8) }
+            return withResponse(downloadRequest(url, headers)) {
+                if (!it.isSuccessful) throw DownloadHttpException(it.code)
+                val body = it.body ?: throw IOException("Empty playlist")
+                body.byteStream().use { input ->
+                    val saved = ByteArrayOutputStream()
+                    val buffer = ByteArray(16 * 1024)
+                    while (saved.size() <= PlaybackManifestPolicy.MAX_BYTES) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        saved.write(buffer, 0, count)
+                    }
+                    val bytes = saved.toByteArray()
+                    require(bytes.size <= PlaybackManifestPolicy.MAX_BYTES) { "Playlist exceeds supported size" }
+                    bytes.toString(Charsets.UTF_8).also { text ->
+                        policy.checkManifest(text, it.header("Retry-After"), url)
+                        if (!text.trimStart().startsWith("#EXTM3U") && text.contains("<html", true)) throw DownloadHttpException(401)
+                    }
                 }
             }
         }
@@ -710,7 +707,7 @@ class NetflixDownloadManager(
                     for (attempt in 0..2) {
                         try {
                             val partial = store.partial(index)
-                            withResponse(downloadRequest(segmentUrl, headers, streamUrl)) { response ->
+                            withResponse(downloadRequest(segmentUrl, headers)) { response ->
                                 if (!response.isSuccessful) throw DownloadHttpException(response.code, response.request.header("Cookie")?.contains("t_hash_t=") == true)
                                 val body = response.body ?: throw IOException("Empty video segment")
                                 if (body.contentType()?.subtype?.contains("html") == true) throw DownloadHttpException(401)
@@ -737,7 +734,7 @@ class NetflixDownloadManager(
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) {
                             failure = error
-                            if (error is DownloadStorageException || error is IllegalArgumentException ||
+                            if (error is com.example.data.PlaybackRateLimitedException || error is DownloadStorageException || error is IllegalArgumentException ||
                                 (error is DownloadHttpException && error.code !in setOf(408, 429) && error.code < 500)) throw error
                             if (attempt < 2) delay((attempt + 1) * 1000L)
                         }
@@ -811,7 +808,7 @@ class NetflixDownloadManager(
         for (attempt in 0..2) {
             try {
                 val partial = store.partial(index)
-                withResponse(downloadRequest(url, headers, source)) { response ->
+                withResponse(downloadRequest(url, headers)) { response ->
                     if (!response.isSuccessful) throw DownloadHttpException(response.code, response.request.header("Cookie")?.contains("t_hash_t=") == true)
                     val body = response.body ?: throw IOException("Empty media segment")
                     if (body.contentType()?.subtype?.contains("html") == true) throw DownloadHttpException(401)
@@ -834,7 +831,7 @@ class NetflixDownloadManager(
                 return store.commit(index)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                if (attempt == 2 || error is DownloadStorageException || error is IllegalArgumentException ||
+                if (attempt == 2 || error is com.example.data.PlaybackRateLimitedException || error is DownloadStorageException || error is IllegalArgumentException ||
                     (error is DownloadHttpException && error.code !in setOf(408, 429) && error.code < 500)) throw error
                 delay((attempt + 1) * 1000L)
             }
@@ -1018,15 +1015,13 @@ class NetflixDownloadManager(
     private val candidateAvailability = ConcurrentHashMap<String, Pair<Long, Boolean>>()
     private suspend fun providerHasDownload(media: MediaItem, episode: Episode?): Boolean {
         automaticPlaybackGate.awaitPermission(automatic = true)
-        val type = if (media.type == MediaType.MOVIE) "movie" else "tv"
-        val season = episode?.let { com.example.ui.viewmodel.episodeCoordinates(it.id).first } ?: 0
-        val number = episode?.episodeNumber ?: 0
-        val key = "${com.example.data.PlaybackServiceGate.sourceRevision}:$type:${media.id}:$season:$number"
+        val target = PlaybackTarget.from(media, episode)
+        val key = "${com.example.data.PlaybackServiceGate.sourceRevision}:${target.type}:${target.tmdbId}:${target.season}:${target.episode}"
         candidateAvailability[key]?.takeIf { System.currentTimeMillis() - it.first < 15 * 60_000L }
             ?.let { return it.second }
         val available = try {
             candidateProbe?.invoke(media, episode) ?: (kotlinx.coroutines.withTimeoutOrNull(60_000L) {
-                netMirrorResolver.resolveNet52(media.id, type, season, number)
+                netMirrorResolver.resolvePlayback(media, episode)
             } != null)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (limited: com.example.data.PlaybackRateLimitedException) { throw limited }
@@ -1237,4 +1232,8 @@ class NetflixDownloadManager(
         }
         return arr.toString()
     }
+}
+
+private class DownloadSourceContext(val sourceId: String?) : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<DownloadSourceContext>
 }

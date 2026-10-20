@@ -190,6 +190,15 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
     }
 
     fun playbackCooldownMillis(): Long = PlaybackServiceGate.remainingMs()
+    suspend fun resolvePlayback(media: com.example.data.model.MediaItem, episode: com.example.data.model.Episode? = null): NetMirrorStream = resolvePlaybackSource {
+        val target = PlaybackTarget.from(media, episode)
+        resolveNet52(target.tmdbId, target.type, target.season, target.episode, target.title, target.year)
+    }
+
+    fun evictPlayback(media: com.example.data.model.MediaItem, episode: com.example.data.model.Episode? = null) {
+        val target = PlaybackTarget.from(media, episode)
+        evictCachedStream(target.tmdbId, target.type, target.season, target.episode)
+    }
     fun evictCachedStream(tmdbId: String, type: String, season: Int = 0, episode: Int = 0) {
         publicPlayback.evict(tmdbId, type, season, episode)
         streamCache.remove("${type}_${tmdbId}_${season}_${episode}")

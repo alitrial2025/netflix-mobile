@@ -3,9 +3,6 @@ package com.example.data.download
 import java.io.IOException
 import com.example.data.PlaybackRateLimitedException
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 
 internal class DownloadHttpException(val code: Int, val usedProviderSession: Boolean = false) : IOException("Download server returned HTTP $code")
 internal class DownloadMembershipException(message: String) : Exception(message)
@@ -15,10 +12,7 @@ internal class DownloadSourceUnavailableException(cause: Exception) : IOExceptio
 
 /** A resolver's own deadline is retryable; stopping the worker must still cancel the transfer. */
 internal suspend fun <T> resolveDownloadSource(resolve: suspend () -> T): T = try {
-    resolve()
-} catch (timeout: TimeoutCancellationException) {
-    currentCoroutineContext().ensureActive()
-    throw DownloadSourceUnavailableException(timeout)
+    com.example.data.resolvePlaybackSource(resolve)
 } catch (cancelled: CancellationException) {
     throw cancelled
 } catch (limited: PlaybackRateLimitedException) {
