@@ -41,6 +41,7 @@ fun DownloadAction(
     val fraction = (task?.progress ?: progress ?: 0f).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
     val failed = task?.status == DownloadTaskStatus.ERROR
     val isPaused = paused || task?.status == DownloadTaskStatus.PAUSED
+    val waiting = task?.status == DownloadTaskStatus.QUEUED && !task.errorMessage.isNullOrBlank()
     val active = progress != null || task?.status in listOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING, DownloadTaskStatus.PAUSED, DownloadTaskStatus.ERROR)
     if (!active || completed) {
         Button(onClick = if (completed) onCompleted else onStart,
@@ -72,10 +73,10 @@ fun DownloadAction(
                         task?.errorMessage?.takeIf { it.isNotBlank() } ?: if (failed) "Continue to resume your saved progress." else listOfNotNull(task?.speedFormatted, task?.etaFormatted?.takeIf { it.isNotBlank() }).joinToString(" · "),
                         color = Color.White.copy(alpha = .6f), fontSize = 11.sp)
                 }
-                IconButton(onClick = if (failed || isPaused) onResume else onPause,
+                IconButton(onClick = if (failed || isPaused || waiting) onResume else onPause,
                     modifier = Modifier.testTag("download_pause_resume_btn_$downloadKey")) {
-                    Icon(if (failed || isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                        if (failed) "Retry download" else if (isPaused) "Resume download" else "Pause download", tint = Color.White)
+                    Icon(if (failed || isPaused || waiting) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        if (failed || waiting) "Retry download" else if (isPaused) "Resume download" else "Pause download", tint = Color.White)
                 }
                 IconButton(onClick = onCancel, modifier = Modifier.testTag("download_cancel_btn_$downloadKey")) {
                     Icon(Icons.Default.Close, "Cancel download", tint = Color.White.copy(alpha = .7f))

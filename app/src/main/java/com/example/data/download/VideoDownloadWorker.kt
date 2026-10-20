@@ -17,12 +17,19 @@ import com.example.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.collect
 
 /** WorkManager owns execution across Activities, network changes and process restarts. */
-class VideoDownloadWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
-    private val manager by lazy { NetflixDownloadManager.getInstance(applicationContext as Application) }
+class VideoDownloadWorker internal constructor(
+    context: Context, parameters: WorkerParameters, managerProvider: () -> NetflixDownloadManager
+) : CoroutineWorker(context, parameters) {
+    constructor(context: Context, parameters: WorkerParameters) : this(context, parameters, {
+        NetflixDownloadManager.getInstance(context.applicationContext as Application)
+    })
+    private val manager by lazy(managerProvider)
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val channel = "netflixpro_active_downloads"
@@ -68,7 +75,16 @@ class VideoDownloadWorker(context: Context, parameters: WorkerParameters) : Coro
                     }
                 } finally { progress.cancel() }
             }
-        } catch (cancelled: CancellationException) { throw cancelled }
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!manager.isCurrentRequest(key, token)) return Result.success()
+            if (runAttemptCount >= 8) {
+                manager.markFailed(key, token, "Android interrupted download preparation. Retry to resume your saved progress.")
+                return Result.failure()
+            }
+            manager.markWaiting(key, token, "Android interrupted download preparation. Retrying automatically.")
+            return Result.retry()
+        }
         catch (_: IllegalStateException) {
             if (runAttemptCount >= 8) {
                 manager.markFailed(key, token, "Android blocked background execution. Continue the download with the app open.")

@@ -155,18 +155,28 @@ class NetflixDownloadManager(
                 _downloadingProgress.update { it + (task.downloadKey to task.progress) }
                 if (task.status == DownloadTaskStatus.PAUSED) _pausedDownloadKeys.update { it + task.downloadKey }
                 if (task.status in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) {
-                    // Replace old UNMETERED jobs once so an update also unblocks already queued hotspots.
-                    if (request.schedulerVersion < 1) scope.launch {
-                        try {
-                            synchronized(this@NetflixDownloadManager) {
-                                requests[task.downloadKey]?.takeIf { it.token == request.token && it.task.status == DownloadTaskStatus.QUEUED }
-                                    ?.let { enqueue(it) }
-                            }
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { markFailed(task.downloadKey, request.token, "Could not resume this download. Check storage and retry.") }
-                    } else observeScheduledWork(request)
+                    restoreScheduledWork(request)
                 }
             }
+        }
+    }
+
+    private fun restoreScheduledWork(request: SavedDownloadRequest) {
+        scope.launch {
+            try {
+                val scheduled = workManager.getWorkInfosForUniqueWork(downloadWorkName(request.task.downloadKey)).get()
+                synchronized(this@NetflixDownloadManager) {
+                    val current = requests[request.task.downloadKey]
+                    if (current?.token != request.token || current.accountId != accountIdProvider() ||
+                        current.task.status !in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) return@synchronized
+                    if (current.schedulerVersion < 2 || scheduled.none { current.token in it.tags && !it.state.isFinished }) {
+                        // Recover old expedited work and orphaned requests after an OS/app restart.
+                        // A new token prevents a late callback from the old worker changing this task.
+                        enqueue(current.copy(token = UUID.randomUUID().toString()))
+                    } else observeScheduledWork(current)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { markFailed(request.task.downloadKey, request.token, "Could not resume this download. Check storage and retry.") }
         }
     }
 
@@ -201,7 +211,8 @@ class NetflixDownloadManager(
         require(key.matches(Regex("[A-Za-z0-9_-]{1,200}"))) { "Invalid download identifier" }
         val account = accountIdProvider() ?: run { emitToast("Sign in to download titles"); return }
         val previous = _downloadTasks.value[key]
-        if (previous?.status in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) {
+        if (previous?.status in setOf(DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING) ||
+            previous?.status == DownloadTaskStatus.QUEUED && previous.errorMessage.isNullOrBlank()) {
             emitToast("Download already queued for ${media.title}"); return
         }
         if (requests[key]?.profileId?.let { it != profileId } == true) {
@@ -239,8 +250,8 @@ class NetflixDownloadManager(
             .setInputData(workDataOf("key" to request.task.downloadKey, "token" to request.token))
             .setConstraints(constraints.build()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_TAG).addTag(request.token)
-        if (!request.automatic) builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-        val scheduled = request.copy(schedulerVersion = 1)
+        // A long foreground transfer must not depend on the short expedited-job quota.
+        val scheduled = request.copy(schedulerVersion = 2)
         requestStore.put(scheduled)
         requests[request.task.downloadKey] = scheduled
         val operation = workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, builder.build())
@@ -316,7 +327,13 @@ class NetflixDownloadManager(
         _downloadTasks.value[key]?.let { updateTask(it.copy(status = DownloadTaskStatus.ERROR, errorMessage = message)) }
     }
 
-    internal suspend fun runSavedDownload(key: String, token: String, attempt: Int): DownloadRunResult =
+    internal suspend fun runSavedDownload(
+        key: String, token: String, attempt: Int,
+        confirmPlan: suspend (String) -> com.example.data.model.SubscriptionPlan = ::confirmedDownloadPlan,
+        transfer: suspend (SavedDownloadRequest, com.example.data.model.SubscriptionPlan) -> Unit = { request, plan ->
+            executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+        }
+    ): DownloadRunResult =
         transferLocks.getOrPut(key) { Mutex() }.withLock {
             val request = requests[key]?.takeIf { it.token == token } ?: return@withLock DownloadRunResult.COMPLETE
             if (request.accountId != accountIdProvider()) {
@@ -336,16 +353,18 @@ class NetflixDownloadManager(
                 transferSlots.acquire()
                 try {
                     updateTask(request.task.copy(status = DownloadTaskStatus.PREPARING, errorMessage = null))
-                    val plan = confirmedDownloadPlan(request.accountId)
-                    if (request.isForYou && !plan.downloadsForYou)
-                        throw DownloadMembershipException("Downloads for You is included with Premium. Upgrade to continue.")
-                    val completedDownloads = repository.getDownloadsOnce(request.profileId)
-                    if (completedDownloads.none { it.downloadKey == key } && completedDownloads.size >= plan.maxDownloads)
-                        throw DownloadMembershipException("Your plan's offline title limit is reached. Delete a download to continue.")
-                    withDownloadNetwork(request.wifiOnly, ::isWifiConnected, ::observeDownloadNetwork) {
-                        withContext(AutomaticDownloadContext(request.automatic)) {
-                            automaticPlaybackGate.requirePermission(request.automatic)
-                            executeDownloadPipeline(request.profileId, request.media, request.episode, key, request.task.episodeTitle, request.highQuality, plan.maxVideoHeight)
+                    withResumableDownloadAttempt {
+                        val plan = confirmPlan(request.accountId)
+                        if (request.isForYou && !plan.downloadsForYou)
+                            throw DownloadMembershipException("Downloads for You is included with Premium. Upgrade to continue.")
+                        val completedDownloads = repository.getDownloadsOnce(request.profileId)
+                        if (completedDownloads.none { it.downloadKey == key } && completedDownloads.size >= plan.maxDownloads)
+                            throw DownloadMembershipException("Your plan's offline title limit is reached. Delete a download to continue.")
+                        withDownloadNetwork(request.wifiOnly, ::isWifiConnected, ::observeDownloadNetwork) {
+                            withContext(AutomaticDownloadContext(request.automatic)) {
+                                automaticPlaybackGate.requirePermission(request.automatic)
+                                transfer(request, plan)
+                            }
                         }
                     }
                     removeSavedRequest(key, token)

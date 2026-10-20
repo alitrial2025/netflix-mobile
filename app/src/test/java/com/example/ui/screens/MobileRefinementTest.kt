@@ -70,6 +70,15 @@ class MobileRefinementTest {
         rule.onNodeWithContentDescription("Cancel download").performClick()
         assertTrue(retried); assertTrue(cancelled)
     }
+    @Test fun waitingTransferOffersRetryInsteadOfOnlyPause() {
+        var retried = false
+        rule.setContent { NetflixTheme { DownloadAction("waiting", 0f, false, false,
+            DownloadTaskInfo("waiting", "waiting", "Movie", status = DownloadTaskStatus.QUEUED,
+                errorMessage = "Waiting to resume download"),
+            onStart = {}, onPause = { fail("Waiting retry must not pause") }, onResume = { retried = true }, onCancel = {}, onCompleted = {}) } }
+        rule.onNodeWithContentDescription("Retry download").performClick()
+        assertTrue(retried)
+    }
     @Test fun offlineEpisodePlaybackPreservesSavedSeasonAndZeroStorageDoesNotCrash() {
         var selectedEpisode: Episode? = null
         val downloaded = DownloadEntity(profileId = "profile", downloadKey = "mr_robot_ep_mr_robot_S3_7", mediaId = "mr_robot", mediaTitle = "Mr. Robot", episodeTitle = "S3:E7 A saved episode", fileSizeMb = 185)
