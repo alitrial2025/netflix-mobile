@@ -107,7 +107,7 @@ class DownloadResumeTest {
         manager.startOrResumeDownload("profile", media(), isWifiOnly = false)
         val saved = store.all().single()
         assertEquals(DownloadRunResult.RETRY, manager.runSavedDownload(media().id, saved.token, 0,
-            confirmPlan = { plan }, transfer = { _, _ -> currentCoroutineContext().cancel("Provider operation ended") }))
+            confirmPlan = { plan }, transfer = { _, _ -> currentCoroutineContext().cancel(CancellationException("Provider operation ended")) }))
         currentCoroutineContext().ensureActive()
     }
 
