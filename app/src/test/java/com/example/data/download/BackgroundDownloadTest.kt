@@ -198,7 +198,7 @@ class BackgroundDownloadTest {
             assertTrue(work.getWorkInfoById(old.id).get()?.state.let { it == null || it == WorkInfo.State.CANCELLED })
             assertEquals(.4f, manager.downloadTasks.value[item.id]!!.progress, 0f)
             assertEquals(400L, manager.downloadTasks.value[item.id]!!.downloadedBytes)
-            assertEquals(3, store.all().first { it.task.downloadKey == item.id }.schedulerVersion)
+            assertEquals(4, store.all().first { it.task.downloadKey == item.id }.schedulerVersion)
             assertEquals(DownloadTaskStatus.PAUSED, manager.downloadTasks.value[pausedItem.id]!!.status)
             assertTrue(work.getWorkInfosForUniqueWork(downloadWorkName(pausedItem.id)).get().isEmpty())
             // A scheduler cancellation must become retryable instead of remaining permanently queued.

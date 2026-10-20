@@ -64,7 +64,7 @@ object DeviceAccessGuard {
         return proof.matches(uid, proof.device, plan, expiry, status, SubscriptionTime.now())
     }
 
-    /** A worker may outlive app entry, so its fresh authorization also saves offline membership. */
+    /** Reuse verified entry admission; a worker without it must confirm and save membership. */
     internal suspend fun confirmDownload(context: Context): com.google.firebase.firestore.DocumentSnapshot = downloadCheckpointMutex.withLock {
         val auth = FirebaseAuth.getInstance()
         val uid = auth.currentUser?.takeUnless { it.isAnonymous }?.uid ?: throw MembershipCheckException()
@@ -79,6 +79,15 @@ object DeviceAccessGuard {
                     confirmationState.storeIfCurrent(generation, Confirmation(entry.proof, snapshot)) {
                         auth.currentUser?.uid == uid
                     }
+                }
+            }, admittedEntry = {
+                val captured = confirmationState.snapshot()
+                val admitted = captured.value
+                val snapshot = admitted?.snapshot
+                if (admitted == null || snapshot == null || snapshot.metadata.hasPendingWrites() || snapshot.metadata.isFromCache) null
+                else DownloadEntryAuthorization(snapshot, admitted.proof) {
+                    val current = confirmationState.snapshot()
+                    auth.currentUser?.uid == uid && current.generation == captured.generation && current.value === admitted
                 }
             }) {
             // The helper acquired the shared verifier mutex before this transaction starts.

@@ -19,10 +19,18 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.example.data.NetMirrorResolver
 import com.example.data.NetMirrorStream
+import com.example.data.DeviceAccessGuard
+import com.example.data.DownloadEntryAuthorization
+import com.example.data.MembershipProof
+import com.example.data.OfflineEntryProof
+import com.example.data.OfflineEntryProofStore
+import com.example.data.SubscriptionTime
+import com.example.data.verifyDownloadMembershipAndCheckpoint
 import com.example.data.local.AppDatabase
 import com.example.data.model.MediaItem
 import com.example.data.model.MediaType
 import com.example.data.model.SubscriptionPlans
+import com.example.data.model.UserSubscription
 import com.example.data.repository.NetflixRepository
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
@@ -88,6 +96,12 @@ class ForegroundDownloadConstraintTest {
             assertTrue(schedulingStates.last() is ConstraintsState.ConstraintsMet)
             val saved = DownloadRequestStore(File(app.noBackupFilesDir, "download-requests")).all().single()
             val verified = CompletableDeferred<Unit>()
+            val expiry = SubscriptionTime.now() + 30L * 86_400_000
+            val device = DeviceAccessGuard.deviceId(app)
+            val subscription = UserSubscription(status = "ACTIVE", planId = "plan_premium", expiresAt = expiry)
+            val proof = MembershipProof("account", device, subscription.planId, expiry, subscription.status)
+            val membership = OfflineEntryProofStore.get(app)
+            membership.save(OfflineEntryProof(proof, subscription), serverConfirmed = true)
             val packet = ByteArray(188 * 3) { 1 }.apply { for (i in indices step 188) this[i] = 0x47 }
             val server = MockWebServer()
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n"))
@@ -96,7 +110,13 @@ class ForegroundDownloadConstraintTest {
             val file = File(app.filesDir, "downloads/${item.id}.ts")
             val download = backgroundScope.async(UnconfinedTestDispatcher(testScheduler)) {
                 manager.runSavedDownload(item.id, saved.token, 0,
-                    confirmPlan = { verified.await(); SubscriptionPlans.getById("plan_premium") },
+                    confirmPlan = {
+                        verified.await()
+                        verifyDownloadMembershipAndCheckpoint("account", device, membership, SubscriptionTime::now, { true },
+                            admittedEntry = { DownloadEntryAuthorization(SubscriptionPlans.getById("plan_premium"), proof) { true } }) {
+                            error("Verified app entry must avoid the failing duplicate Firebase request")
+                        }
+                    },
                     transfer = { request, plan ->
                         manager.executeResolvedDownload(request.profileId, request.media, request.episode, item.id, null,
                             true, NetMirrorStream(server.url("/stream.m3u8").toString(), emptyMap(), emptyList(),

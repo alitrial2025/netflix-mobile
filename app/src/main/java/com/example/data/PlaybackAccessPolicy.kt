@@ -208,7 +208,10 @@ internal class OfflineEntryProofStore(private val file: File) {
     }
 }
 
-/** A background transfer must checkpoint its fresh membership before it can create offline media. */
+/** Only a live server confirmation can reuse entry admission; cached UI plans are insufficient. */
+internal data class DownloadEntryAuthorization<T>(val result: T, val proof: MembershipProof, val isCurrent: () -> Boolean)
+
+/** Reuse durable server admission, or checkpoint fresh verification before creating offline media. */
 internal suspend fun <T> verifyDownloadMembershipAndCheckpoint(
     uid: String,
     device: String,
@@ -217,11 +220,22 @@ internal suspend fun <T> verifyDownloadMembershipAndCheckpoint(
     isCurrent: () -> Boolean,
     onDenial: () -> Unit = {},
     onConfirmed: (T, OfflineEntryProof) -> Unit = { _, _ -> },
+    admittedEntry: () -> DownloadEntryAuthorization<T>? = { null },
     verify: suspend () -> Pair<T, OfflineEntryProof>
 ): T = store.withServerVerification {
     val generation = store.checkpointGeneration()
     try {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (!isCurrent()) throw MembershipCheckException()
+        admittedEntry()?.let { admitted ->
+            val checkpoint = store.checkpoint(uid, device, now())
+            val reused = store.withCheckpoint(checkpoint, uid, device, now(),
+                isCurrent = { isCurrent() && admitted.isCurrent() }) { saved ->
+                if (admitted.proof.matches(uid, device, saved.proof.plan, saved.proof.expiry, saved.proof.status, now()))
+                    admitted.result else null
+            }
+            if (reused != null) return@withServerVerification reused
+        }
         val (result, entry) = verify()
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         val verifiedAt = now()

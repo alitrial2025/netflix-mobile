@@ -168,8 +168,8 @@ class NetflixDownloadManager(
                     val current = requests[request.task.downloadKey]
                     if (current?.token != request.token || current.accountId != accountIdProvider() ||
                         current.task.status !in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING)) return@synchronized
-                    if (current.schedulerVersion < 3 || scheduled.none { current.token in it.tags && !it.state.isFinished }) {
-                        // Replace old custom-network jobs and recover orphaned requests after restart.
+                    if (current.schedulerVersion < 4 || scheduled.none { current.token in it.tags && !it.state.isFinished }) {
+                        // Apply updated admission/tracking policies and recover orphaned requests.
                         // A new token prevents a late callback from the old worker changing this task.
                         enqueue(current.copy(token = UUID.randomUUID().toString()))
                     } else observeScheduledWork(current)
@@ -248,7 +248,7 @@ class NetflixDownloadManager(
             .setConstraints(constraints.build()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_TAG).addTag(request.token)
         // A long foreground transfer must not depend on the short expedited-job quota.
-        val scheduled = request.copy(schedulerVersion = 3)
+        val scheduled = request.copy(schedulerVersion = 4)
         requestStore.put(scheduled)
         requests[request.task.downloadKey] = scheduled
         val operation = workManager.enqueueUniqueWork(downloadWorkName(request.task.downloadKey), ExistingWorkPolicy.REPLACE, builder.build())

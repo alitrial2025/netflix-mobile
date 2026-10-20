@@ -220,4 +220,71 @@ class DownloadMembershipCheckpointTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertSame(OfflineEntryProofStore.get(context), OfflineEntryProofStore.get(context))
     }
+
+    @Test fun verifiedAppEntryStartsDownloadWithoutAnotherFirebaseRequestOrCheckpointRewrite() = runBlocking {
+        store.save(entry, serverConfirmed = true)
+        val generation = store.checkpointGeneration()
+        // Repeating the old forced request fails even though entry already admitted this device.
+        val forced = runCatching {
+            verifyDownloadMembershipAndCheckpoint<String>(uid, device, store, { now }, { true }) {
+                throw MembershipCheckException(IOException("Firebase temporarily unavailable"))
+            }
+        }
+        assertTrue(forced.exceptionOrNull() is MembershipCheckException)
+        val result = verifyDownloadMembershipAndCheckpoint(uid, device, store, { now }, { true },
+            admittedEntry = { DownloadEntryAuthorization("server-admitted", entry.proof) { true } }) {
+            error("A download in this admitted session must not force another Firebase request")
+        }
+        assertEquals("server-admitted", result)
+        assertEquals(generation, store.checkpointGeneration())
+        assertEquals(entry, store.load(uid, device, now))
+    }
+
+    @Test fun savedProofAloneStillRequiresServerAdmissionForANewBackgroundDownload() = runBlocking {
+        store.save(entry, serverConfirmed = true)
+        var checked = false
+        val result = verifyDownloadMembershipAndCheckpoint(uid, device, store, { now }, { true }) {
+            checked = true
+            "verified-background" to entry
+        }
+        assertTrue(checked)
+        assertEquals("verified-background", result)
+    }
+
+    @Test fun expiredRevokedMismatchedOrInvalidatedEntryCannotAuthorizeADownload() = runBlocking {
+        for (kind in listOf("expired", "revoked", "changed-plan", "changed-account", "changed-device", "invalidated", "missing-checkpoint")) {
+            store.save(entry, serverConfirmed = true)
+            var admitted = entry.proof
+            when (kind) {
+                "revoked" -> store.blockMigration(uid, device)
+                "changed-plan" -> store.save(entry.copy(proof = entry.proof.copy(plan = "plan_basic"),
+                    subscription = subscription.copy(planId = "plan_basic")), serverConfirmed = true)
+                "changed-account" -> admitted = admitted.copy(uid = "other-account")
+                "changed-device" -> admitted = admitted.copy(device = "other-phone")
+                "missing-checkpoint" -> store.clear()
+            }
+            var checked = false
+            val result = runCatching {
+                verifyDownloadMembershipAndCheckpoint<String>(uid, device, store,
+                    { if (kind == "expired") expiry + RenewalPolicy.GRACE_MS else now }, { true },
+                    admittedEntry = { DownloadEntryAuthorization("must-not-grant", admitted) { kind != "invalidated" } }) {
+                    checked = true
+                    throw MembershipCheckException(IOException("Server required"))
+                }
+            }
+            assertTrue("Fresh verification required for $kind", checked)
+            assertTrue("Cannot grant $kind entry", result.exceptionOrNull() is MembershipCheckException)
+        }
+    }
+
+    @Test fun accountSwitchCannotReuseAnotherAccountsLiveEntry() = runBlocking {
+        store.save(entry, serverConfirmed = true)
+        val result = runCatching {
+            verifyDownloadMembershipAndCheckpoint(uid, device, store, { now }, { false },
+                admittedEntry = { DownloadEntryAuthorization("must-not-grant", entry.proof) { true } }) {
+                error("Account change must reject before server request")
+            }
+        }
+        assertTrue(result.exceptionOrNull() is MembershipCheckException)
+    }
 }
