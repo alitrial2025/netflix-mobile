@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 
 sealed class VerificationResult {
     data class Success(val subscription: UserSubscription, val amountPaid: Int, val message: String) : VerificationResult()
-    data class Error(val message: String) : VerificationResult()
+    data class Error(val message: String, val retryAfterMs: Long? = null) : VerificationResult()
 }
 
 /** Merchant credentials, gateway evidence and atomic activation live only in the trusted service. */
@@ -71,6 +71,14 @@ object PayheroVerifier {
 
 
     suspend fun verifyPayment(
+        receiptCode: String, planPrice: Int, planId: String, userId: String, paymentReference: String,
+        onCooldown: (secondsRemaining: Int) -> Unit = {}
+    ): VerificationResult = recoverPaymentVerification(
+        onCooldown = onCooldown,
+        verify = { verifyPaymentOnce(receiptCode, planPrice, planId, userId, paymentReference) }
+    )
+
+    private suspend fun verifyPaymentOnce(
         receiptCode: String, planPrice: Int, planId: String, userId: String, paymentReference: String
     ): VerificationResult = withContext(Dispatchers.IO) {
         val code = receiptCode.trim().uppercase(Locale.ROOT)
@@ -99,7 +107,10 @@ object PayheroVerifier {
                     val json = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrNull()
                     if (!response.isSuccessful) return@withContext VerificationResult.Error(
                         json?.optString("message")?.takeIf { it.isNotBlank() }
-                            ?: "Payment verification is unavailable. Retry this same code; do not pay again.")
+                            ?: "Payment verification is unavailable. Retry this same code; do not pay again.",
+                        retryAfterMs = paymentVerificationCooldown(
+                            response.code, json?.optString("code"), json?.opt("retryAfterMs"), response.header("Retry-After")
+                        ))
                     if (FirebaseAuth.getInstance().currentUser?.uid != userId)
                         return@withContext VerificationResult.Error("Payment was saved to the original account. Sign in to that account to see it.")
                     val saved = json?.optJSONObject("subscription")

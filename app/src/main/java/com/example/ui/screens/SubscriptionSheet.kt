@@ -121,6 +121,7 @@ fun SubscriptionSheet(
 
     var mpesaCodeInput by remember(userId, selectedPlanId) { mutableStateOf("") }
     var isVerifying by remember(userId) { mutableStateOf(false) }
+    var verificationCooldownSeconds by remember(userId) { mutableStateOf(0) }
     var verificationError by remember(userId, selectedPlanId) { mutableStateOf<String?>(null) }
     var showSuccessBanner by remember(userId, selectedPlanId) { mutableStateOf(false) }
     var successMessage by remember(userId, selectedPlanId) { mutableStateOf("Membership Activated! Unlocked across Phone & TV.") }
@@ -385,6 +386,15 @@ fun SubscriptionSheet(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    if (isVerifying && verificationCooldownSeconds > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Verification will retry automatically in $verificationCooldownSeconds seconds. Keep this code; do not pay again.",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp
+                        )
+                    }
+
                     if (verificationError != null) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -417,7 +427,8 @@ fun SubscriptionSheet(
                                         planPrice = planToVerify.priceKes,
                                         planId = planToVerify.id,
                                         userId = ownerToVerify,
-                                        paymentReference = referenceToVerify
+                                        paymentReference = referenceToVerify,
+                                        onCooldown = { verificationCooldownSeconds = it }
                                     )
                                     when (result) {
                                         is com.example.data.network.VerificationResult.Success -> {
@@ -439,6 +450,7 @@ fun SubscriptionSheet(
                                 } catch (_: Exception) {
                                     verificationError = "Unable to finish verification. Retry the same code; do not pay again."
                                 } finally {
+                                    verificationCooldownSeconds = 0
                                     isVerifying = false
                                 }
                             }
