@@ -1,0 +1,11 @@
+# Home category filters
+
+Mobile 1.35 (36) adds Netflix, Prime Video, Disney+, Hotstar, Apple TV and Peacock to the existing Categories dropdown. Service selection uses TMDB subscription availability, never names, synopsis words or a playback provider guess. It uses the existing US catalog baseline; Hotstar uses India (JioHotstar and legacy Hotstar IDs). Apple TV Store rentals and free-with-ads Prime catalog are excluded. This is discovery metadata; availability can vary by region and does not promise a playable stream.
+
+Series/Films and category selections combine. Clearing Categories preserves the selected media type; the clear chip/Home resets everything. The hero, including cinematic/tablet Home, every rail and Continue Watching use the same filtered catalog. Empty selections show an explicit empty state instead of falling back to unrelated titles. Changing the selection resets scroll and discards prior category rows immediately.
+
+Genre rules use TMDB genre IDs, original language or exact genre labels for older cached records. Unknown genres no longer become Drama; reality is not classified as documentary. International includes known non-English catalog items and a Korean discovery feed. TMDB combines science fiction/fantasy for TV; those TV categories therefore overlap. Romance TV uses TMDB keyword 9840, since TMDB has no romance TV genre.
+
+Each selected category loads two discovery pages for movies and two for series, at most two concurrent requests. Per-request and overall timeouts, cancellation on selection/network changes, a six-hour memory/disk cache per category, explicit retry, and empty-result persistence prevent refresh loops and stale-category leakage. Uncached offline categories remain empty. Profile maturity restrictions still apply; newly discovered titles with unknown certification stay excluded from restricted profiles until safe certification is known. Playback, subscriptions and download admission remain in their existing paths.
+
+Validation covers metadata membership, all six provider query parameters and regions, request limits, typed movie/series identity, cache isolation and restart, failure/empty/force-retry behavior, cancellation, native UI empty state, combined service/media-type hero, and dropdown type preservation. Live TMDB smoke checks verified nonempty movie and series responses for every service.

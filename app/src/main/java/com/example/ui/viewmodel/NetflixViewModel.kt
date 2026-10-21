@@ -211,6 +211,21 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private val heroArtworkCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "hero-artwork-cache.json"))
     private val heroArtworkUpdates = MutableStateFlow<List<MediaItem>>(emptyList())
+    private val homeCategoryRepository = com.example.data.HomeCategoryRepository(
+        fetch = { type, parameters ->
+            val response = if (type == MediaType.MOVIE) TmdbClient.service.discoverReleaseMovies(parameters + ("api_key" to TmdbClient.apiKey))
+                else TmdbClient.service.discoverReleaseTv(parameters + ("api_key" to TmdbClient.apiKey))
+            response.results.map { result -> mapResultToMedia(result, type).copy(maturityRating = "18+") }
+        },
+        readCache = { category -> withContext(Dispatchers.IO) {
+            val file = java.io.File(getApplication<Application>().filesDir, "home-categories/${category.key}-v1.json")
+            com.example.data.CatalogDiskCache(file).readOrNull()?.let { com.example.data.CachedHomeCategory(it, file.lastModified()) }
+        } },
+        writeCache = { category, items -> withContext(Dispatchers.IO) {
+            val folder = java.io.File(getApplication<Application>().filesDir, "home-categories").apply { mkdirs() }
+            com.example.data.CatalogDiskCache(java.io.File(folder, "${category.key}-v1.json")).write(items, allowEmpty = true)
+        } }
+    )
     private val catalogPersistenceLock = kotlinx.coroutines.sync.Mutex()
     private val heroArtwork = com.example.data.HeroArtworkRepository({ type, id ->
         if (type == MediaType.MOVIE) TmdbClient.service.getMovieImages(id, TmdbClient.apiKey)
@@ -422,6 +437,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             isTrending = isTrending,
             isComingSoon = isComingSoon && com.example.discovery.ReleasePolicy.isUpcoming(result.releaseDate ?: result.firstAirDate),
             releaseDate = result.releaseDate ?: result.firstAirDate,
+            originalLanguage = result.originalLanguage,
             genreIds = result.genreIds, voteAverage = result.voteAverage ?: 0.0,
             voteCount = result.voteCount, popularity = result.popularity,
             releaseDateBadge = if (isComingSoon) {
@@ -878,6 +894,28 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private val _selectedCategoryGenre = MutableStateFlow<String?>(null)
     val selectedCategoryGenre: StateFlow<String?> = _selectedCategoryGenre.asStateFlow()
+
+    private val rawHomeCategoryState = MutableStateFlow(com.example.data.HomeCategoryState())
+    val homeCategoryState = combine(rawHomeCategoryState, heroArtworkUpdates, _activeProfile) { state, artwork, profile ->
+        state.copy(items = com.example.data.enrichHeroArtwork(state.items, artwork).filter {
+            !profile.hasMaturityRestriction || it.isKidSafe(profile.contentMaxAge)
+        })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.HomeCategoryState())
+
+    suspend fun loadHomeCategory(label: String?, online: Boolean, force: Boolean = false) {
+        val category = com.example.data.model.HomeCategory.fromLabel(label)
+        if (category == null) { rawHomeCategoryState.value = com.example.data.HomeCategoryState(); return }
+        val local = if (category.isService) emptyList() else displayCatalogMedia.value.filter { it.matchesGenre(category.label) }
+        rawHomeCategoryState.value = com.example.data.HomeCategoryState(category, local, loading = online)
+        val result = homeCategoryRepository.load(category, online, force)
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        val known = displayCatalogMedia.value.associateBy { it.type to it.id }
+        val items = result.items.map { item ->
+            known[item.type to item.id]?.let { item.copy(maturityRating = it.maturityRating, logoUrl = it.logoUrl,
+                heroPosterUrl = it.heroPosterUrl) } ?: item
+        }
+        rawHomeCategoryState.value = result.copy(items = (items + local).distinctBy { it.type to it.id })
+    }
 
     // Media Detail Selection
     private val _selectedMedia = MutableStateFlow<MediaItem?>(null)
@@ -1506,7 +1544,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             }
             return
         }
-        _categoryFilter.value = filter
+        _categoryFilter.value = if (filter == CategoryFilter.ALL && genre != null) CategoryFilter.CATEGORIES else filter
         _selectedCategoryGenre.value = genre
     }
 

@@ -80,14 +80,6 @@ fun NetflixTopBar(
     onCastClick: () -> Unit = {}
 ) {
     var showCategoriesDropdown by remember { mutableStateOf(false) }
-    val allGenres = remember {
-        listOf(
-            "Action & Adventure", "Crime Thrillers", "Sci-Fi & Cyberpunk",
-            "Dramas", "Anime & Animation", "Comedies", "Documentaries",
-            "Horror & Suspense", "International & K-Dramas", "Kids & Family",
-            "Romance", "Fantasy & Supernatural"
-        )
-    }
     val isFilterActive = currentCategory != CategoryFilter.ALL || selectedGenre != null
 
     Column(
@@ -210,21 +202,21 @@ fun NetflixTopBar(
                     CategoryPill(
                         label = "Series",
                         endShape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp, topEnd = 13.dp, bottomEnd = 13.dp),
-                        isSelected = currentCategory == CategoryFilter.TV_SHOWS && selectedGenre == null,
+                        isSelected = currentCategory == CategoryFilter.TV_SHOWS,
                         onClick = {
                             onCategorySelected(
-                                if (currentCategory == CategoryFilter.TV_SHOWS && selectedGenre == null) CategoryFilter.ALL
-                                else CategoryFilter.TV_SHOWS, null
+                                if (currentCategory == CategoryFilter.TV_SHOWS) CategoryFilter.ALL
+                                else CategoryFilter.TV_SHOWS, selectedGenre
                             )
                         }
                     )
                     CategoryPill(
                         label = "Films",
-                        isSelected = currentCategory == CategoryFilter.MOVIES && selectedGenre == null,
+                        isSelected = currentCategory == CategoryFilter.MOVIES,
                         onClick = {
                             onCategorySelected(
-                                if (currentCategory == CategoryFilter.MOVIES && selectedGenre == null) CategoryFilter.ALL
-                                else CategoryFilter.MOVIES, null
+                                if (currentCategory == CategoryFilter.MOVIES) CategoryFilter.ALL
+                                else CategoryFilter.MOVIES, selectedGenre
                             )
                         }
                     )
@@ -256,25 +248,36 @@ fun NetflixTopBar(
                             containerColor = Color(0xFF242226),
                             tonalElevation = 0.dp
                         ) {
-                            (listOf("All Categories") + allGenres).forEach { genre ->
-                                val genreSelected = if (genre == "All Categories") selectedGenre == null else selectedGenre == genre
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            genre, color = if (genreSelected) Color.White else Color(0xFFD1CDD2),
-                                            fontWeight = if (genreSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                            fontSize = 14.sp
-                                        )
-                                    },
-                                    onClick = {
-                                        showCategoriesDropdown = false
-                                        onCategorySelected(
-                                            if (genre == "All Categories") CategoryFilter.ALL else CategoryFilter.CATEGORIES,
-                                            genre.takeUnless { it == "All Categories" }
-                                        )
-                                    },
-                                    modifier = Modifier.semantics { selected = genreSelected }
-                                )
+                            val typeFilter = currentCategory.takeIf {
+                                it == CategoryFilter.TV_SHOWS || it == CategoryFilter.MOVIES
+                            }
+                            DropdownMenuItem(
+                                text = { Text("All Categories", color = Color.White) },
+                                onClick = {
+                                    showCategoriesDropdown = false
+                                    onCategorySelected(typeFilter ?: CategoryFilter.ALL, null)
+                                },
+                                modifier = Modifier.testTag("category_menu_all").semantics { selected = selectedGenre == null }
+                            )
+                            listOf("Streaming services" to com.example.data.model.HomeCategory.services,
+                                "Genres" to com.example.data.model.HomeCategory.genres).forEach { (heading, categories) ->
+                                Text(heading, color = Color.White.copy(alpha = .6f), fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                                categories.forEach { category ->
+                                    val categorySelected = selectedGenre == category.label
+                                    DropdownMenuItem(
+                                        text = { Text(category.label,
+                                            color = if (categorySelected) Color.White else Color(0xFFD1CDD2),
+                                            fontWeight = if (categorySelected) FontWeight.SemiBold else FontWeight.Normal,
+                                            fontSize = 14.sp) },
+                                        onClick = {
+                                            showCategoriesDropdown = false
+                                            onCategorySelected(typeFilter ?: CategoryFilter.CATEGORIES, category.label)
+                                        },
+                                        modifier = Modifier.testTag("category_menu_${category.key}")
+                                            .semantics { selected = categorySelected }
+                                    )
+                                }
                             }
                         }
                     }

@@ -38,4 +38,15 @@ class CatalogDiskCacheTest {
         assertEquals(listOf(media), CatalogDiskCache(file).read())
     }
 
+    @Test fun scopedCachesCanPersistAnEmptyResultWithoutKeepingOldTitles() {
+        val file = folder.newFile("category.json")
+        val cache = CatalogDiskCache(file)
+        assertNull(cache.readOrNull())
+        cache.write(listOf(media))
+        cache.write(emptyList(), allowEmpty = true)
+        assertEquals(emptyList<MediaItem>(), CatalogDiskCache(file).readOrNull())
+        file.writeText("corrupt")
+        assertNull(cache.readOrNull())
+    }
+
 }

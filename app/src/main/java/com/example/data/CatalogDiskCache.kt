@@ -13,13 +13,15 @@ internal class CatalogDiskCache(private val file: File) {
             .adapter<List<MediaItem>>(Types.newParameterizedType(List::class.java, MediaItem::class.java))
     }
 
-    fun read(): List<MediaItem> = try {
-        if (!file.isFile || file.length() > MAX_BYTES) emptyList()
-        else adapter.fromJson(file.readText()).orEmpty()
-    } catch (_: Exception) { emptyList() }
+    fun read(): List<MediaItem> = readOrNull().orEmpty()
 
-    fun write(items: List<MediaItem>) {
-        if (items.isEmpty()) return
+    fun readOrNull(): List<MediaItem>? = try {
+        if (!file.isFile || file.length() > MAX_BYTES) null
+        else adapter.fromJson(file.readText())
+    } catch (_: Exception) { null }
+
+    fun write(items: List<MediaItem>, allowEmpty: Boolean = false) {
+        if (items.isEmpty() && !allowEmpty) return
         val json = adapter.toJson(items)
         if (json.toByteArray().size > MAX_BYTES) return
         val temporary = File(file.parentFile, "${file.name}.tmp")

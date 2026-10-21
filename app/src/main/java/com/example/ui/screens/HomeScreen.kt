@@ -81,45 +81,39 @@ fun HomeScreen(
     onGameClick: (GameItem) -> Unit = {},
     onOpenGames: () -> Unit = {},
     onHeroVisible: suspend (MediaItem) -> Unit = {},
-    artworkNetworkAvailable: Boolean = true
+    artworkNetworkAvailable: Boolean = true,
+    catalogIsScoped: Boolean = false,
+    categoryLoading: Boolean = false,
+    categoryMessage: String? = null,
+    onRetryCategory: () -> Unit = {},
+    onClearCategory: () -> Unit = {}
 ) {
-    // Determine Hero and Catalog Sections based on category reactively
-    val heroMedia = remember(catalogMedia, categoryFilter, selectedGenre) {
-        if (catalogMedia.isEmpty()) null
-        else {
-            when (categoryFilter) {
-                CategoryFilter.MOVIES -> {
-                    val movList = if (selectedGenre != null) {
-                        catalogMedia.filter { it.type == MediaType.MOVIE && it.matchesGenre(selectedGenre) && !it.isComingSoon }
-                    } else catalogMedia.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
-                    movList.firstOrNull { it.backdropUrl?.isNotBlank() == true }
-                        ?: movList.firstOrNull()
-                        ?: catalogMedia.firstOrNull { it.type == MediaType.MOVIE }
-                        ?: catalogMedia.firstOrNull()
-                }
-                CategoryFilter.TV_SHOWS -> {
-                    val tvList = if (selectedGenre != null) {
-                        catalogMedia.filter { it.type == MediaType.TV_SHOW && it.matchesGenre(selectedGenre) && !it.isComingSoon }
-                    } else catalogMedia.filter { it.type == MediaType.TV_SHOW && !it.isComingSoon }
-                    tvList.firstOrNull { it.backdropUrl?.isNotBlank() == true }
-                        ?: tvList.firstOrNull()
-                        ?: catalogMedia.firstOrNull { it.type == MediaType.TV_SHOW }
-                        ?: catalogMedia.firstOrNull()
-                }
-                CategoryFilter.CATEGORIES -> {
-                    if (selectedGenre != null) {
-                        val matching = catalogMedia.filter { it.matchesGenre(selectedGenre) }
-                        matching.firstOrNull { it.backdropUrl?.isNotBlank() == true }
-                            ?: matching.firstOrNull()
-                            ?: catalogMedia.firstOrNull()
-                    } else catalogMedia.firstOrNull()
-                }
-                CategoryFilter.ALL, CategoryFilter.GAMES -> {
-                    com.example.ui.components.featuredTrendingMedia(catalogMedia)
-                        ?: catalogMedia.firstOrNull { it.backdropUrl?.isNotBlank() == true }
-                        ?: catalogMedia.firstOrNull()
-                }
-            }
+    val filtering = selectedGenre != null || categoryFilter == CategoryFilter.TV_SHOWS || categoryFilter == CategoryFilter.MOVIES
+    val homeCatalog = remember(catalogMedia, categoryFilter, selectedGenre, catalogIsScoped) {
+        catalogMedia.filter { media ->
+            (categoryFilter != CategoryFilter.TV_SHOWS || media.type == MediaType.TV_SHOW) &&
+            (categoryFilter != CategoryFilter.MOVIES || media.type == MediaType.MOVIE) &&
+            (selectedGenre == null || catalogIsScoped || media.matchesGenre(selectedGenre))
+        }
+    }
+    val visibleContinueWatching = remember(continueWatchingList, homeCatalog, filtering) {
+        if (!filtering) continueWatchingList else {
+            val keys = homeCatalog.map { it.type to it.id }.toSet()
+            continueWatchingList.filter { (it.first.type to it.first.id) in keys }
+        }
+    }
+    val heroMedia = remember(homeCatalog) {
+        val released = homeCatalog.filterNot { it.isComingSoon }
+        com.example.ui.components.featuredTrendingMedia(released)
+            ?: released.firstOrNull { !it.backdropUrl.isNullOrBlank() }
+            ?: released.firstOrNull()
+    }
+    var previousSelection by remember { mutableStateOf(categoryFilter to selectedGenre) }
+    LaunchedEffect(categoryFilter, selectedGenre) {
+        val selection = categoryFilter to selectedGenre
+        if (previousSelection != selection) {
+            previousSelection = selection
+            listState.scrollToItem(0)
         }
     }
 
@@ -131,8 +125,18 @@ fun HomeScreen(
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                if (isLoadingCatalog) NetflixSpinner(size = 50.dp)
-                else {
+                if (categoryLoading || (isLoadingCatalog && homeCatalog.isEmpty())) NetflixSpinner(size = 50.dp)
+                else if (filtering) {
+                    androidx.compose.material3.Text("No matching titles", color = Color.White, fontSize = 22.sp,
+                        modifier = Modifier.testTag("home_category_empty"))
+                    Spacer(Modifier.height(12.dp))
+                    androidx.compose.material3.Text(categoryMessage ?: "No titles match this category for the current profile.",
+                        color = Color.White.copy(alpha = .7f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    if (selectedGenre != null) androidx.compose.material3.TextButton(onClick = onRetryCategory) {
+                        androidx.compose.material3.Text("Retry")
+                    }
+                    androidx.compose.material3.Button(onClick = onClearCategory) { androidx.compose.material3.Text("Clear filter") }
+                } else {
                     androidx.compose.material3.Text("You’re offline", color = Color.White, fontSize = 22.sp)
                     Spacer(Modifier.height(12.dp))
                     androidx.compose.material3.Text("Your downloads are still available. Reconnect to browse more titles.", color = Color.White.copy(alpha = .7f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -158,7 +162,7 @@ fun HomeScreen(
 
     val currentTopColor = extractedTopColor ?: defaultTop
     val currentBottomColor = extractedBottomColor ?: defaultBottom
-    val showGames = games.isNotEmpty() && userSubscription.isGamesAllowed && categoryFilter == CategoryFilter.ALL
+    val showGames = games.isNotEmpty() && userSubscription.isGamesAllowed && categoryFilter == CategoryFilter.ALL && selectedGenre == null
 
     // Ambient color propagation for bottom navigation bar blend (called once on settle, not per-frame)
     LaunchedEffect(heroMedia.id, extractedBottomColor) {
@@ -195,32 +199,32 @@ fun HomeScreen(
     }
 
     // Cache categorized rows for performance and consistency (Offloaded to Dispatchers.Default to prevent UI thread lag)
-    val sectionState = produceState(emptyList<MediaSection>(), catalogMedia, personalizedMedia,
+    val sectionState = androidx.compose.runtime.key(categoryFilter, selectedGenre) { produceState(emptyList<MediaSection>(), homeCatalog, personalizedMedia,
         categoryFilter, selectedGenre, activeProfile.name, railCardWidth) {
         value = withContext(Dispatchers.Default) {
             val rawSections = mutableListOf<Triple<String, String, List<MediaItem>>>()
-            val movies = catalogMedia.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
-            val tvShows = catalogMedia.filter { it.type == MediaType.TV_SHOW && !it.isComingSoon }
-            val top10 = catalogMedia.filter { it.top10Rank != null }.sortedBy { it.top10Rank }
-            val trending = catalogMedia.filter { it.isTrending && !it.isComingSoon }
-            val originals = catalogMedia.filter { it.isOriginal && !it.isComingSoon }
-            val comingSoon = catalogMedia.filter { it.isComingSoon }
-            val podcasts = catalogMedia.filter { media ->
+            val movies = homeCatalog.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
+            val tvShows = homeCatalog.filter { it.type == MediaType.TV_SHOW && !it.isComingSoon }
+            val top10 = homeCatalog.filter { it.top10Rank != null }.sortedBy { it.top10Rank }
+            val trending = homeCatalog.filter { it.isTrending && !it.isComingSoon }
+            val originals = homeCatalog.filter { it.isOriginal && !it.isComingSoon }
+            val comingSoon = homeCatalog.filter { it.isComingSoon }
+            val podcasts = homeCatalog.filter { media ->
                 !media.isComingSoon && media.genres.any { genre ->
                     genre.equals("Podcast", ignoreCase = true) || genre.equals("Podcasts", ignoreCase = true)
                 }
             }
-            val newReleases = catalogMedia.filter {
+            val newReleases = homeCatalog.filter {
                 !it.isComingSoon && com.example.discovery.ReleasePolicy.isNew(it.releaseDate)
             }.sortedByDescending { it.releaseDate }
 
-            val usedMediaIds = mutableSetOf<String>()
-            heroMedia?.let { usedMediaIds.add(it.id) }
+            val usedMediaIds = mutableSetOf<Pair<MediaType, String>>()
+            heroMedia?.let { usedMediaIds.add(it.type to it.id) }
 
             fun filterFresh(list: List<MediaItem>, minCount: Int = 4): List<MediaItem> {
-                val fresh = list.filter { !usedMediaIds.contains(it.id) }
-                val result = if (fresh.size >= minCount) fresh else list.distinctBy { it.id }
-                result.take(10).forEach { usedMediaIds.add(it.id) }
+                val fresh = list.filter { !usedMediaIds.contains(it.type to it.id) }
+                val result = if (fresh.size >= minCount) fresh else list.distinctBy { it.type to it.id }
+                result.take(10).forEach { usedMediaIds.add(it.type to it.id) }
                 return result
             }
 
@@ -234,53 +238,53 @@ fun HomeScreen(
                     if (podcasts.isNotEmpty()) {
                         rawSections.add(Triple("section_podcasts", "Podcasts: Now on NetflixPro", filterFresh(podcasts)))
                     }
-                    if (personalizedMedia.isNotEmpty()) {
-                        rawSections.add(Triple("section_personalized", "Your next watch", filterFresh(personalizedMedia)))
+                    val allowed = homeCatalog.map { it.type to it.id }.toSet()
+                    val personalized = personalizedMedia.filter { (it.type to it.id) in allowed }
+                    if (personalized.isNotEmpty()) {
+                        rawSections.add(Triple("section_personalized", "Your next watch", filterFresh(personalized)))
                     }
                     if (top10.isNotEmpty()) {
                         rawSections.add(Triple("section_top10", "Top 10 Today in Your Country", top10))
-                        top10.take(5).forEach { usedMediaIds.add(it.id) }
+                        top10.take(5).forEach { usedMediaIds.add(it.type to it.id) }
                     }
                     if (trending.isNotEmpty()) rawSections.add(Triple("section_trending", "Trending Now", filterFresh(trending)))
                     if (comingSoon.isNotEmpty()) rawSections.add(Triple("section_coming_soon", "Worth the Wait / Coming Soon", comingSoon))
                     if (originals.isNotEmpty()) rawSections.add(Triple("section_originals", "Only on NetflixPro", filterFresh(originals)))
                     
-                    val actionSciFi = catalogMedia.filter { it.matchesGenre("Action") || it.matchesGenre("Sci-Fi") }
+                    val actionSciFi = homeCatalog.filter { it.matchesGenre("Action") || it.matchesGenre("Sci-Fi") }
                     if (actionSciFi.isNotEmpty()) rawSections.add(Triple("section_action_scifi", "Action & Sci-Fi Thrillers", filterFresh(actionSciFi)))
                     
-                    val crimeSuspense = catalogMedia.filter { it.matchesGenre("Crime Thrillers") || it.matchesGenre("Crime") }
+                    val crimeSuspense = homeCatalog.filter { it.matchesGenre("Crime Thrillers") || it.matchesGenre("Crime") }
                     if (crimeSuspense.isNotEmpty()) rawSections.add(Triple("section_crime", "Crime TV Shows & Mystery Thrillers", filterFresh(crimeSuspense)))
 
-                    val drama = catalogMedia.filter { it.matchesGenre("Drama") }
+                    val drama = homeCatalog.filter { it.matchesGenre("Drama") }
                     if (drama.isNotEmpty()) rawSections.add(Triple("section_drama", "Critically Acclaimed Dramas", filterFresh(drama)))
 
-                    val comedy = catalogMedia.filter { it.matchesGenre("Comedy") }
+                    val comedy = homeCatalog.filter { it.matchesGenre("Comedy") }
                     if (comedy.isNotEmpty()) rawSections.add(Triple("section_comedy", "Comedies & Feel-Good", filterFresh(comedy)))
 
-                    val anime = catalogMedia.filter { it.matchesGenre("Anime") || it.matchesGenre("Animation") }
+                    val anime = homeCatalog.filter { it.matchesGenre("Anime") || it.matchesGenre("Animation") }
                     if (anime.isNotEmpty()) rawSections.add(Triple("section_anime", "Anime & Animation Hits", filterFresh(anime)))
 
-                    val korean = catalogMedia.filter { it.matchesGenre("K-Dramas") }
+                    val korean = homeCatalog.filter { it.matchesGenre("K-Dramas") }
                     if (korean.isNotEmpty()) rawSections.add(Triple("section_korean", "Korean Dramas & Global Sensations", filterFresh(korean)))
 
-                    val award = catalogMedia.filter { it.matchPercentage > 85 }
+                    val award = homeCatalog.filter { it.matchPercentage > 85 }
                     if (award.isNotEmpty()) rawSections.add(Triple("section_award_winning", "Award-Winning & Top Rated", filterFresh(award)))
 
-                    val doc = catalogMedia.filter { it.matchesGenre("Documentary") }
+                    val doc = homeCatalog.filter { it.matchesGenre("Documentary") }
                     if (doc.isNotEmpty()) rawSections.add(Triple("section_documentary", "Gripping Documentaries", filterFresh(doc)))
 
                     if (tvShows.isNotEmpty()) rawSections.add(Triple("section_binge", "Binge-Worthy TV Series", filterFresh(tvShows)))
                     if (movies.isNotEmpty()) rawSections.add(Triple("section_blockbusters", "Blockbuster Movies", filterFresh(movies)))
                 }
                 CategoryFilter.TV_SHOWS -> {
-                    val tvFiltered = if (selectedGenre != null) {
-                        tvShows.filter { it.matchesGenre(selectedGenre) }
-                    } else tvShows
+                    val tvFiltered = tvShows
 
                     val tvTop10 = tvFiltered.filter { it.top10Rank != null }
                     if (tvTop10.isNotEmpty()) {
                         rawSections.add(Triple("section_tv_top10", "Top 10 TV Shows Today", tvTop10))
-                        tvTop10.take(4).forEach { usedMediaIds.add(it.id) }
+                        tvTop10.take(4).forEach { usedMediaIds.add(it.type to it.id) }
                     }
                     
                     val tvTitle = if (selectedGenre != null) "Popular $selectedGenre TV Shows" else "Popular TV Shows"
@@ -305,14 +309,12 @@ fun HomeScreen(
                     if (tvNew.isNotEmpty()) rawSections.add(Triple("section_tv_new", "New TV Shows", filterFresh(tvNew)))
                 }
                 CategoryFilter.MOVIES -> {
-                    val movFiltered = if (selectedGenre != null) {
-                        movies.filter { it.matchesGenre(selectedGenre) }
-                    } else movies
+                    val movFiltered = movies
 
                     val movTop10 = movFiltered.filter { it.top10Rank != null }
                     if (movTop10.isNotEmpty()) {
                         rawSections.add(Triple("section_movies_top10", "Top 10 Movies Today", movTop10))
-                        movTop10.take(4).forEach { usedMediaIds.add(it.id) }
+                        movTop10.take(4).forEach { usedMediaIds.add(it.type to it.id) }
                     }
                     
                     val movTitle = if (selectedGenre != null) "Popular $selectedGenre Movies" else "Popular Movies"
@@ -341,10 +343,7 @@ fun HomeScreen(
                 }
                 CategoryFilter.CATEGORIES -> {
                     val genreFilter = selectedGenre ?: "All"
-                    val filtered = if (selectedGenre == null) catalogMedia else {
-                        val matches = catalogMedia.filter { it.matchesGenre(selectedGenre) }
-                        if (matches.isNotEmpty()) matches else catalogMedia
-                    }
+                    val filtered = homeCatalog
 
                     val catTop10 = filtered.filter { it.top10Rank != null }.sortedBy { it.top10Rank }
                     val catTrending = filtered.filter { it.isTrending }
@@ -377,9 +376,6 @@ fun HomeScreen(
                     if (catNew.isNotEmpty()) {
                         rawSections.add(Triple("section_category_new", "New Releases in $genreFilter", catNew))
                     }
-                    if (filtered.size < 6 && trending.isNotEmpty()) {
-                        rawSections.add(Triple("section_cat_popular_more", "Popular on NetflixPro", trending))
-                    }
                 }
             }
             
@@ -397,6 +393,8 @@ fun HomeScreen(
         }
     }
 
+    }
+
     // Read once per composition: lazy interval counts, keys and game placement
     // must share the same catalog snapshot while background row building completes.
     val uiSections = sectionState.value
@@ -410,8 +408,8 @@ fun HomeScreen(
     val setItemHeight = remember(itemHeights) { { key: String, height: Int ->
         if (itemHeights[key] != height) itemHeights[key] = height
     } }
-    val itemKeys = remember(uiSections, continueWatchingList.isNotEmpty(), showGames) {
-        listOf("hero") + (if (continueWatchingList.isNotEmpty()) listOf("continue_watching") else emptyList()) +
+    val itemKeys = remember(uiSections, visibleContinueWatching.isNotEmpty(), showGames, selectedGenre, categoryLoading, categoryMessage) {
+        listOf("hero") + (if (selectedGenre != null && (categoryLoading || categoryMessage != null)) listOf("category_status") else emptyList()) + (if (visibleContinueWatching.isNotEmpty()) listOf("continue_watching") else emptyList()) +
             uiSections.flatMapIndexed { index, section ->
                 if (showGames && index == 0) listOf(section.id, "mobile_games") else listOf(section.id)
             } + if (showGames && uiSections.isEmpty()) listOf("mobile_games") else emptyList()
@@ -495,13 +493,24 @@ fun HomeScreen(
             }
             }
             }
+            if (selectedGenre != null && (categoryLoading || categoryMessage != null)) {
+                item(key = "category_status", contentType = "category_status") {
+                    Column(Modifier.fillMaxWidth().onSizeChanged { setItemHeight("category_status", it.height) }.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        androidx.compose.material3.Text(categoryMessage ?: "Loading more $selectedGenre titles…",
+                            color = Color.White.copy(alpha = .75f), fontSize = 13.sp)
+                        if (!categoryLoading && categoryMessage != null) androidx.compose.material3.TextButton(onClick = onRetryCategory) {
+                            androidx.compose.material3.Text("Retry")
+                        }
+                    }
+                }
+            }
             // Continue Watching Row (only if present)
-            if (continueWatchingList.isNotEmpty()) {
+            if (visibleContinueWatching.isNotEmpty()) {
                 item(key = "continue_watching", contentType = "continue_watching") {
                 Column(Modifier.onSizeChanged { setItemHeight("continue_watching", it.height) }) {
                 ContinueWatchingSectionRow(
                     title = "Continue Watching for ${activeProfile.name}",
-                    items = continueWatchingList,
+                    items = visibleContinueWatching,
                     onPlayClick = onPlayClick,
                     onInfoClick = onMediaClick,
                     onOptionsClick = onContinueWatchingOptionsClick

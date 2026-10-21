@@ -24,7 +24,8 @@ data class TmdbMediaResult(
     @Json(name = "vote_average") val voteAverage: Double?,
     @Json(name = "genre_ids") val genreIds: List<Int> = emptyList(),
     @Json(name = "vote_count") val voteCount: Int = 0,
-    val popularity: Double = 0.0
+    val popularity: Double = 0.0,
+    @Json(name = "original_language") val originalLanguage: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -142,13 +143,13 @@ fun mapGenreIds(genreIds: List<Int>): List<String> {
             37 -> { set.add("Western"); set.add("Action") }
             10759 -> { set.add("Action & Adventure"); set.add("Action"); set.add("Adventure") }
             10762 -> { set.add("Kids"); set.add("Kids & Family") }
-            10764 -> { set.add("Reality TV"); set.add("Documentaries") }
+            10764 -> { set.add("Reality TV") }
             10765 -> { set.add("Sci-Fi & Fantasy"); set.add("Sci-Fi"); set.add("Fantasy") }
             10766 -> { set.add("Soap"); set.add("Drama"); set.add("Romance") }
-            10767 -> { set.add("Talk Show"); set.add("Comedy") }
+            10767 -> { set.add("Talk Show") }
             10768 -> { set.add("War & Politics"); set.add("Drama") }
         }
     }
-    return if (set.isEmpty()) listOf("Drama", "Popular") else set.toList()
+    return if (set.isEmpty()) emptyList() else set.toList()
 }
 

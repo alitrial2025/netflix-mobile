@@ -228,6 +228,20 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val diagnosticRunning by viewModel.diagnosticRunning.collectAsStateWithLifecycle()
     val diagnosticResult by viewModel.diagnosticResult.collectAsStateWithLifecycle()
     val catalogMedia by viewModel.displayCatalogMedia.collectAsStateWithLifecycle()
+    val homeCategoryState by viewModel.homeCategoryState.collectAsStateWithLifecycle()
+    var categoryRetry by remember { mutableStateOf(0) }
+    var handledCategoryRetry by remember { mutableStateOf(0) }
+    LaunchedEffect(selectedCategoryGenre, playbackNetwork.online, categoryRetry) {
+        val force = categoryRetry != handledCategoryRetry
+        handledCategoryRetry = categoryRetry
+        viewModel.loadHomeCategory(selectedCategoryGenre, playbackNetwork.online, force)
+    }
+    val categoryDefinition = com.example.data.model.HomeCategory.fromLabel(selectedCategoryGenre)
+    val categoryIsScoped = categoryDefinition != null
+    val categoryMatches = categoryDefinition == homeCategoryState.category
+    val categoryLoading = categoryIsScoped && (!categoryMatches || homeCategoryState.loading)
+    val homeCatalog = if (!categoryIsScoped) catalogMedia else if (categoryMatches) homeCategoryState.items else emptyList()
+
     val personalizedMedia by viewModel.personalizedMedia.collectAsStateWithLifecycle()
     val upcomingReleases by viewModel.upcomingReleases.collectAsStateWithLifecycle()
     val recentReleases by viewModel.recentReleases.collectAsStateWithLifecycle()
@@ -355,12 +369,17 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
                                 } else {
                                     HomeScreen(
-                                        catalogMedia = catalogMedia,
+                                        catalogMedia = homeCatalog,
                                         personalizedMedia = personalizedMedia,
                                         userSubscription = userSubscription,
                                         reminders = reminders,
                                         onToggleReminder = stableOnToggleReminder,
-                                        isLoadingCatalog = isLoadingCatalog,
+                                        isLoadingCatalog = if (categoryIsScoped) categoryLoading else isLoadingCatalog,
+                                        catalogIsScoped = categoryIsScoped,
+                                        categoryLoading = categoryLoading,
+                                        categoryMessage = homeCategoryState.message.takeIf { categoryIsScoped && categoryMatches },
+                                        onRetryCategory = { categoryRetry++ },
+                                        onClearCategory = { viewModel.setCategoryFilter(CategoryFilter.ALL, null) },
                                         onRetryCatalog = viewModel::refreshCatalog,
                                         onOpenDownloads = stableOnDownloadsClick,
                                         activeProfile = activeProfile,

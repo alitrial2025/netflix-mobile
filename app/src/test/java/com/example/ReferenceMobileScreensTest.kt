@@ -152,6 +152,45 @@ class ReferenceMobileScreensTest {
         bounds.forEach { assertTrue("Each tab needs a usable tap target", it.width >= 48f && it.height >= 48f) }
     }
 
+    @Test fun emptyGenreNeverShowsAnUnrelatedHeroOrContinueWatching() {
+        val unrelated = show.copy(genreIds = listOf(18), genres = listOf("Drama"))
+        rule.setContent { NetflixTheme {
+            HomeScreen(profile, CategoryFilter.CATEGORIES, "Documentaries", listOf(unrelated to com.example.data.local.WatchProgressEntity(mediaId = unrelated.id, positionSeconds = 20, totalSeconds = 100)), { false }, {}, {}, {},
+                catalogMedia = listOf(unrelated), userSubscription = membership)
+        } }
+        rule.onNodeWithTag("home_category_empty").assertIsDisplayed()
+        rule.onNodeWithTag("hero_title_logo").assertDoesNotExist()
+        rule.onNodeWithText("Continue Watching").assertDoesNotExist()
+    }
+
+    @Test fun selectedProviderHeroAlsoRespectsTheFilmsChip() {
+        var played: MediaItem? = null
+        rule.setContent { NetflixTheme {
+            HomeScreen(profile, CategoryFilter.MOVIES, "Disney+", emptyList(), { false }, {}, { played = it }, {},
+                catalogMedia = listOf(show.copy(isTrending = true), movie), catalogIsScoped = true, userSubscription = membership)
+        } }
+        artworkReady(movie.logoUrl, movie.backdropUrl)
+        rule.onNodeWithText("Play").performClick()
+        rule.runOnIdle { assertEquals(movie.id, played?.id); assertEquals(MediaType.MOVIE, played?.type) }
+    }
+
+    @Test fun providerDropdownKeepsSeriesSelectionAndGenreSurvivesFilmsSelection() {
+        var selection: Pair<CategoryFilter, String?>? = null
+        rule.setContent { NetflixTheme {
+            NetflixTopBar(profile, CategoryFilter.TV_SHOWS, "Netflix", { filter, genre -> selection = filter to genre }, {}, {}, {})
+        } }
+        rule.onNodeWithTag("category_pill_categories").performScrollTo().performClick()
+        rule.onNodeWithTag("category_menu_netflix").assertExists()
+        rule.onNodeWithTag("category_menu_prime").assertExists()
+        rule.onNodeWithTag("category_menu_disney").assertExists()
+        rule.onNodeWithTag("category_menu_hotstar").assertExists()
+        rule.onNodeWithTag("category_menu_apple").assertExists()
+        rule.onNodeWithTag("category_menu_peacock").performScrollTo().performClick()
+        rule.runOnIdle { assertEquals(CategoryFilter.TV_SHOWS to "Peacock", selection) }
+        rule.onNodeWithText("Films").performScrollTo().performClick()
+        rule.runOnIdle { assertEquals(CategoryFilter.MOVIES to "Netflix", selection) }
+    }
+
     @Test
     @Config(qualifiers = "w840dp-h1100dp-mdpi")
     fun unfoldedHomeUsesTheEntireWindowAndCinematicArtwork() {
