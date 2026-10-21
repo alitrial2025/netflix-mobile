@@ -44,6 +44,7 @@ import com.example.data.model.UserSubscription
 import com.example.ui.components.ContinueWatchingSectionRow
 import com.example.ui.components.HomeBackdrop
 import com.example.ui.components.homeBackdropOffset
+import com.example.ui.components.CinematicHeroBanner
 import com.example.ui.components.HeroBanner
 import com.example.ui.components.MediaSectionRow
 import com.example.ui.components.HomeGamesRow
@@ -175,7 +176,13 @@ fun HomeScreen(
         (viewportHeightDp * .85f - statusBarHeightDp - 116f - 14f)
             .coerceAtLeast(minimumHeight).dp
     }
-    val railCardWidth = ((viewportWidthDp - 48) / 3.35f).dp.coerceAtLeast(92.dp)
+    // Use window bounds, not device identity: folding, rotation and multi-window
+    // can all change presentation without recreating the activity or its list.
+    val cinematic = viewportWidthDp >= 600f || viewportWidthDp > viewportHeightDp
+    val cinematicHeight = minOf(viewportWidthDp * 9f / 16f, viewportHeightDp * .76f)
+        .coerceAtLeast(minOf(280f, viewportHeightDp * .76f)).dp
+    val railCardWidth = if (cinematic) (viewportWidthDp / 6.2f).dp.coerceIn(100.dp, 180.dp)
+        else ((viewportWidthDp - 48) / 3.35f).dp.coerceAtLeast(92.dp)
 
     val gradientEndPx = remember(heroCardHeight, density) {
         with(density) { (134.dp + heroCardHeight + 580.dp).toPx() }
@@ -419,13 +426,16 @@ fun HomeScreen(
         if (measuredWidth > 0f && measuredWidth != viewportWidthDp) viewportWidthDp = measuredWidth
     }) {
         // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
-        HomeBackdrop(currentTopColor, currentBottomColor, gradientEndPx, { backdropOffset.value })
+        HomeBackdrop(if (cinematic) Color.Black else currentTopColor,
+            if (cinematic) Color.Black else currentBottomColor, gradientEndPx, { backdropOffset.value })
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = com.example.ui.components.navigationContentClearance())) {
             item(key = "hero", contentType = "hero") {
             Column(Modifier.onSizeChanged { setItemHeight("hero", it.height) }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
-            Spacer(modifier = Modifier.statusBarsPadding())
-            Spacer(modifier = Modifier.height(116.dp))
+            if (!cinematic) {
+                Spacer(modifier = Modifier.statusBarsPadding())
+                Spacer(modifier = Modifier.height(116.dp))
+            }
 
             // Hero Banner with poster color extraction and adaptive phone height
             val onHeroPlay = remember(heroMedia, onPlayClick) { { onPlayClick(heroMedia) } }
@@ -445,7 +455,21 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                HeroBanner(
+                if (cinematic) {
+                    CinematicHeroBanner(
+                        media = heroMedia,
+                        isInWatchlist = isInWatchlist,
+                        onPlayClick = onHeroPlay,
+                        onWatchlistToggle = onHeroToggle,
+                        onInfoClick = onHeroInfo,
+                        height = cinematicHeight,
+                        isLocked = userSubscription.isMediaLocked(heroMedia.id, heroMedia.title),
+                        onColorsExtracted = { top, bottom ->
+                            extractedTopColor = top
+                            extractedBottomColor = bottom
+                        }
+                    )
+                } else HeroBanner(
                     media = heroMedia,
                     isInWatchlist = isInWatchlist,
                     onPlayClick = onHeroPlay,

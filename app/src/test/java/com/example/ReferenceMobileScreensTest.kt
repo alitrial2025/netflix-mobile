@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,7 +96,7 @@ class ReferenceMobileScreensTest {
         MediaItem("reference-show", "Squid Game", MediaType.TV_SHOW,
             "A new game changes everything. Discover the people behind each choice.", "", 96, "16+", 2026, "3 Seasons",
             genres = listOf("Suspenseful", "Thriller", "Korean"), cast = emptyList(), director = "",
-            posterUrl = fixture("squid-game.jpg"), backdropUrl = fixture("squid-game.jpg"),
+            posterUrl = fixture("squid-game.jpg"), backdropUrl = fixture("squid-game-backdrop.jpg"),
             logoUrl = fixture("squid-game-logo.png"), isOriginal = true, isTrending = true)
     }
     private val movie by lazy {
@@ -152,25 +154,88 @@ class ReferenceMobileScreensTest {
 
     @Test
     @Config(qualifiers = "w840dp-h1100dp-mdpi")
-    fun unfoldedHomeKeepsThePortraitCompositionAndPlayableControls() {
+    fun unfoldedHomeUsesTheEntireWindowAndCinematicArtwork() {
         var played = false
+        var listed = false
         rule.setContent { NetflixTheme {
             com.example.ui.components.MobileHomeViewport {
                 HomeScreen(profile, CategoryFilter.ALL, null, emptyList(), { false }, {},
-                    { played = true }, {}, catalogMedia = listOf(show, movie), userSubscription = membership)
+                    { played = true }, { listed = true }, catalogMedia = listOf(show, movie), userSubscription = membership)
                 NetflixTopBar(profile, CategoryFilter.ALL, null, { _, _ -> }, {}, {}, {})
                 NetflixBottomNav(NavigationTab.HOME, profile, {}, Modifier.align(Alignment.BottomCenter), isClipsAllowed = true)
             }
         } }
-        artworkReady(show.posterUrl)
+        artworkReady(show.posterUrl, show.backdropUrl, show.logoUrl)
         val root = rule.onRoot().fetchSemanticsNode().boundsInRoot
-        val hero = rule.onNodeWithTag("hero_banner_card").fetchSemanticsNode().boundsInRoot
-        assertTrue("A wide window must retain a portrait hero", hero.height > hero.width)
-        assertTrue("Home must remain a centered mobile column", hero.width < root.width * .75f)
-        assertTrue(kotlin.math.abs(hero.center.x - root.center.x) < 2f)
+        val hero = rule.onNodeWithTag("home_cinematic_hero").fetchSemanticsNode().boundsInRoot
+        rule.onNodeWithTag("hero_banner_card").assertDoesNotExist()
+        assertEquals("Cinematic artwork must reach both edges", root.width, hero.width, 1f)
+        assertEquals(root.left, hero.left, 1f)
+        assertTrue("Use a wide image instead of a portrait card", hero.width > hero.height)
+        val play = rule.onNodeWithTag("hero_play").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue("Actions belong on the left", play.center.x < root.center.x)
         rule.onNodeWithTag("hero_play").performClick()
-        rule.runOnIdle { assertTrue(played) }
+        rule.onNodeWithTag("hero_my_list").performClick()
+        rule.runOnIdle { assertTrue(played); assertTrue(listed) }
         capture("home-unfolded-840")
+    }
+
+    @Test
+    @Config(qualifiers = "w840dp-h412dp-mdpi")
+    fun landscapeHomeKeepsHeroControlsAboveNavigationAndRowsBelow() = assertLandscapeHome()
+
+    @Test
+    @Config(qualifiers = "w560dp-h360dp-mdpi")
+    fun narrowLandscapeAlsoUsesCinematicHome() = assertLandscapeHome()
+
+    private fun assertLandscapeHome() {
+        rule.setContent { NetflixTheme {
+            com.example.ui.components.MobileHomeViewport {
+                HomeScreen(profile, CategoryFilter.ALL, null, emptyList(), { false }, {}, {}, {},
+                    catalogMedia = listOf(show, movie), userSubscription = membership)
+                NetflixTopBar(profile, CategoryFilter.ALL, null, { _, _ -> }, {}, {}, {})
+                FloatingNavigation(NavigationTab.HOME)
+            }
+        } }
+        artworkReady(show.posterUrl, show.backdropUrl, show.logoUrl)
+        val hero = rule.onNodeWithTag("home_cinematic_hero").fetchSemanticsNode().boundsInRoot
+        val play = rule.onNodeWithTag("hero_play").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val nav = rule.onNodeWithTag("nav_main_glass_pill").fetchSemanticsNode().boundsInRoot
+        val chips = rule.onNodeWithTag("category_pill_series").fetchSemanticsNode().boundsInRoot
+        val title = rule.onNodeWithTag("cinematic_title", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(title.top >= chips.bottom)
+        assertTrue(play.bottom < nav.top)
+        assertTrue(hero.bottom < nav.top)
+        rule.onNodeWithText("Trending Now").assertIsDisplayed()
+        capture("home-landscape-${hero.width.toInt()}")
+    }
+
+    @Test
+    @Config(qualifiers = "w840dp-h1100dp-mdpi")
+    fun resizingAnOpenHomeSwitchesLayoutsAndRetainsItsActions() {
+        val wide = mutableStateOf(false)
+        val listed = mutableStateOf(false)
+        rule.setContent { NetflixTheme {
+            Box(Modifier.size(if (wide.value) 840.dp else 412.dp, if (wide.value) 600.dp else 895.dp)) {
+                com.example.ui.components.MobileHomeViewport {
+                    HomeScreen(profile, CategoryFilter.ALL, null, emptyList(), { listed.value }, {}, {},
+                        { listed.value = !listed.value }, catalogMedia = listOf(show, movie), userSubscription = membership)
+                }
+            }
+        } }
+        artworkReady(show.posterUrl)
+        rule.onNodeWithTag("hero_banner_card").assertIsDisplayed()
+        rule.onNodeWithTag("home_cinematic_hero").assertDoesNotExist()
+        rule.runOnIdle { wide.value = true }
+        artworkReady(show.backdropUrl, show.logoUrl)
+        rule.onNodeWithTag("home_cinematic_hero").assertIsDisplayed()
+        rule.onNodeWithTag("hero_banner_card").assertDoesNotExist()
+        rule.onNodeWithTag("hero_my_list").performClick()
+        rule.runOnIdle { assertTrue(listed.value); wide.value = false }
+        rule.onNodeWithTag("hero_banner_card").assertIsDisplayed()
+        rule.onNodeWithTag("home_cinematic_hero").assertDoesNotExist()
+        rule.onNodeWithTag("hero_my_list").performClick()
+        rule.runOnIdle { assertTrue(!listed.value) }
     }
 
     @Test fun frostedHomePreviewRetainsCompactHeaderAndFloatingControls() {

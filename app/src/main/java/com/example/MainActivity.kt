@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.CatalogData
@@ -289,6 +290,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .nestedScroll(glassTheme.scrollConnection)
             .background(NetflixBlack)
     ) {
         Scaffold(

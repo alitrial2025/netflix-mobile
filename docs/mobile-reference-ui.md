@@ -10,9 +10,11 @@ viewer chrome and touch indicators do not belong in the application.
   translucent rounded Series/Films/Games/New & hot/Categories chips, and a
   floating four-destination navigation pill when membership includes Clips.
 - The two outer chip ends use capsule curves. Chips and Clips action circles
-  share the same translucent surface. Home retains a centered portrait column
-  on wide tablet/foldable windows; rails measure the actual column width.
-- Header plus hero fill approximately85% of the actual viewport. The first
+  share the same translucent surface. Portrait phones retain the card layout.
+  At an actual window width of 600dp or in landscape, Home fills the window with
+  a cinematic backdrop, left-aligned title/actions and denser poster rails.
+  Fold/unfold and multi-window resizing switch layouts without resetting Home.
+- On portrait phones, header plus hero fill approximately85% of the actual viewport. The first
   content rail peeks below. Sizing follows available height and font scale;
   short windows can scroll rather than clipping the controls.
 - The hero preserves portrait artwork, a small original mark, real title art,
@@ -62,3 +64,19 @@ small, promotional, perspective-scaled images cannot establish pixel identity
 for every phone, stream or content edition. No red marketing background or
 fictitious podcast, personal list, saved clip or installed game is added to
 force an apparent match.
+
+## Cinematic Home
+
+The 21 October wide-screen reference supersedes the earlier centered-column
+requirement. Wide Home uses the catalog's landscape backdrop (poster fallback
+on failure), separate title logo (text fallback), and localized side/bottom
+scrims. The image is display-sized and crossfade-free; there is no new player,
+video decode, frame polling or live blur. Play, My List and artwork details
+use the same callbacks and subscription rules as portrait Home. Existing
+header/category controls and the glass preference remain shared.
+
+Native screen tests cover 840dp unfolded, 840×412 and 560×360 landscape windows,
+live narrow→wide→narrow resizing, action callbacks, navigation clearance and
+portrait regression captures. Physical foldable/tablet verification remains
+necessary for device-specific cutouts and performance; the Android APK does
+not install on iPadOS.

@@ -126,4 +126,28 @@ class GlassNavigationTest {
         assertEquals("Tint updates belong to drawing, not content composition", initial, compositions)
         assertFalse("The frosted tint must actually follow the palette", first.contentEquals(second))
     }
+    @Test fun scrollingMovesTheLensSheenWithoutConsumingScrollOrRecomposingContent() {
+        val theme = GlassThemeState(true)
+        var compositions = 0
+        rule.setContent {
+            CompositionLocalProvider(LocalGlassTheme provides theme) {
+                GlassPanel(Modifier.size(300.dp, 64.dp).testTag("lens_panel")) {
+                    SideEffect { compositions++ }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val before = compositions
+        val initial = capture("lens_panel", "lens-rest").readBytes()
+        rule.runOnIdle {
+            assertEquals(androidx.compose.ui.geometry.Offset.Zero, theme.scrollConnection.onPostScroll(
+                androidx.compose.ui.geometry.Offset(0f, 180f), androidx.compose.ui.geometry.Offset.Zero,
+                androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput))
+        }
+        rule.waitForIdle()
+        val moving = capture("lens_panel", "lens-scrolled").readBytes()
+        assertEquals("Scroll must not recompose the foreground", before, compositions)
+        assertFalse("The simulated lens sheen must respond to content movement", initial.contentEquals(moving))
+    }
+
 }

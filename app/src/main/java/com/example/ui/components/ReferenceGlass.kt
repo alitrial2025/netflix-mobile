@@ -9,7 +9,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
 /** One translucent surface shared by the reference chips and Clips controls. */
+internal val ReferenceGlassTint = Color.White.copy(alpha = .12f)
+
 internal fun Modifier.referenceGlass(shape: Shape, selected: Boolean = false): Modifier =
     clip(shape)
-        .background(Color.White.copy(alpha = if (selected) .23f else .12f))
+        .background(if (selected) Color.White.copy(alpha = .23f) else ReferenceGlassTint)
         .border(1.dp, Color.White.copy(alpha = if (selected) .36f else .16f), shape)

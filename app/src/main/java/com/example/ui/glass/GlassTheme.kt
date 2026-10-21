@@ -12,14 +12,31 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.unit.dp
+import com.example.ui.components.ReferenceGlassTint
+import kotlin.math.sin
 
 /** Simulated frost: no screen capture, blur pass, refraction shader or video-surface change. */
 @Stable
 class GlassThemeState(
     val glassy: Boolean,
     val ambientColorProvider: () -> Color = { Color.Black }
-)
+) {
+    // Draw-only, bounded scroll position. Never consume or redirect the gesture.
+    internal val travel = mutableFloatStateOf(0f)
+    internal val scrollConnection = object : NestedScrollConnection {
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            val delta = consumed.x + consumed.y
+            if (glassy && delta.isFinite() && delta != 0f) {
+                travel.floatValue = (travel.floatValue + delta * .008f) % (2f * kotlin.math.PI.toFloat())
+            }
+            return Offset.Zero
+        }
+    }
+}
 val LocalGlassTheme = compositionLocalOf<GlassThemeState?> { null }
 
 /** Fixed soft gradients imply diffusion. Cached geometry and tracked draw reads keep updates cheap. */
@@ -36,8 +53,7 @@ fun GlassPanel(
         Box(Modifier.matchParentSize().drawWithCache {
             val raw = if (frosted) theme?.ambientColorProvider?.invoke() ?: Color.Black else Color.Black
             val ambient = if (raw == Color.Unspecified) Color.Black else raw.copy(alpha = 1f)
-            val muted = Color(ambient.red * .45f, ambient.green * .45f, ambient.blue * .45f)
-            val base = if (frosted) lerp(Color(0xFF454750), muted, .06f).copy(alpha = .97f)
+            val base = if (frosted) Color.Black.copy(alpha = .78f)
                 else Color(0xFF242529).copy(alpha = .97f)
             val bloom = Brush.radialGradient(listOf(ambient.copy(alpha = .035f), Color.Transparent),
                 center = Offset(size.width * .1f, -size.height * .65f), radius = size.width.coerceAtLeast(size.height) * .85f)
@@ -57,13 +73,32 @@ fun GlassPanel(
                     y += spacing; row++
                 }
             } else emptyList()
-            val stroke = 1.dp.toPx()
-            val rim = Brush.linearGradient(listOf(Color.White.copy(alpha = if (frosted) .40f else .20f),
+            val stroke = (if (frosted) 1.8.dp else 1.dp).toPx()
+            val rim = Brush.linearGradient(listOf(Color.White.copy(alpha = if (frosted) .78f else .20f),
                 Color.White.copy(alpha = .06f), Color.White.copy(alpha = .10f),
-                Color.White.copy(alpha = if (frosted) .26f else .16f)), Offset.Zero, Offset(size.width, size.height))
+                Color.White.copy(alpha = if (frosted) .58f else .16f)), Offset.Zero, Offset(size.width, size.height))
+            val lensRadius = size.width.coerceAtLeast(size.height) * .65f
+            val lens = Brush.radialGradient(listOf(Color.White.copy(alpha = .055f), Color.Transparent),
+                center = Offset.Zero, radius = lensRadius)
+            val innerRim = Brush.verticalGradient(listOf(Color.White.copy(alpha = .20f), Color.Transparent,
+                Color.Black.copy(alpha = .26f), Color.White.copy(alpha = .16f)))
             onDrawBehind {
                 drawRect(base)
-                if (frosted) { drawRect(bloom); drawRect(bottomGlow) }
+                if (frosted) {
+                    drawRect(ReferenceGlassTint)
+                    drawRect(bloom); drawRect(bottomGlow)
+                    // A moving sheen suggests a lens; it does not magnify or
+                    // sample underlying pixels. Read travel only while drawing.
+                    val shift = .5f + sin(theme?.travel?.floatValue ?: 0f) * .28f
+                    withTransform({ translate(size.width * shift, -size.height * .55f) }) {
+                        drawCircle(lens, lensRadius, Offset.Zero)
+                    }
+                    val inset = stroke * 1.5f
+                    drawRoundRect(innerRim, Offset(inset, inset),
+                        androidx.compose.ui.geometry.Size((size.width - inset * 2).coerceAtLeast(0f),
+                            (size.height - inset * 2).coerceAtLeast(0f)),
+                        CornerRadius((size.height / 2 - inset).coerceAtLeast(0f)), style = Stroke(.7.dp.toPx()))
+                }
                 drawRect(milk)
                 if (grain.isNotEmpty()) drawPoints(grain, PointMode.Points, Color.White.copy(alpha = .012f),
                     strokeWidth = .55.dp.toPx())
