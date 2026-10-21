@@ -41,14 +41,14 @@ internal fun PlatformHeroCarousel(items: List<MediaItem>, scope: String?, height
                 PlatformHeroBanner(media, height, wide, inList(media), isLocked(media), networkAvailable,
                     { onPlay(media) }, { onList(media) }, { onInfo(media) })
             }
-            if (items.size > 1) Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.Center,
+            if (items.size > 1) Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically) {
                 items.indices.forEach { index ->
                     val active = pager.currentPage == index
-                    Box(Modifier.size(32.dp).clickable(role = Role.Tab) { coroutine.launch { pager.animateScrollToPage(index) } }
+                    Box(Modifier.size(48.dp).clickable(role = Role.Tab) { coroutine.launch { pager.animateScrollToPage(index) } }
                         .semantics { selected = active }.testTag("platform_hero_page_$index"), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(if (active) 14.dp else 5.dp, 5.dp).background(
-                            if (active) Color.White else Color.White.copy(alpha = .4f), CircleShape))
+                            if (active) design.accent else Color.White.copy(alpha = .4f), CircleShape))
                     }
                 }
             }

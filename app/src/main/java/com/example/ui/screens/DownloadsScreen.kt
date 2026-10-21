@@ -128,7 +128,7 @@ fun DownloadsScreen(
             if (prime) item(key = "prime_summary") {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(primeDownloadsSummary(ready.filter { showId == null || (it.mediaId == showId && (showSeason == null || primeDownloadedSeason(it) == showSeason)) }, byId), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f).testTag("prime_downloads_summary"))
-                    if (ready.isNotEmpty()) OutlinedButton(onClick = { editing = !editing; selected = emptySet() }, modifier = Modifier.testTag("downloads_edit_toggle_btn"), shape = RoundedCornerShape(8.dp)) { Text(if (editing) "Done" else "Edit", color = Color.White) }
+                    if (ready.isNotEmpty()) OutlinedButton(onClick = { editing = !editing; selected = emptySet() }, modifier = Modifier.testTag("downloads_edit_toggle_btn"), shape = RoundedCornerShape(platformDesign.controlRadius)) { Text(if (editing) "Done" else "Edit", color = Color.White) }
                 }
             }
             if (!prime && showId == null) item(key = "smart_settings") {
@@ -178,7 +178,7 @@ fun DownloadsScreen(
                 }
                 item(key = "discover") {
                     if (prime) Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Button(onOpenSearch, shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = platformDesign.raised, contentColor = Color.White), modifier = Modifier.testTag("prime_download_more")) { Text("Download more videos") }
+                        Button(onOpenSearch, shape = RoundedCornerShape(platformDesign.controlRadius), colors = ButtonDefaults.buttonColors(containerColor = platformDesign.raised, contentColor = Color.White), modifier = Modifier.testTag("prime_download_more")) { Text("Download more videos") }
                         TextButton(onClick = { settings = true }, modifier = Modifier.testTag("downloads_smart_settings")) {
                             Text("Auto Downloads: ${if (smartDownloadsEnabled || downloadsForYouEnabled) "On" else "Off"}", color = Color.White)
                             Text("  ·  Manage", color = platformDesign.accent)

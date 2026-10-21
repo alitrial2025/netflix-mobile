@@ -31,7 +31,7 @@ internal fun PlatformHeroBanner(media: MediaItem, height: Dp, wide: Boolean, inL
     networkAvailable: Boolean, onPlay: () -> Unit, onList: () -> Unit, onInfo: () -> Unit) {
     val design = LocalPlatformDesign.current
     val compact = wide && height < 340.dp
-    val logoHeight = if (compact) 48.dp else if (wide) 76.dp else 88.dp
+    val logoHeight = if (compact) 32.dp else if (wide) 76.dp else 88.dp
     val centered = !wide && design.appearance in setOf(PlatformAppearance.DISNEY,
         PlatformAppearance.APPLE, PlatformAppearance.PEACOCK)
     val insetCard = !wide && design.appearance in setOf(PlatformAppearance.PRIME, PlatformAppearance.HOTSTAR, PlatformAppearance.PEACOCK)
@@ -41,7 +41,7 @@ internal fun PlatformHeroBanner(media: MediaItem, height: Dp, wide: Boolean, inL
     val artwork = if (failedBackdrop) posterModel(media) else if (portrait)
         media.heroPosterUrl ?: media.backdropUrl ?: posterModel(media) else media.backdropUrl ?: posterModel(media)
     val frame = Modifier.fillMaxWidth().height(height)
-        .then(if (insetCard) Modifier.padding(start = 16.dp, end = 16.dp, top = 116.dp, bottom = 12.dp)
+        .then(if (insetCard) Modifier.padding(start = 16.dp, end = 16.dp, top = 132.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 12.dp)
             .clip(RoundedCornerShape(design.cardRadius)) else Modifier)
     BoxWithConstraints(frame.background(design.surface).clickable(onClick = onInfo)
         .testTag("platform_hero_${design.appearance.key}")) {
@@ -64,15 +64,16 @@ internal fun PlatformHeroBanner(media: MediaItem, height: Dp, wide: Boolean, inL
                 contentScale = ContentScale.Fit, alignment = if (centered) Alignment.Center else Alignment.CenterStart,
                 onError = { failedLogo = true }, modifier = Modifier.fillMaxWidth().height(logoHeight)
                     .testTag("platform_title_logo"))
-            else Text(media.title, color = Color.White, fontSize = if (wide) 30.sp else 32.sp,
-                fontWeight = design.titleWeight, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            else Text(media.title, color = Color.White, fontSize = if (compact) 24.sp else if (wide) 30.sp else 32.sp,
+                fontWeight = design.titleWeight, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis,
                 textAlign = if (centered) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start)
-            if (!compact) Text((listOf(media.releaseYear.toString()) + media.genres.take(2)).joinToString("  •  "),
+            if (!compact) Text((listOfNotNull(media.releaseYear.takeIf { it > 0 }?.toString()) + media.genres.take(2)).joinToString("  •  "),
                 color = Color.White.copy(alpha = .82f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!centered && height >= 400.dp && design.appearance != PlatformAppearance.HOTSTAR) Text(media.description, color = Color.White.copy(alpha = .85f),
                 fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (wide || design.appearance != PlatformAppearance.HOTSTAR) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, if (centered) Alignment.CenterHorizontally else Alignment.Start)) {
                 Button(onPlay, (if (design.appearance == PlatformAppearance.HOTSTAR) Modifier.size(52.dp)
+                    else if (wide) Modifier.width(180.dp).height(48.dp)
                     else if (design.appearance == PlatformAppearance.APPLE && !wide) Modifier.width(144.dp).height(48.dp)
                     else Modifier.weight(1f).heightIn(min = 48.dp)).testTag("hero_play"),
                     colors = ButtonDefaults.buttonColors(containerColor = design.primary, contentColor = design.onPrimary),
@@ -83,7 +84,7 @@ internal fun PlatformHeroBanner(media: MediaItem, height: Dp, wide: Boolean, inL
                     }
                 }
                 OutlinedButton(onList, (if (!wide && design.appearance == PlatformAppearance.APPLE) Modifier.size(48.dp)
-                    else Modifier.heightIn(min = 48.dp)).testTag("hero_my_list"), contentPadding = PaddingValues(0.dp),
+                    else Modifier.size(48.dp)).testTag("hero_my_list"), contentPadding = PaddingValues(0.dp),
                     shape = RoundedCornerShape(if (design.appearance in setOf(PlatformAppearance.HOTSTAR, PlatformAppearance.APPLE)) 50.dp else design.controlRadius), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .5f))) {
                     Icon(if (inList) Icons.Default.Check else Icons.Default.Add, "My List")

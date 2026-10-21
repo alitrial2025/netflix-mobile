@@ -117,5 +117,6 @@ internal fun navigationControlHeight(): Dp = if (LocalDensity.current.fontScale 
 internal fun navigationContentClearance(): Dp {
     val density = LocalDensity.current
     val inset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
-    return navigationControlHeight() + 32.dp + inset
+    val design = com.example.ui.theme.LocalPlatformDesign.current
+    return (if (design.originalLayout) navigationControlHeight() else platformNavigationHeight()) + 32.dp + inset
 }

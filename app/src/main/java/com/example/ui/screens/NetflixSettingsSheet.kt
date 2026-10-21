@@ -191,7 +191,7 @@ private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag
     enabled: Boolean = true, onClick: () -> Unit) {
     val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(Modifier.fillMaxWidth()
-        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surface))
         .clickable(enabled = enabled, onClick = onClick).testTag(tag)
         .heightIn(min = 60.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -209,7 +209,7 @@ private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag
 private fun SettingsToggle(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
     val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(Modifier.fillMaxWidth()
-        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surface))
         .toggleable(checked, enabled, Role.Switch, onChange)
         .testTag("settings_toggle_$title").heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp),

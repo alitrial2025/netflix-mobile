@@ -109,7 +109,7 @@ fun DetailScreen(
     Box(modifier.fillMaxSize().background(platformDesign.surfaceColor(Color(0xFF101010))).background(backdropGradient)) {
     LazyColumn(Modifier.fillMaxSize().testTag("detail_list"), state = listState, contentPadding = PaddingValues(bottom = 36.dp)) {
         item(key = "artwork_${media.id}", contentType = "artwork") {
-            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).heightIn(max = 380.dp).clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)).background(platformDesign.background)) {
+            Box(Modifier.fillMaxWidth().then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 12.dp)).aspectRatio(16f / 9f).heightIn(max = 380.dp).clip(if (platformDesign.originalLayout) RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp) else RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.background)) {
                 AsyncImage(media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 if (previewEnabled && isActive && previewArtworkVisible) DetailPreview(media, Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Color.Black.copy(alpha = .4f), .45f to Color.Transparent, 1f to platformDesign.surfaceColor(Color(0xFF101010)))))
@@ -184,7 +184,7 @@ fun DetailScreen(
                 onSelect = { localSeason = it; onSeasonSelect(it) }, onInfo = { seasonInfo = true }, onDownloads = onOpenDownloads)
         }
         item(key = "tabs_${media.type}", contentType = "tabs") {
-            ScrollableTabRow(tabIndex, containerColor = Color.Transparent, contentColor = Color.White, edgePadding = 16.dp, divider = {}, indicator = { positions -> Box(Modifier.tabIndicatorOffset(positions[tabIndex]).fillMaxHeight().wrapContentHeight(Alignment.Top).height(3.dp).background(platformDesign.accent)) }) {
+            ScrollableTabRow(tabIndex, containerColor = Color.Transparent, contentColor = Color.White, edgePadding = 16.dp, divider = {}, indicator = { positions -> Box(Modifier.tabIndicatorOffset(positions[tabIndex]).fillMaxHeight().wrapContentHeight(if (prime) Alignment.Bottom else Alignment.Top).height(3.dp).clip(RoundedCornerShape(50)).background(platformDesign.accent)) }) {
                 tabs.forEachIndexed { index, title -> Tab(tabIndex == index, onClick = { tab = index }, text = { Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }) }
             }
         }
@@ -340,9 +340,9 @@ private fun DetailSeasonSelector(media: MediaItem, season: Int, episodeCount: In
     val prime = design.appearance == com.example.data.model.PlatformAppearance.PRIME
     var menu by remember(media.id) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            TextButton(onClick = { menu = true }, modifier = Modifier.background(design.raised, RoundedCornerShape(design.corner(4.dp))).testTag("detail_season_selector")) {
-                Text("Season $season" + if (prime && episodeCount != null) " ($episodeCount episode${if (episodeCount == 1) "" else "s"})" else "", color = Color.White, fontWeight = FontWeight.Bold)
+        Box(if (prime) Modifier.weight(1f) else Modifier) {
+            TextButton(onClick = { menu = true }, modifier = (if (prime) Modifier.fillMaxWidth() else Modifier).background(design.raised, RoundedCornerShape(design.corner(4.dp))).testTag("detail_season_selector")) {
+                Text("Season $season" + if (prime && episodeCount != null) " ($episodeCount episode${if (episodeCount == 1) "" else "s"})" else "", color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = if (prime) Modifier.weight(1f) else Modifier)
                 Icon(Icons.Default.KeyboardArrowDown, null, tint = Color.White)
             }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
@@ -351,7 +351,7 @@ private fun DetailSeasonSelector(media: MediaItem, season: Int, episodeCount: In
                 }
             }
         }
-        Spacer(Modifier.weight(1f))
+        if (prime) Spacer(Modifier.width(8.dp)) else Spacer(Modifier.weight(1f))
         if (prime) TextButton(onClick = onDownloads, modifier = Modifier.testTag("prime_detail_open_downloads")) {
             Icon(painterResource(R.drawable.ic_netflix_download_custom), null, tint = Color.White, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(5.dp)); Text("Downloads", color = Color.White, fontSize = 12.sp)

@@ -49,15 +49,15 @@ private val platformDesigns = mapOf(
     PlatformAppearance.ORIGINAL to PlatformDesign(),
     PlatformAppearance.NETFLIX to PlatformDesign(appearance = PlatformAppearance.NETFLIX),
     PlatformAppearance.PRIME to PlatformDesign(PlatformAppearance.PRIME, Color(0xFF00A8E1), Color(0xFF00131C),
-        Color(0xFF00050D), Color(0xFF101C29), Color(0xFF1A2B3D), Color(0xFF34465A), 8.dp, 8.dp, false),
+        Color(0xFF00050D), Color(0xFF101C29), Color(0xFF1A2B3D), Color(0xFF34465A), 12.dp, 12.dp, false),
     PlatformAppearance.DISNEY to PlatformDesign(PlatformAppearance.DISNEY, Color(0xFF02D6E8), Color(0xFF002329),
-        Color(0xFF16141B), Color(0xFF24222C), Color(0xFF302D3A), Color(0xFF4A4656), 6.dp, 6.dp, false, FontWeight.SemiBold),
+        Color(0xFF16141B), Color(0xFF24222C), Color(0xFF302D3A), Color(0xFF4A4656), 12.dp, 12.dp, false, FontWeight.SemiBold),
     PlatformAppearance.HOTSTAR to PlatformDesign(PlatformAppearance.HOTSTAR, Color(0xFF0865D6), Color.White,
-        Color(0xFF0F1014), Color(0xFF191D29), Color(0xFF252B3B), Color(0xFF3B4253), 16.dp, 8.dp, false, FontWeight.ExtraBold),
+        Color(0xFF0F1014), Color(0xFF191D29), Color(0xFF252B3B), Color(0xFF3B4253), 16.dp, 12.dp, false, FontWeight.ExtraBold),
     PlatformAppearance.APPLE to PlatformDesign(PlatformAppearance.APPLE, Color(0xFF0071E3), Color.White,
-        Color(0xFF000000), Color(0xFF1C1C1E), Color(0xFF2C2C2E), Color(0xFF3A3A3C), 14.dp, 50.dp, true, FontWeight.SemiBold),
+        Color(0xFF000000), Color(0xFF1C1C1E), Color(0xFF2C2C2E), Color(0xFF3A3A3C), 16.dp, 50.dp, true, FontWeight.SemiBold),
     PlatformAppearance.PEACOCK to PlatformDesign(PlatformAppearance.PEACOCK, Color(0xFFFCCC12), Color(0xFF111111),
-        Color(0xFF202020), Color(0xFF292929), Color(0xFF333333), Color(0xFF505050), 14.dp, 50.dp, false)
+        Color(0xFF202020), Color(0xFF292929), Color(0xFF333333), Color(0xFF505050), 16.dp, 50.dp, false)
 )
 fun platformDesign(appearance: PlatformAppearance): PlatformDesign = platformDesigns.getValue(appearance)
 val LocalPlatformDesign = staticCompositionLocalOf { platformDesign(PlatformAppearance.ORIGINAL) }

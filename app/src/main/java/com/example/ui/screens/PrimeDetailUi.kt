@@ -40,7 +40,7 @@ internal fun PrimeDetailActions(inList: Boolean, rating: String?, onTrailer: () 
 private fun PrimeAction(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean,
                         tag: String, onClick: () -> Unit) {
     val design = LocalPlatformDesign.current
-    OutlinedButton(onClick, Modifier.heightIn(min = 48.dp).testTag(tag), shape = RoundedCornerShape(8.dp),
+    OutlinedButton(onClick, Modifier.heightIn(min = 48.dp).testTag(tag), shape = RoundedCornerShape(design.controlRadius),
         contentPadding = PaddingValues(horizontal = 10.dp), border = BorderStroke(1.dp, design.outline),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White,
             containerColor = if (selected) design.raised else Color.Transparent)) {

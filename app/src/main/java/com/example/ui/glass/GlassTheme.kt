@@ -53,8 +53,11 @@ fun GlassPanel(
     val frosted = theme?.glassy == true
     if (!design.originalLayout) {
         val platformShape = if (shape == RoundedCornerShape(50)) RoundedCornerShape(design.controlRadius) else shape
-        Box(modifier.clip(platformShape).background(if (frosted) design.surface.copy(alpha = .96f) else design.background)
-            .then(if (frosted) Modifier.border(.5.dp, design.outline.copy(alpha = .6f), platformShape) else Modifier), content = content)
+        val fill = remember(frosted, design) { Brush.verticalGradient(if (frosted) listOf(design.raised.copy(alpha = .96f), design.surface.copy(alpha = .98f))
+            else listOf(design.surface, design.surface)) }
+        val rim = remember(frosted, design) { Brush.verticalGradient(if (frosted) listOf(Color.White.copy(alpha = .24f), design.outline.copy(alpha = .55f))
+            else listOf(design.outline.copy(alpha = .35f), design.outline.copy(alpha = .35f))) }
+        Box(modifier.clip(platformShape).background(fill).border(if (frosted) 1.dp else .5.dp, rim, platformShape), content = content)
         return
     }
     Box(modifier.shadow(if (frosted) 8.dp else 5.dp, shape,

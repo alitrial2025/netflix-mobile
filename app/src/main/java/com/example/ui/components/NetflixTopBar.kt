@@ -305,7 +305,7 @@ private fun CategoryPill(
     endShape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(13.dp)
 ) {
     val design = com.example.ui.theme.LocalPlatformDesign.current
-    val shape = if (design.originalLayout) endShape else RoundedCornerShape(design.controlRadius)
+    val shape = if (design.originalLayout) endShape else RoundedCornerShape(design.controlRadius.coerceAtLeast(12.dp))
     val filled = isSelected && design.appearance !in setOf(com.example.data.model.PlatformAppearance.PRIME,
         com.example.data.model.PlatformAppearance.DISNEY, com.example.data.model.PlatformAppearance.HOTSTAR)
     val chipText = if (filled && !design.originalLayout) design.onAccent else Color.White
@@ -322,7 +322,7 @@ private fun CategoryPill(
         Row(
             Modifier.height(40.dp).then(if (design.originalLayout) Modifier.referenceGlass(shape, isSelected)
                 else Modifier.clip(shape).background(if (filled) design.accent else design.surface.copy(alpha = .94f))
-                    .border(.7.dp, if (isSelected) design.accent else design.outline, shape))
+                    .border(1.dp, if (isSelected) design.accent else design.outline, shape))
                 .padding(horizontal = if (label.isEmpty()) 14.dp else 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center

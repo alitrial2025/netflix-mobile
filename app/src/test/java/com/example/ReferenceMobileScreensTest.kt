@@ -172,6 +172,7 @@ class ReferenceMobileScreensTest {
             rule.onNodeWithTag("platform_hero_${style.key}").assertIsDisplayed()
             rule.onNodeWithTag("platform_navigation_${style.key}").assertIsDisplayed()
             artworkReady(show.logoUrl, show.backdropUrl, show.posterUrl)
+            assertPlatformChromeGeometry()
             capture("platform-${style.key}-home-412")
             rule.onNodeWithTag("hero_play").performClick()
             rule.onNodeWithTag("hero_my_list").performClick()
@@ -179,6 +180,60 @@ class ReferenceMobileScreensTest {
             rule.runOnIdle { assertEquals(index + 1, played); assertEquals(index + 1, listed); assertEquals(NavigationTab.SEARCH, navigated) }
         }
     }
+
+    private fun assertPlatformChromeGeometry() {
+        val root = rule.onRoot().fetchSemanticsNode().boundsInRoot
+        val title = rule.onNodeWithTag("platform_header_title").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val actions = rule.onNodeWithTag("platform_header_actions").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue("Header groups must have a visible gap", title.right + 6f <= actions.left)
+        val tabs = listOf("home", "clips", "search", "my_netflix").map {
+            rule.onNodeWithTag("nav_tab_$it").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        }
+        tabs.forEach { assertTrue("Every tab needs a full touch target", it.width >= 48f && it.height >= 48f) }
+        tabs.zipWithNext().forEach { (a, b) -> assertTrue(a.right <= b.left) }
+        assertTrue("Dock must leave side margins", tabs.first().left >= root.left + 16f && tabs.last().right <= root.right - 16f)
+        assertTrue("Dock must stay bounded on tablets", tabs.last().right - tabs.first().left <= 560f)
+        listOf("Home", "Clips", "Search", "My Netflix").forEach { text ->
+            rule.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { get ->
+                val result = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                get(result)
+                assertTrue("$text must fit without truncation: ${result.map { "size=${it.size}, lines=${it.lineCount}, height=${it.didOverflowHeight}, width=${it.didOverflowWidth}, paragraph=${it.multiParagraph.height}" }}", result.all { !it.hasVisualOverflow })
+            }
+        }
+    }
+
+    private fun polishedChromeFits(glassy: Boolean, largeText: Boolean = false) {
+        var selected by mutableStateOf(NavigationTab.HOME)
+        var downloads = 0
+        rule.setContent {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, if (largeText) 2f else density.fontScale),
+                com.example.ui.glass.LocalGlassTheme provides remember { com.example.ui.glass.GlassThemeState(glassy) }) {
+                NetflixTheme(platform = com.example.data.model.PlatformAppearance.PRIME) {
+                    Box(Modifier.fillMaxSize()) {
+                        NetflixTopBar(profile, CategoryFilter.ALL, null, { _, _ -> }, { downloads++ }, {}, {})
+                        NetflixBottomNav(selected, profile, { selected = it }, Modifier.align(Alignment.BottomCenter), isClipsAllowed = true)
+                    }
+                }
+            }
+        }
+        assertPlatformChromeGeometry()
+        rule.onNodeWithTag("top_bar_download_button").performClick()
+        rule.onNodeWithTag("nav_tab_my_netflix").performClick()
+        rule.onNodeWithTag("nav_tab_my_netflix").assertIsSelected()
+        rule.runOnIdle { assertEquals(1, downloads); assertEquals(NavigationTab.MY_NETFLIX, selected) }
+        capture("platform-polish-${if (largeText) "large-text" else if (glassy) "glass" else "normal"}-${rule.onRoot().fetchSemanticsNode().size.width}")
+    }
+
+    @Test @Config(qualifiers = "w360dp-h800dp-mdpi")
+    fun platformPolishFitsCompactPhones() = polishedChromeFits(glassy = false)
+
+    @Test @Config(qualifiers = "w840dp-h600dp-mdpi")
+    fun platformPolishBoundsTheDockOnTablets() = polishedChromeFits(glassy = true)
+
+    @Test @Config(qualifiers = "w360dp-h800dp-mdpi")
+    fun platformPolishKeepsLargeTextLabelsAndControlsVisible() = polishedChromeFits(glassy = true, largeText = true)
 
     @Test fun persistedPlatformsToggleChangesTheMountedAppWithoutLosingState() {
         val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()

@@ -90,7 +90,7 @@ fun MediaSectionRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = if (platformDesign.originalLayout) 8.dp else 12.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -99,14 +99,14 @@ fun MediaSectionRow(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = if (platformDesign.originalLayout) 18.sp else 20.sp,
                 fontWeight = platformDesign.titleWeight,
                 fontFamily = FontFamily.SansSerif,
                 letterSpacing = (-0.3).sp
             )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(if (platformDesign.originalLayout) 4.dp else 8.dp))
 
         if (isTop10) {
             LazyRow(
@@ -147,7 +147,7 @@ fun MediaSectionRow(
             LazyRow(
                 state = lazyListState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (platformDesign.originalLayout) 8.dp else 10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(rowHeight)

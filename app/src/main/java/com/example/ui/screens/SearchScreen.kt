@@ -111,12 +111,12 @@ fun SearchScreen(
             }
         } else {
             Text("Movies & Shows (${results.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            LazyVerticalGrid(if (platformDesign.originalLayout) GridCells.Fixed(3) else GridCells.Adaptive(if (platformDesign.wideCards) 180.dp else 112.dp), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = com.example.ui.components.navigationContentClearance()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyVerticalGrid(if (platformDesign.originalLayout) GridCells.Fixed(3) else GridCells.Adaptive(if (platformDesign.wideCards) 180.dp else 112.dp), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = if (platformDesign.originalLayout) 12.dp else 16.dp, end = if (platformDesign.originalLayout) 12.dp else 16.dp, bottom = com.example.ui.components.navigationContentClearance()),
+                horizontalArrangement = Arrangement.spacedBy(if (platformDesign.originalLayout) 6.dp else 10.dp), verticalArrangement = Arrangement.spacedBy(if (platformDesign.originalLayout) 12.dp else 16.dp)) {
                 gridItems(results, key = { "${it.type}:${it.id}" }, contentType = { "poster" }) { media ->
                     Column(Modifier.clickable { onMediaClick(media) }.testTag("search_result_${media.id}")) {
                         AsyncImage(if (platformDesign.wideCards) media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes else media.posterUrl ?: media.backdropUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(platformDesign.cardAspectRatio).clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surfaceColor(Color(0xFF252525))))
-                        Text(media.title, color = Color.LightGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
+                        Text(media.title, color = Color.LightGray, fontSize = if (platformDesign.originalLayout) 10.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
                     }
                 }
             }
