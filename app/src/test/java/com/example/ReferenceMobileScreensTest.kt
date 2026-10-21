@@ -97,12 +97,12 @@ class ReferenceMobileScreensTest {
             "A new game changes everything. Discover the people behind each choice.", "", 96, "16+", 2026, "3 Seasons",
             genres = listOf("Suspenseful", "Thriller", "Korean"), cast = emptyList(), director = "",
             posterUrl = fixture("squid-game.jpg"), backdropUrl = fixture("squid-game-backdrop.jpg"),
-            logoUrl = fixture("squid-game-logo.png"), isOriginal = true, isTrending = true)
+            logoUrl = fixture("squid-game-logo.png"), heroPosterUrl = fixture("squid-game-textless.jpg"), isOriginal = true, isTrending = true)
     }
     private val movie by lazy {
         show.copy(id = "reference-film", title = "Umthetho", type = MediaType.MOVIE, isTrending = false,
             posterUrl = fixture("umthetho.jpg"), backdropUrl = fixture("umthetho.jpg"),
-            logoUrl = fixture("umthetho-logo.png"))
+            logoUrl = fixture("umthetho-logo.png"), heroPosterUrl = null)
     }
     private val games by lazy {
         listOf(GameItem("reference-game", "Squid Game: Unleashed", "Netflix Games", "Action", "18+", "420 MB",
@@ -202,7 +202,9 @@ class ReferenceMobileScreensTest {
         val play = rule.onNodeWithTag("hero_play").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val nav = rule.onNodeWithTag("nav_main_glass_pill").fetchSemanticsNode().boundsInRoot
         val chips = rule.onNodeWithTag("category_pill_series").fetchSemanticsNode().boundsInRoot
-        val title = rule.onNodeWithTag("cinematic_title", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val logo = rule.onNodeWithTag("cinematic_title", useUnmergedTree = true)
+            .assertContentDescriptionEquals(show.title).assertIsDisplayed()
+        val title = logo.fetchSemanticsNode().boundsInRoot
         assertTrue(title.top >= chips.bottom)
         assertTrue(play.bottom < nav.top)
         assertTrue(hero.bottom < nav.top)
@@ -223,7 +225,7 @@ class ReferenceMobileScreensTest {
                 }
             }
         } }
-        artworkReady(show.posterUrl)
+        artworkReady(show.posterUrl, show.heroPosterUrl, show.logoUrl)
         rule.onNodeWithTag("hero_banner_card").assertIsDisplayed()
         rule.onNodeWithTag("home_cinematic_hero").assertDoesNotExist()
         rule.runOnIdle { wide.value = true }
@@ -238,6 +240,72 @@ class ReferenceMobileScreensTest {
         rule.runOnIdle { assertTrue(!listed.value) }
     }
 
+    @Test fun failedPortraitLogoRetriesTheSameUrlWhenTheNetworkReturns() = assertFailedLogoRecovers(false)
+
+    @Test
+    @Config(qualifiers = "w840dp-h600dp-mdpi")
+    fun failedCinematicLogoRetriesTheSameUrlWhenTheNetworkReturns() = assertFailedLogoRecovers(true)
+
+    private fun assertFailedLogoRecovers(cinematic: Boolean) {
+        val online = mutableStateOf(false)
+        val logoFile = File("build/reports/reference-fixtures/retry-logo.png").apply { parentFile!!.mkdirs(); delete() }
+        val media = show.copy(logoUrl = logoFile.toURI().toString())
+        rule.setContent { NetflixTheme {
+            HomeScreen(profile, CategoryFilter.TV_SHOWS, null, emptyList(), { false }, {}, {}, {},
+                catalogMedia = listOf(media), userSubscription = membership, artworkNetworkAvailable = online.value)
+        } }
+        artworkReady(show.posterUrl)
+        if (cinematic) {
+            rule.waitUntil(10_000) {
+                rule.onAllNodes(hasTestTag("cinematic_title") and hasText(show.title), useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+        } else {
+            rule.waitUntil(10_000) {
+                rule.onAllNodesWithTag("hero_title_logo", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+            }
+        }
+        javaClass.getResourceAsStream("/artwork/squid-game-logo.png")!!.use { input ->
+            logoFile.outputStream().use { input.copyTo(it) }
+        }
+        rule.runOnIdle { online.value = true }
+        artworkReady(media.logoUrl)
+        rule.onNodeWithTag(if (cinematic) "cinematic_title" else "hero_title_logo", useUnmergedTree = true)
+            .assertContentDescriptionEquals(show.title).assertIsDisplayed()
+    }
+
+    @Test fun artworkLookupCancelsOfflineAndRetriesWhenConnectivityReturns() {
+        val online = mutableStateOf(true)
+        var requests = 0
+        var cancelled = 0
+        rule.setContent { NetflixTheme {
+            HomeScreen(profile, CategoryFilter.TV_SHOWS, null, emptyList(), { false }, {}, {}, {},
+                catalogMedia = listOf(show.copy(logoUrl = null)), userSubscription = membership,
+                artworkNetworkAvailable = online.value, onHeroVisible = {
+                    requests++
+                    try { kotlinx.coroutines.awaitCancellation() } finally { cancelled++ }
+                })
+        } }
+        artworkReady(show.posterUrl)
+        rule.runOnIdle { assertEquals(1, requests); online.value = false }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(1, cancelled); assertEquals(1, requests); online.value = true }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(2, requests) }
+    }
+
+    @Test fun seriesHeroRequestsItsOwnArtworkBeyondTheFirstFifteenCatalogItems() {
+        var requested: MediaItem? = null
+        val catalog = (1..20).map { movie.copy(id = "movie-$it") } + show
+        rule.setContent { NetflixTheme {
+            HomeScreen(profile, CategoryFilter.TV_SHOWS, null, emptyList(), { false }, {}, {}, {},
+                catalogMedia = catalog, userSubscription = membership, onHeroVisible = { requested = it })
+        } }
+        artworkReady(show.posterUrl, show.heroPosterUrl, show.logoUrl)
+        rule.runOnIdle { assertEquals(show.id, requested?.id); assertEquals(MediaType.TV_SHOW, requested?.type) }
+        rule.onNodeWithTag("hero_title_logo", useUnmergedTree = true).assertIsDisplayed()
+    }
+
     @Test fun frostedHomePreviewRetainsCompactHeaderAndFloatingControls() {
         rule.setContent { NetflixTheme {
             val theme = remember { com.example.ui.glass.GlassThemeState(true) { Color(0xFF686348) } }
@@ -250,7 +318,8 @@ class ReferenceMobileScreensTest {
                 }
             }
         } }
-        artworkReady(show.posterUrl)
+        artworkReady(show.posterUrl, show.heroPosterUrl, show.logoUrl)
+        rule.onNodeWithTag("hero_title_logo", useUnmergedTree = true).assertIsDisplayed()
         val brand = rule.onNodeWithTag("top_bar_brand_glass").fetchSemanticsNode().boundsInRoot
         assertTrue(brand.width < 165f)
         assertFloatingNavigationHasSeparateTargets()
@@ -272,7 +341,7 @@ class ReferenceMobileScreensTest {
                 FloatingNavigation(selectedTab.value) { selectedTab.value = it }
             }
         } }
-        artworkReady(show.posterUrl)
+        artworkReady(show.posterUrl, show.heroPosterUrl, show.logoUrl)
         val chips = listOf("series", "films", "games", "new_and_hot").map {
             rule.onNodeWithTag("category_pill_$it").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         }
@@ -316,7 +385,7 @@ class ReferenceMobileScreensTest {
         rule.onNodeWithTag("home_game_reference-game").assertIsDisplayed().performClick()
         rule.onNodeWithTag("home_open_games").assertIsDisplayed().performClick()
         rule.runOnIdle { assertEquals(games.single(), opened); assertEquals(1, explore) }
-        artworkReady(show.posterUrl)
+        artworkReady(show.posterUrl, show.heroPosterUrl, show.logoUrl)
         capture("home-games-412")
     }
 

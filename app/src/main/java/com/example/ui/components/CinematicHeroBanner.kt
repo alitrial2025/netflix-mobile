@@ -38,12 +38,13 @@ internal fun CinematicHeroBanner(
     onInfoClick: () -> Unit,
     height: Dp,
     isLocked: Boolean,
-    onColorsExtracted: (Color, Color) -> Unit
+    onColorsExtracted: (Color, Color) -> Unit,
+    artworkNetworkAvailable: Boolean = true
 ) {
     val colors by rememberPosterColors(media)
     LaunchedEffect(media.id, colors) { onColorsExtracted(colors.first, colors.second) }
-    var backdropFailed by remember(media.id, media.backdropUrl) { mutableStateOf(false) }
-    var logoFailed by remember(media.id, media.logoUrl) { mutableStateOf(false) }
+    var backdropFailed by remember(media.id, media.backdropUrl, artworkNetworkAvailable) { mutableStateOf(false) }
+    var logoFailed by remember(media.id, media.logoUrl, artworkNetworkAvailable) { mutableStateOf(false) }
     val artwork = if (backdropFailed) posterModel(media)
         else media.backdropUrl?.takeIf(String::isNotBlank) ?: posterModel(media)
     BoxWithConstraints(Modifier.fillMaxWidth().height(height).background(colors.second)

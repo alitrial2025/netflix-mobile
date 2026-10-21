@@ -68,6 +68,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -208,6 +209,23 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private val catalogCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "catalog-cache.json"))
 
+    private val heroArtworkCache = com.example.data.CatalogDiskCache(java.io.File(application.filesDir, "hero-artwork-cache.json"))
+    private val heroArtworkUpdates = MutableStateFlow<List<MediaItem>>(emptyList())
+    private val catalogPersistenceLock = kotlinx.coroutines.sync.Mutex()
+    private val heroArtwork = com.example.data.HeroArtworkRepository({ type, id ->
+        if (type == MediaType.MOVIE) TmdbClient.service.getMovieImages(id, TmdbClient.apiKey)
+        else TmdbClient.service.getTvShowImages(id, TmdbClient.apiKey)
+    })
+
+    private suspend fun persistCatalog() {
+        catalogPersistenceLock.withLock {
+            withContext(Dispatchers.IO) {
+                catalogCache.write(_catalogMedia.value)
+                heroArtworkCache.write(heroArtworkUpdates.value)
+            }
+        }
+    }
+
     private fun setupOfflineFallbacks() {
         // A failed refresh must not erase metadata needed by offline downloads and history.
         CatalogData.allMedia = _catalogMedia.value
@@ -223,6 +241,9 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun loadCachedCatalog() {
         val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+        if (heroArtworkUpdates.value.isEmpty()) {
+            heroArtworkUpdates.value = withContext(Dispatchers.IO) { heroArtworkCache.read().takeLast(64) }
+        }
         if (_catalogMedia.value.isEmpty() && cached.isNotEmpty()) {
             _catalogMedia.value = cached
             CatalogData.allMedia = cached
@@ -335,12 +356,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
                 // Pure TMDB real catalog
                 val deduplicated = mappedItems.distinctBy { it.id }
                 if (deduplicated.isEmpty()) throw java.io.IOException("Catalog is unavailable")
-                withContext(Dispatchers.IO) { catalogCache.write(deduplicated) }
-                CatalogData.allMedia = deduplicated
-                _catalogMedia.value = deduplicated
-
-                // Fetch real TMDB logo titles in background for hero and trending items
-                fetchLogosForItems(apiKey, deduplicated)
+                withContext(Dispatchers.Main.immediate) {
+                    val previous = _catalogMedia.value.associateBy { it.type to it.id }
+                    val refreshed = deduplicated.map { item ->
+                        val artwork = previous[item.type to item.id]
+                        item.copy(logoUrl = artwork?.logoUrl, heroPosterUrl = artwork?.heroPosterUrl)
+                    }
+                    _catalogMedia.value = refreshed
+                    CatalogData.allMedia = refreshed
+                }
+                persistCatalog()
 
                 // History and notifications come from actual user actions, not catalog fixtures.
 
@@ -837,10 +862,12 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         RecommendationResult(picks + merged.filter { it.recommendationTitle().key !in rankedKeys }, picks.take(20))
     }.debounce(300).flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RecommendationResult())
     private data class RecommendationResult(val catalog: List<MediaItem> = emptyList(), val picks: List<MediaItem> = emptyList())
-    val displayCatalogMedia = recommendationResult.map { it.catalog }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val personalizedMedia = recommendationResult.map { it.picks }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val displayCatalogMedia = combine(recommendationResult, heroArtworkUpdates) { result, artwork ->
+        com.example.data.enrichHeroArtwork(result.catalog, artwork)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val personalizedMedia = combine(recommendationResult, heroArtworkUpdates) { result, artwork ->
+        com.example.data.enrichHeroArtwork(result.picks, artwork)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Navigation and Categories
     private val _selectedTab = MutableStateFlow(NavigationTab.HOME)
@@ -1835,41 +1862,29 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun fetchLogosForItems(apiKey: String, items: List<MediaItem>) {
-        viewModelScope.launch {
-            try {
-                val targets = items.take(15).filter { it.id.toIntOrNull() != null }
-                val updatedItems = _catalogMedia.value.toMutableList()
-                var anyUpdated = false
-
-                for (item in targets) {
-                    val tmdbId = item.id.toIntOrNull() ?: continue
-                    try {
-                        val imagesResponse = if (item.type == MediaType.MOVIE) {
-                            TmdbClient.service.getMovieImages(tmdbId, apiKey)
-                        } else {
-                            TmdbClient.service.getTvShowImages(tmdbId, apiKey)
-                        }
-                        val logoPath = imagesResponse.logos.firstOrNull { it.language == "en" }?.filePath
-                            ?: imagesResponse.logos.firstOrNull()?.filePath
-                        if (logoPath != null) {
-                            val logoUrl = "https://image.tmdb.org/t/p/w500$logoPath"
-                            val index = updatedItems.indexOfFirst { it.id == item.id }
-                            if (index >= 0) {
-                                updatedItems[index] = updatedItems[index].copy(logoUrl = logoUrl)
-                                anyUpdated = true
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                if (anyUpdated) {
-                    CatalogData.allMedia = updatedItems
-                    _catalogMedia.value = updatedItems
-                    withContext(Dispatchers.IO) { catalogCache.write(updatedItems) }
-                }
-            } catch (_: Exception) {}
-        }
+    /** The current hero, including series/genre heroes beyond the old first-15 batch. */
+    suspend fun ensureHeroArtwork(media: MediaItem) {
+        val current = com.example.data.enrichHeroArtwork(listOf(
+            _catalogMedia.value.firstOrNull { it.id == media.id && it.type == media.type } ?: media),
+            heroArtworkUpdates.value).single()
+        val checkedArtwork = heroArtworkUpdates.value.any { it.id == media.id && it.type == media.type }
+        if ((!current.logoUrl.isNullOrBlank() && checkedArtwork) || !hasCatalogNetwork()) return
+        val id = resolveTmdbId(media.id)?.takeIf { it > 0 } ?: return
+        if (TmdbClient.apiKey.isBlank() || TmdbClient.apiKey == "PLACEHOLDER") return
+        try {
+            val artwork = heroArtwork.load(media.type, id) ?: return
+            if (artwork.logoUrl == null && artwork.portraitUrl == null && current.logoUrl.isNullOrBlank()) return
+            val updated = artwork.applyTo(current).copy(episodes = emptyList(), similarMedia = emptyList())
+            heroArtworkUpdates.update { previous ->
+                (previous.filterNot { it.id == media.id && it.type == media.type } + updated).takeLast(64)
+            }
+            _catalogMedia.update { latest -> latest.map { item ->
+                if (item.id == media.id && item.type == media.type) artwork.applyTo(item) else item
+            } }
+            CatalogData.allMedia = _catalogMedia.value
+            persistCatalog()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Artwork must never block catalog entry or playback. */ }
     }
 
     fun closeDetail() {

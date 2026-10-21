@@ -332,6 +332,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 { media: MediaItem, progress: WatchProgressEntity -> viewModel.openContinueWatchingOptions(media, progress) }
                             }
                             val stableOnAmbientColorChange = remember(viewModel) { { color: Color -> viewModel.updateAmbientColor(color) } }
+                            val stableOnHeroVisible = remember(viewModel) {
+                                val load: suspend (MediaItem) -> Unit = { media -> viewModel.ensureHeroArtwork(media) }
+                                load
+                            }
                             val stableOnCategorySelected = remember(viewModel) {
                                 { filter: CategoryFilter, genre: String? -> viewModel.setCategoryFilter(filter, genre) }
                             }
@@ -370,6 +374,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                         onContinueWatchingOptionsClick = stableOnContinueWatchingOptionsClick,
                                         onAmbientColorChange = stableOnAmbientColorChange,
                                         listState = homeListState,
+                                        onHeroVisible = stableOnHeroVisible,
+                                        artworkNetworkAvailable = playbackNetwork.online,
                                         games = games,
                                         onGameClick = { selectedGame = it },
                                         onOpenGames = { viewModel.setCategoryFilter(CategoryFilter.GAMES, null) }

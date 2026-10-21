@@ -17,7 +17,10 @@ viewer chrome and touch indicators do not belong in the application.
 - On portrait phones, header plus hero fill approximately85% of the actual viewport. The first
   content rail peeks below. Sizing follows available height and font scale;
   short windows can scroll rather than clipping the controls.
-- The hero preserves portrait artwork, a small original mark, real title art,
+- The portrait hero uses textless portrait artwork with the real TMDB title logo
+  when available (landscape artwork cropped to the card is the next fallback).
+  Regular poster artwork remains in rails and as the no-logo fallback. It keeps
+  a small original mark, real title art,
   three dot-separated genres, a white Play button and translucent My List.
   Its inner scrim stays transparent through62% of the image and shades the
   footer gently. The surrounding ambient background follows the artwork.
@@ -80,3 +83,27 @@ live narrow→wide→narrow resizing, action callbacks, navigation clearance and
 portrait regression captures. Physical foldable/tablet verification remains
 necessary for device-specific cutouts and performance; the Android APK does
 not install on iPadOS.
+
+## TMDB hero logos
+
+Portrait Home no longer suppresses logos whenever a poster exists. Both hero
+layouts use the actual TMDB wordmark when one is available; cinematic title
+text and ordinary poster artwork remain useful fallbacks. English logos take
+priority over language-neutral logos; unrelated foreign wordmarks are skipped.
+
+The visible hero drives one cancellable artwork lookup, replacing the old
+first-15 catalog batch that missed TV/genre heroes. Requests use typed movie/TV
+keys, coalesce concurrent requests, have bounded concurrency/timeouts, and cache
+successful responses. Empty logo responses are cached briefly; failed requests
+are retryable after reconnect. Both renderers also clear failed-logo state on
+connectivity changes so an unchanged image URL can load after going online. Leaving a hero or going offline cancels its
+lookup. This never gates splash, subscriptions or playback.
+
+Logo/textless-poster metadata survives catalog refreshes and disk-cache restarts.
+A bounded artwork cache enriches the final displayed catalog as well as
+discovery-only heroes; their newer synopsis/title metadata is retained.
+Artwork updates merge into the latest catalog instead of replacing it with an
+old full-list snapshot. Disk writes are serialized. Native captures assert the
+logo image on portrait and cinematic heroes, a series beyond the old batch,
+and offline/reconnect lookup lifecycle. Repository tests cover selection,
+typed keys, duplicate calls, negative caching, failure recovery and cancellation.

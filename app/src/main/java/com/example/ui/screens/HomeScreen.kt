@@ -79,7 +79,9 @@ fun HomeScreen(
     listState: LazyListState = rememberLazyListState(),
     games: List<GameItem> = emptyList(),
     onGameClick: (GameItem) -> Unit = {},
-    onOpenGames: () -> Unit = {}
+    onOpenGames: () -> Unit = {},
+    onHeroVisible: suspend (MediaItem) -> Unit = {},
+    artworkNetworkAvailable: Boolean = true
 ) {
     // Determine Hero and Catalog Sections based on category reactively
     val heroMedia = remember(catalogMedia, categoryFilter, selectedGenre) {
@@ -141,6 +143,10 @@ fun HomeScreen(
             }
         }
         return
+    }
+
+    LaunchedEffect(heroMedia.id, heroMedia.type, artworkNetworkAvailable) {
+        if (artworkNetworkAvailable) onHeroVisible(heroMedia)
     }
 
     // Extracted dynamic background colors from hero poster
@@ -463,6 +469,7 @@ fun HomeScreen(
                         onWatchlistToggle = onHeroToggle,
                         onInfoClick = onHeroInfo,
                         height = cinematicHeight,
+                        artworkNetworkAvailable = artworkNetworkAvailable,
                         isLocked = userSubscription.isMediaLocked(heroMedia.id, heroMedia.title),
                         onColorsExtracted = { top, bottom ->
                             extractedTopColor = top
@@ -476,6 +483,7 @@ fun HomeScreen(
                     onWatchlistToggle = onHeroToggle,
                     onInfoClick = onHeroInfo,
                     cardHeight = heroCardHeight,
+                    artworkNetworkAvailable = artworkNetworkAvailable,
                     parallaxOffsetProvider = { parallaxOffset.value },
                     isLocked = userSubscription.isMediaLocked(heroMedia.id, heroMedia.title),
                     userPlanName = userSubscription.planName,

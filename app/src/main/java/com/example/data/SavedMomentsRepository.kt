@@ -132,7 +132,8 @@ class SavedMomentsRepository internal constructor(private val directory: File) {
             cast = media.cast.take(50).map { it.take(200) },
             releaseDateBadge = media.releaseDateBadge?.take(100), releaseDate = media.releaseDate?.take(50),
             posterUrl = publicArtwork(media.posterUrl), backdropUrl = publicArtwork(media.backdropUrl),
-            logoUrl = publicArtwork(media.logoUrl), episodes = emptyList(), similarMedia = emptyList(),
+            logoUrl = publicArtwork(media.logoUrl), heroPosterUrl = publicArtwork(media.heroPosterUrl),
+            episodes = emptyList(), similarMedia = emptyList(),
             genreIds = media.genreIds.take(100), bannerDrawableRes = null,
             voteAverage = media.voteAverage.takeIf { it.isFinite() } ?: 0.0,
             popularity = media.popularity.takeIf { it.isFinite() } ?: 0.0

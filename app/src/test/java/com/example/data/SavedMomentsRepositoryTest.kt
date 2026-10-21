@@ -133,6 +133,7 @@ class SavedMomentsRepositoryTest {
             posterUrl = "https://cdn.example/movie.m3u8?token=secret",
             backdropUrl = "https://image.tmdb.org/t/p/w500/image.jpg?token=secret",
             logoUrl = "https://user:secret@image.tmdb.org/t/p/w500/image.png",
+            heroPosterUrl = "https://image.tmdb.org/t/p/w780/image.jpg?token=secret",
             similarMedia = listOf(movie)
         ))
         assertTrue(repository.save("account", "profile", unsafe))
@@ -140,6 +141,7 @@ class SavedMomentsRepositoryTest {
         assertNull(restored.media.posterUrl)
         assertNull(restored.media.backdropUrl)
         assertNull(restored.media.logoUrl)
+        assertNull(restored.media.heroPosterUrl)
         assertTrue(restored.media.similarMedia.isEmpty())
         assertFalse(directory.listFiles()!!.single().readText().contains("secret"))
     }

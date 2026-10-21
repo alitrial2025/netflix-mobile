@@ -14,10 +14,12 @@ class CatalogDiskCacheTest {
 
     @Test fun metadataSurvivesProcessRestartAndEmptyRefresh() {
         val file = folder.newFile("catalog.json")
-        CatalogDiskCache(file).write(listOf(media))
+        val withArtwork = media.copy(logoUrl = "https://image.tmdb.org/t/p/w500/logo.png",
+            heroPosterUrl = "https://image.tmdb.org/t/p/w780/textless.jpg")
+        CatalogDiskCache(file).write(listOf(withArtwork))
         val restartedCache = CatalogDiskCache(file)
         restartedCache.write(emptyList())
-        assertEquals(listOf(media), restartedCache.read())
+        assertEquals(listOf(withArtwork), restartedCache.read())
     }
 
     @Test fun corruptCacheDoesNotCrashOfflineStartup() {
@@ -25,4 +27,15 @@ class CatalogDiskCacheTest {
         file.writeText("unfinished response")
         assertTrue(CatalogDiskCache(file).read().isEmpty())
     }
+    @Test fun olderCatalogWithoutTheNewArtworkFieldStillLoads() {
+        val file = folder.newFile("old-catalog.json")
+        CatalogDiskCache(file).write(listOf(media.copy(heroPosterUrl = "remove-me")))
+        val adapter = com.squareup.moshi.Moshi.Builder().build().adapter(Any::class.java)
+        @Suppress("UNCHECKED_CAST")
+        val rows = adapter.fromJson(file.readText()) as List<MutableMap<String, Any?>>
+        rows.single().remove("heroPosterUrl")
+        file.writeText(adapter.toJson(rows))
+        assertEquals(listOf(media), CatalogDiskCache(file).read())
+    }
+
 }

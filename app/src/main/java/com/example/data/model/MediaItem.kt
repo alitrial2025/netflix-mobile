@@ -52,7 +52,8 @@ data class MediaItem(
     val genreIds: List<Int> = emptyList(),
     val voteAverage: Double = 0.0,
     val voteCount: Int = 0,
-    val popularity: Double = 0.0
+    val popularity: Double = 0.0,
+    val heroPosterUrl: String? = null
 ) {
     fun isKidSafe(maxAge: Int = 12): Boolean {
         val rating = maturityRating.trim().uppercase()

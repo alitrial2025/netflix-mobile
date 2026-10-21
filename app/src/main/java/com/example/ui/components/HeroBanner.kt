@@ -46,7 +46,8 @@ fun HeroBanner(
     parallaxOffsetProvider: () -> Float = { 0f },
     isLocked: Boolean = false,
     userPlanName: String = "",
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    artworkNetworkAvailable: Boolean = true
 ) {
     val colors by rememberPosterColors(media)
     LaunchedEffect(media.id, colors) { onColorsExtracted(colors.first, colors.second) }
@@ -56,12 +57,16 @@ fun HeroBanner(
         Color.White.copy(alpha = .16f), Color.White.copy(alpha = .04f), Color.White.copy(alpha = .10f)
     )) }
     val heroWidth = (LocalConfiguration.current.screenWidthDp - 52).coerceIn(1, 540).dp
-    val posterRequest = rememberPosterRequest(posterModel(media), heroWidth, cardHeight)
     val logoHeight = (cardHeight * .18f).coerceIn(64.dp, 104.dp)
     val logoRequest = rememberPosterRequest(media.logoUrl, heroWidth * .82f, logoHeight)
-    var logoFailed by remember(media.id, media.logoUrl) { mutableStateOf(false) }
-    // Regular catalog posters already contain their title artwork. A second
-    // overlaid wordmark duplicates it, especially with the reference's soft scrim.
+    var logoFailed by remember(media.id, media.logoUrl, artworkNetworkAvailable) { mutableStateOf(false) }
+    val showLogo = !media.logoUrl.isNullOrBlank() && !logoFailed
+    // Pair the actual TMDB wordmark with textless artwork. Keep ordinary posters
+    // for rails and for the no-logo/error fallback, rather than hiding the logo.
+    val heroModel = if (showLogo) media.heroPosterUrl?.takeIf { it.isNotBlank() }
+        ?: media.backdropUrl?.takeIf { it.isNotBlank() } ?: posterModel(media) else posterModel(media)
+    var artworkFailed by remember(media.id, heroModel, artworkNetworkAvailable) { mutableStateOf(false) }
+    val posterRequest = rememberPosterRequest(if (artworkFailed) posterModel(media) else heroModel, heroWidth, cardHeight)
     val needsTitleOverlay = media.posterUrl.isNullOrBlank() && media.bannerDrawableRes == null
     val footerBrush = remember(footerColor) { Brush.verticalGradient(
         0f to Color.Transparent, .62f to Color.Transparent,
@@ -81,6 +86,7 @@ fun HeroBanner(
             AsyncImage(
                 model = posterRequest, contentDescription = media.title,
                 contentScale = ContentScale.Crop,
+                onError = { artworkFailed = true },
                 modifier = Modifier.fillMaxSize().graphicsLayer { translationY = parallaxOffsetProvider().coerceIn(-12f, 12f) }
             )
             Box(Modifier.fillMaxSize().background(footerBrush))
@@ -89,10 +95,10 @@ fun HeroBanner(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (needsTitleOverlay && !media.logoUrl.isNullOrBlank() && !logoFailed) {
+                if (showLogo) {
                     AsyncImage(model = logoRequest, contentDescription = media.title,
                         contentScale = ContentScale.Fit, onError = { logoFailed = true },
-                        modifier = Modifier.fillMaxWidth(.82f).height(logoHeight))
+                        modifier = Modifier.fillMaxWidth(.82f).height(logoHeight).testTag("hero_title_logo"))
                 } else if (needsTitleOverlay) {
                     Text(media.title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
