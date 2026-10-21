@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.glass.GlassHeader
 import com.example.BuildConfig
 import com.example.data.CellularDataMode
 import com.example.data.model.UserProfile
@@ -44,13 +45,14 @@ fun NetflixSettingsSheet(
     currentEmail: String? = null, userSubscription: UserSubscription = UserSubscription(),
     onOpenAuth: () -> Unit = {}, onOpenSubscription: () -> Unit = {}, onEditProfile: () -> Unit = {},
     onOpenSmartDownloads: () -> Unit = {}, onSignOut: () -> Unit = {}, onResetPassword: () -> Unit = {},
-    hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier
+    hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier,
+    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {}
 ) = NetflixSettingsScreen(activeProfile, smartDownloadsEnabled, wifiOnlyEnabled, highQualityEnabled,
     autoPlayNextEnabled, autoPlayPreviewsEnabled, spatialAudioEnabled, cellularDataOption, diagnosticRunning,
     diagnosticResult, totalStorageUsedMb, onClose, onToggleSmartDownloads, onToggleWifiOnly, onToggleHighQuality,
     onToggleAutoPlayNext, onToggleAutoPlayPreviews, onToggleSpatialAudio, onSetCellularData, onRunDiagnosticTest,
     onClearAllDownloads, onSwitchProfile, onOpenTvPair, currentEmail, userSubscription, onOpenAuth,
-    onOpenSubscription, onEditProfile, onOpenSmartDownloads, onSignOut, onResetPassword, hasActiveDownloads, modifier)
+    onOpenSubscription, onEditProfile, onOpenSmartDownloads, onSignOut, onResetPassword, hasActiveDownloads, modifier, glassyThemeEnabled, onToggleGlassyTheme)
 
 @Composable
 fun NetflixSettingsScreen(
@@ -66,7 +68,8 @@ fun NetflixSettingsScreen(
     currentEmail: String? = null, userSubscription: UserSubscription = UserSubscription(),
     onOpenAuth: () -> Unit = {}, onOpenSubscription: () -> Unit = {}, onEditProfile: () -> Unit = {},
     onOpenSmartDownloads: () -> Unit = {}, onSignOut: () -> Unit = {}, onResetPassword: () -> Unit = {},
-    hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier
+    hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier,
+    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {}
 ) {
     var dialog by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -119,12 +122,7 @@ fun NetflixSettingsScreen(
 
     Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()
         .testTag("netflix_settings_screen")) {
-        Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClose, modifier = Modifier.testTag("close_settings_btn")) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", tint = Color.White)
-            }
-            Text("App Settings", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f))
+        GlassHeader("App Settings", onClose, backTag = "close_settings_btn") {
             ProfileAvatar(activeProfile, size = 26.dp)
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) {
@@ -139,6 +137,10 @@ fun NetflixSettingsScreen(
             SettingsRow("Switch Profile", null, Icons.Outlined.SwapHoriz, "settings_switch_profile") { navigate(onSwitchProfile) }
             SettingsRow("Watch on TV", "Sign in with your NetflixPro account on TV", Icons.Outlined.Tv,
                 "pair_tv_settings_btn") { navigate(onOpenTvPair) }
+
+            SettingsSection("Appearance")
+            SettingsToggle("Use Glassy Theme", if (glassyThemeEnabled) "Frosted header and navigation" else "Normal glass header and navigation",
+                glassyThemeEnabled, onToggleGlassyTheme)
 
             SettingsSection("Video Playback")
             SettingsRow("Cellular Data Usage", cellularDataOption, Icons.Outlined.CellTower, "settings_cellular_data") { dialog = "cellular" }

@@ -27,6 +27,7 @@ class SettingsInteractionTest {
                 "Automatic (Balanced)", false, null, usedMb,
                 onClose = { events += "close" }, onToggleSmartDownloads = { events += "smart:$it" },
                 onToggleWifiOnly = { events += "wifi:$it" }, onToggleHighQuality = { events += "quality:$it" },
+                onToggleGlassyTheme = { events += "glass:$it" },
                 onToggleAutoPlayNext = { events += "next:$it" }, onToggleAutoPlayPreviews = { events += "previews:$it" },
                 onToggleSpatialAudio = { events += "spatial:$it" }, onSetCellularData = { events += "cellular:$it" },
                 onRunDiagnosticTest = { events += "diagnostic" }, onClearAllDownloads = { events += "delete" },
@@ -61,7 +62,7 @@ class SettingsInteractionTest {
         rule.onNodeWithTag("settings_video_quality").performScrollTo().performClick()
         rule.onNodeWithTag("settings_quality_standard").performClick()
         assertEquals("quality:false", events.last())
-        for ((title, kind) in listOf("Auto-Play Next Episode" to "next", "Auto-Play Previews" to "previews",
+        for ((title, kind) in listOf("Use Glassy Theme" to "glass", "Auto-Play Next Episode" to "next", "Auto-Play Previews" to "previews",
             "Spatial Audio" to "spatial", "Wi-Fi Only Downloads" to "wifi", "Download Next Episode" to "smart")) {
             rule.onNodeWithTag("settings_toggle_$title").performScrollTo().performClick()
             assertEquals("$kind:false", events.last())

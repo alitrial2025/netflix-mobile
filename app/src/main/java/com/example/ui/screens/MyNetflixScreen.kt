@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.ui.glass.GlassPanel
 import com.example.R
 import com.example.data.CloudWatchHistoryItem
 import com.example.data.local.DownloadEntity
@@ -159,49 +160,8 @@ fun MyNetflixScreen(
         )
     }
 
-    Column(
-        modifier = modifier.fillMaxSize().background(Color(0xFF0B0B0B))
-            .statusBarsPadding().verticalScroll(rememberScrollState()).padding(bottom = 112.dp)
-            .testTag("my_netflix_screen")
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                        if (isAuthenticated) onSwitchProfileClick()
-                        else { onShowToast("Sign in to create and manage profiles."); onOpenAuth() }
-                    }.padding(vertical = 8.dp).testTag("my_netflix_profile_dropdown_btn"),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ProfileAvatar(profile = activeProfile, size = 32.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(activeProfile.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                Icon(Icons.Default.ArrowDropDown, contentDescription = "Switch profile", tint = Color.White, modifier = Modifier.size(24.dp))
-            }
-            IconButton(onClick = onOpenCast, modifier = Modifier.size(42.dp).testTag("my_netflix_cast_button")) {
-                Icon(if (connectedCastDevice?.isConnected == true) Icons.Default.CastConnected else Icons.Default.Cast,
-                    contentDescription = connectedCastDevice?.takeIf { it.isConnected }?.let { "Connected to ${it.name}" } ?: "Cast",
-                    tint = Color.White, modifier = Modifier.size(24.dp))
-            }
-            IconButton(onClick = onOpenDownloads, modifier = Modifier.size(42.dp).testTag("my_netflix_header_download_button")) {
-                Icon(painterResource(R.drawable.ic_netflix_download_custom), contentDescription = "Downloads", tint = Color.White, modifier = Modifier.size(24.dp))
-            }
-            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                IconButton(onClick = onOpenNotifications, modifier = Modifier.fillMaxSize().testTag("my_netflix_notifications_btn")) {
-                    Icon(Icons.Default.NotificationsNone, "Notifications", tint = Color.White, modifier = Modifier.size(24.dp))
-                }
-                if (unreadCount > 0) {
-                    Box(Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 3.dp)
-                        .background(NetflixRed, CircleShape).padding(horizontal = 4.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
-                        Text(if (unreadCount > 99) "99+" else "$unreadCount", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
+    Box(modifier.fillMaxSize().background(Color(0xFF0B0B0B)).statusBarsPadding().testTag("my_netflix_screen")) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 78.dp, bottom = com.example.ui.components.navigationContentClearance())) {
 
         if (userSubscription.isGuest) {
             Row(
@@ -333,6 +293,53 @@ fun MyNetflixScreen(
         LibraryUtilityRow("App settings & diagnostics", "Downloads, playback quality and account settings", "app_settings_row_btn", onOpenSettings) {
             Icon(Icons.Default.Settings, null, tint = Color.White, modifier = Modifier.size(25.dp))
         }
+    }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GlassPanel(Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        if (isAuthenticated) onSwitchProfileClick()
+                        else { onShowToast("Sign in to create and manage profiles."); onOpenAuth() }
+                    }.padding(horizontal = 10.dp, vertical = 8.dp).testTag("my_netflix_profile_dropdown_btn"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ProfileAvatar(profile = activeProfile, size = 32.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(activeProfile.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "Switch profile", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            }
+            Spacer(Modifier.width(10.dp))
+            GlassPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onOpenCast, modifier = Modifier.size(48.dp).testTag("my_netflix_cast_button")) {
+                Icon(if (connectedCastDevice?.isConnected == true) Icons.Default.CastConnected else Icons.Default.Cast,
+                    contentDescription = connectedCastDevice?.takeIf { it.isConnected }?.let { "Connected to ${it.name}" } ?: "Cast",
+                    tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            IconButton(onClick = onOpenDownloads, modifier = Modifier.size(48.dp).testTag("my_netflix_header_download_button")) {
+                Icon(painterResource(R.drawable.ic_netflix_download_custom), contentDescription = "Downloads", tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                IconButton(onClick = onOpenNotifications, modifier = Modifier.fillMaxSize().testTag("my_netflix_notifications_btn")) {
+                    Icon(Icons.Default.NotificationsNone, "Notifications", tint = Color.White, modifier = Modifier.size(24.dp))
+                }
+                if (unreadCount > 0) {
+                    Box(Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 3.dp)
+                        .background(NetflixRed, CircleShape).padding(horizontal = 4.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
+                        Text(if (unreadCount > 99) "99+" else "$unreadCount", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            }
+            }
+        }
+
     }
 }
 

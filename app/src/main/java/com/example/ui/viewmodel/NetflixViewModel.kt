@@ -1007,6 +1007,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _isAutoPlayPreviewsEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.AUTOPLAY_PREVIEWS))
     val isAutoPlayPreviewsEnabled: StateFlow<Boolean> = _isAutoPlayPreviewsEnabled.asStateFlow()
 
+    private val _useGlassyTheme = MutableStateFlow(mobileSettings.get(MobileSetting.GLASSY_THEME))
+    val useGlassyTheme: StateFlow<Boolean> = _useGlassyTheme.asStateFlow()
+    fun setGlassyTheme(enabled: Boolean) {
+        _useGlassyTheme.value = enabled
+        mobileSettings.set(MobileSetting.GLASSY_THEME, enabled)
+    }
+
     private val _isSpatialAudioEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.SPATIAL_AUDIO))
     val isSpatialAudioEnabled: StateFlow<Boolean> = _isSpatialAudioEnabled.asStateFlow()
 

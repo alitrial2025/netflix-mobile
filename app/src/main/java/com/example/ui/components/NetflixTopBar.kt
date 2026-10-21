@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.glass.GlassPanel
 import com.example.R
 import com.example.data.model.UserProfile
 import com.example.ui.theme.NetflixRed
@@ -97,8 +98,8 @@ fun NetflixTopBar(
                 drawRect(
                     Brush.verticalGradient(
                         listOf(
-                            Color.Black.copy(alpha = .24f + fraction * .66f),
-                            Color.Black.copy(alpha = fraction * .90f)
+                            Color.Black.copy(alpha = .06f + fraction * .22f),
+                            Color.Transparent
                         )
                     )
                 )
@@ -106,18 +107,12 @@ fun NetflixTopBar(
             .statusBarsPadding()
             .padding(top = 4.dp, bottom = 6.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(role = Role.Button) { onCategorySelected(CategoryFilter.ALL, null) },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            GlassPanel(Modifier.weight(1f, fill = false).heightIn(min = 48.dp).testTag("top_bar_brand_glass")) {
+            Row(Modifier.heightIn(min = 48.dp)
+                .clickable(role = Role.Button) { onCategorySelected(CategoryFilter.ALL, null) }
+                .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (currentCategory == CategoryFilter.GAMES) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
@@ -127,8 +122,10 @@ fun NetflixTopBar(
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                NetflixNLogo(size = 34.dp)
-                Spacer(Modifier.width(8.dp))
+                if (currentCategory != CategoryFilter.GAMES) {
+                    NetflixNLogo(size = 30.dp)
+                    Spacer(Modifier.width(6.dp))
+                }
                 Text(
                     text = when {
                         currentCategory == CategoryFilter.TV_SHOWS -> "Series"
@@ -138,13 +135,17 @@ fun NetflixTopBar(
                         else -> "Home"
                     },
                     color = Color.White,
-                    fontSize = 24.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("top_bar_title_home")
+                    modifier = Modifier.weight(1f, fill = false).testTag("top_bar_title_home")
                 )
             }
+            }
+            Spacer(Modifier.width(10.dp))
+            GlassPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onCastClick, modifier = Modifier.size(48.dp).testTag("top_bar_cast_button")) {
                 Icon(Icons.Default.Cast, "Cast", tint = Color.White, modifier = Modifier.size(22.dp))
             }
@@ -173,6 +174,8 @@ fun NetflixTopBar(
                         )
                     }
                 }
+            }
+            }
             }
         }
 

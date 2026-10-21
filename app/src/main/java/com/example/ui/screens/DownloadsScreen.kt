@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.glass.GlassHeader
 import com.example.R
 import com.example.data.CatalogData
 import com.example.data.download.*
@@ -115,10 +116,7 @@ fun DownloadsScreen(
         return
     }
     Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
-            Text(showId?.let { id -> ready.firstOrNull { it.mediaId == id }?.mediaTitle } ?: "Downloads", color = Color.White,
-                fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        GlassHeader(showId?.let { id -> ready.firstOrNull { it.mediaId == id }?.mediaTitle } ?: "Downloads", back) {
             IconButton(onOpenCast) { Icon(painterResource(R.drawable.ic_outline_cast), if (connectedCastDevice != null) "Connected to TV" else "Cast", tint = Color.White) }
             IconButton(onOpenSearch) { Icon(painterResource(R.drawable.ic_outline_search), "Search", tint = Color.White) }
             IconButton(onOpenProfiles) { ProfileAvatar(activeProfile, size = 26.dp) }

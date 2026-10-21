@@ -633,7 +633,7 @@ internal fun ClipDiscoveryOverlay(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 74.dp, bottom = 104.dp),
+                .padding(start = 14.dp, end = 74.dp, bottom = com.example.ui.components.navigationControlHeight() + 40.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Text(

@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 enum class MobileSetting(val key: String) {
     WIFI_ONLY_DOWNLOADS("pref_wifi_only_downloads"), HIGH_QUALITY("pref_high_quality"),
     AUTOPLAY_NEXT("pref_autoplay_next"), AUTOPLAY_PREVIEWS("pref_autoplay_previews"),
-    SPATIAL_AUDIO("pref_spatial_audio")
+    GLASSY_THEME("pref_glassy_theme"), SPATIAL_AUDIO("pref_spatial_audio")
 }
 
 enum class CellularDataMode(val label: String) {

@@ -420,7 +420,7 @@ fun HomeScreen(
     }) {
         // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
         HomeBackdrop(currentTopColor, currentBottomColor, gradientEndPx, { backdropOffset.value })
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = 110.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = com.example.ui.components.navigationContentClearance())) {
             item(key = "hero", contentType = "hero") {
             Column(Modifier.onSizeChanged { setItemHeight("hero", it.height) }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room

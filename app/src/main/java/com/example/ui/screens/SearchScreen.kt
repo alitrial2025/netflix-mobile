@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.glass.GlassHeader
 import com.example.R
 import com.example.data.model.*
 
@@ -58,9 +59,9 @@ fun SearchScreen(
         if (result.resultCode == Activity.RESULT_OK) result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onQueryChange)
     }
     Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Search", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            IconButton(onOpenCast) { Icon(painterResource(R.drawable.ic_outline_cast), if (connectedCastDevice != null) "Connected to TV" else "Cast", tint = Color.White) }
+        GlassHeader("Search") {
+            IconButton(onOpenCast) { Icon(painterResource(R.drawable.ic_outline_cast),
+                if (connectedCastDevice != null) "Connected to TV" else "Cast", tint = Color.White) }
         }
         TextField(searchQuery, onValueChange = onQueryChange, placeholder = { Text("Shows, movies and more", color = Color(0xFFAAAAAA), fontSize = 14.sp) },
             leadingIcon = { Icon(painterResource(R.drawable.ic_outline_search), null, tint = Color.LightGray) },
@@ -94,7 +95,7 @@ fun SearchScreen(
                 Text(if (searchQuery.isBlank()) "Search for a title or explore a category." else "Try another title, a shorter phrase, or a different category.", color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp))
             }
         } else if (searchQuery.isBlank() && selectedGenre == null && type == "All") {
-            LazyColumn(Modifier.weight(1f).testTag("search_top_list"), contentPadding = PaddingValues(bottom = 110.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            LazyColumn(Modifier.weight(1f).testTag("search_top_list"), contentPadding = PaddingValues(bottom = com.example.ui.components.navigationContentClearance()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 item { Text("Top Searches", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
                 items(results.sortedByDescending { it.isTrending }.take(24), key = { "${it.type}:${it.id}" }, contentType = { "search_title" }) { media ->
                     Row(Modifier.fillMaxWidth().background(Color(0xFF1B1B1B)).clickable { onMediaClick(media) }.testTag("top_search_${media.id}"), verticalAlignment = Alignment.CenterVertically) {
@@ -109,7 +110,7 @@ fun SearchScreen(
             }
         } else {
             Text("Movies & Shows (${results.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            LazyVerticalGrid(GridCells.Fixed(3), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 110.dp),
+            LazyVerticalGrid(GridCells.Fixed(3), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = com.example.ui.components.navigationContentClearance()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 gridItems(results, key = { "${it.type}:${it.id}" }, contentType = { "poster" }) { media ->
                     Column(Modifier.clickable { onMediaClick(media) }.testTag("search_result_${media.id}")) {

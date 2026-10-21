@@ -1,34 +1,24 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -38,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.UserProfile
+import com.example.ui.glass.GlassPanel
 import com.example.ui.viewmodel.NavigationTab
 
 @Composable
@@ -56,89 +47,70 @@ fun NetflixBottomNav(
     isClipsAllowed: Boolean = false,
     ambientColorProvider: () -> Color = { Color.Black }
 ) {
-    val shape = RoundedCornerShape(32.dp)
-    BoxWithConstraints(
-        modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 10.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            Modifier.width((maxWidth * if (isClipsAllowed) .88f else .80f)
-                .coerceAtMost(if (isClipsAllowed) 360.dp else 312.dp))
-                .height(60.dp).clip(shape)
-                .drawBehind {
-                    // Read the poster's ambient state only during drawing. The tint follows
-                    // the hero/clip without recomposing the complete navigation on each frame.
-                    val ambient = ambientColorProvider()
-                    val tint = if (ambient == Color.Unspecified) Color.Black else ambient.copy(alpha = 1f)
-                    val glass = lerp(Color(0xFF2C292D), tint, .19f)
-                    drawRect(
-                        Brush.verticalGradient(
-                            listOf(lerp(glass, Color.White, .045f).copy(alpha = .97f), glass.copy(alpha = .96f))
-                        )
-                    )
-                }
-                .border(1.dp, Color.White.copy(alpha = .10f), shape)
-                .padding(horizontal = 5.dp, vertical = 4.dp)
-                .selectableGroup(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val tabs = if (isClipsAllowed) {
-                listOf(NavigationTab.HOME, NavigationTab.CLIPS, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX)
-            } else {
-                listOf(NavigationTab.HOME, NavigationTab.SEARCH, NavigationTab.MY_NETFLIX)
-            }
-            tabs.forEach { tab ->
-                val selected = selectedTab == tab
-                val title = when (tab) {
-                    NavigationTab.HOME -> "Home"
-                    NavigationTab.CLIPS -> "Clips"
-                    NavigationTab.SEARCH -> "Search"
-                    else -> "My Netflix"
-                }
-                val tag = when (tab) {
-                    NavigationTab.HOME -> "home"
-                    NavigationTab.CLIPS -> "clips"
-                    NavigationTab.SEARCH -> "search"
-                    else -> "my_netflix"
-                }
-                Column(
-                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(26.dp))
-                        .selectable(selected = selected, role = Role.Tab, onClick = { onTabSelected(tab) })
-                        .testTag("nav_tab_$tag"),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        Modifier.size(30.dp).clip(CircleShape)
-                            .background(if (selected) Color.White.copy(alpha = .10f) else Color.Transparent),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (tab == NavigationTab.MY_NETFLIX) {
-                            ProfileAvatar(activeProfile, size = 24.dp, modifier = Modifier.clip(CircleShape))
-                        } else {
-                            Icon(
-                                painterResource(
-                                    when (tab) {
-                                        NavigationTab.HOME -> R.drawable.ic_nav_home
-                                        NavigationTab.CLIPS -> R.drawable.ic_nav_clips
-                                        else -> R.drawable.ic_nav_search
-                                    }
-                                ),
-                                contentDescription = null,
-                                tint = if (selected) Color.White else Color(0xFFB5B0B5),
-                                modifier = Modifier.size(22.dp)
-                            )
+    val tabs = remember(isClipsAllowed) {
+        if (isClipsAllowed) listOf(NavigationTab.HOME, NavigationTab.CLIPS, NavigationTab.SEARCH)
+        else listOf(NavigationTab.HOME, NavigationTab.SEARCH)
+    }
+    val density = LocalDensity.current
+    val height = navigationControlHeight()
+    BoxWithConstraints(modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center) {
+        val totalWidth = maxWidth.coerceAtMost(if (isClipsAllowed) 414.dp else 346.dp)
+        val gap = 10.dp
+        val pillWidth = totalWidth - height - gap
+        val tabWidth = (pillWidth - 8.dp) / tabs.size
+        val selectedIndex = tabs.indexOf(selectedTab)
+        val highlightX = animateDpAsState(tabWidth * selectedIndex.coerceAtLeast(0),
+            spring(dampingRatio = .86f, stiffness = 550f), label = "glassTabSelection")
+        Row(Modifier.width(totalWidth).height(height).selectableGroup(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            GlassPanel(Modifier.width(pillWidth).fillMaxHeight().testTag("nav_main_glass_pill")) {
+                Box(Modifier.padding(4.dp).width(tabWidth).fillMaxHeight()
+                    .graphicsLayer { translationX = with(density) { highlightX.value.toPx() }; alpha = if (selectedIndex >= 0) 1f else 0f }
+                    .clip(RoundedCornerShape(50)).drawWithCache {
+                        val fill = Brush.verticalGradient(listOf(Color.White.copy(alpha = .14f), Color.White.copy(alpha = .07f)))
+                        onDrawBehind { drawRect(fill) }
+                    })
+                Row(Modifier.fillMaxSize().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    tabs.forEach { tab ->
+                        val selected = selectedTab == tab
+                        val title = when (tab) { NavigationTab.HOME -> "Home"; NavigationTab.CLIPS -> "Clips"; else -> "Search" }
+                        Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(50))
+                            .selectable(selected, role = Role.Tab, onClick = { onTabSelected(tab) })
+                            .testTag("nav_tab_${title.lowercase()}"), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Icon(painterResource(when(tab) { NavigationTab.HOME -> R.drawable.ic_nav_home
+                                NavigationTab.CLIPS -> R.drawable.ic_nav_clips; else -> R.drawable.ic_nav_search }),
+                                null, tint = if (selected) Color.White else Color(0xFFE4E1E6), modifier = Modifier.size(23.dp))
+                            Spacer(Modifier.height(3.dp))
+                            Text(title, color = Color.White, fontSize = 10.sp, lineHeight = 12.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
                         }
                     }
-                    Spacer(Modifier.height(1.dp))
-                    Text(
-                        title, color = if (selected) Color.White else Color(0xFFCDC9CE),
-                        fontSize = 9.sp, lineHeight = 11.sp,
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 1
-                    )
+                }
+            }
+            GlassPanel(Modifier.size(height).testTag("nav_profile_glass_circle"), CircleShape) {
+                Column(Modifier.fillMaxSize().clip(CircleShape)
+                    .background(if (selectedTab == NavigationTab.MY_NETFLIX) Color.White.copy(alpha = .16f) else Color.Transparent)
+                    .selectable(selectedTab == NavigationTab.MY_NETFLIX, role = Role.Tab,
+                        onClick = { onTabSelected(NavigationTab.MY_NETFLIX) }).testTag("nav_tab_my_netflix"),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    ProfileAvatar(activeProfile, size = 26.dp, modifier = Modifier.clip(CircleShape))
+                    Spacer(Modifier.height(2.dp))
+                    Text("My Netflix", color = Color.White, fontSize = 9.sp, lineHeight = 10.sp,
+                        fontWeight = FontWeight.Medium, maxLines = 2,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 6.dp))
                 }
             }
         }
     }
+}
+
+@Composable
+internal fun navigationControlHeight(): Dp = if (LocalDensity.current.fontScale > 1.5f) 80.dp else 64.dp
+
+@Composable
+internal fun navigationContentClearance(): Dp {
+    val density = LocalDensity.current
+    val inset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
+    return navigationControlHeight() + 32.dp + inset
 }

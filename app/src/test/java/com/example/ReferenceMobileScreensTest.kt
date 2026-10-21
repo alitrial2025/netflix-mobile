@@ -173,6 +173,25 @@ class ReferenceMobileScreensTest {
         capture("home-unfolded-840")
     }
 
+    @Test fun frostedHomePreviewRetainsCompactHeaderAndFloatingControls() {
+        rule.setContent { NetflixTheme {
+            val theme = remember { com.example.ui.glass.GlassThemeState(true) { Color(0xFF686348) } }
+            androidx.compose.runtime.CompositionLocalProvider(com.example.ui.glass.LocalGlassTheme provides theme) {
+                Box(Modifier.fillMaxSize()) {
+                    HomeScreen(profile, CategoryFilter.ALL, null, emptyList(), { false }, {}, {}, {},
+                        catalogMedia = listOf(show, movie), userSubscription = membership)
+                    NetflixTopBar(profile, CategoryFilter.ALL, null, { _, _ -> }, {}, {}, {}, unreadNotificationCount = 3)
+                    FloatingNavigation(NavigationTab.HOME)
+                }
+            }
+        } }
+        artworkReady(show.posterUrl)
+        val brand = rule.onNodeWithTag("top_bar_brand_glass").fetchSemanticsNode().boundsInRoot
+        assertTrue(brand.width < 165f)
+        assertFloatingNavigationHasSeparateTargets()
+        capture("home-frosted-412")
+    }
+
     @Test fun openingHomeCapturesTheReferenceAndKeepsCategoryAndNavigationActionsIndependent() {
         var played: MediaItem? = null
         var listed: MediaItem? = null

@@ -197,6 +197,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val isSmartDownloadsEnabled by viewModel.isSmartDownloadsEnabled.collectAsStateWithLifecycle()
     val allocatedStorageGb by viewModel.allocatedStorageGb.collectAsStateWithLifecycle()
     val isWifiOnlyEnabled by viewModel.isWifiOnlyEnabled.collectAsStateWithLifecycle()
+    val useGlassyTheme by viewModel.useGlassyTheme.collectAsStateWithLifecycle()
     val isHighQualityEnabled by viewModel.isHighQualityEnabled.collectAsStateWithLifecycle()
     val isAutoPlayNextEnabled by viewModel.isAutoPlayNextEnabled.collectAsStateWithLifecycle()
     val isAutoPlayPreviewsEnabled by viewModel.isAutoPlayPreviewsEnabled.collectAsStateWithLifecycle()
@@ -280,6 +281,11 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         }
     }
 
+    val glassTintProvider = remember(viewModel) { { viewModel.ambientColor.value } }
+    val glassTheme = remember(useGlassyTheme, glassTintProvider) {
+        com.example.ui.glass.GlassThemeState(useGlassyTheme, glassTintProvider)
+    }
+    androidx.compose.runtime.CompositionLocalProvider(com.example.ui.glass.LocalGlassTheme provides glassTheme) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -784,6 +790,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 smartDownloadsEnabled = isSmartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
                 wifiOnlyEnabled = isWifiOnlyEnabled,
                 highQualityEnabled = isHighQualityEnabled,
+                glassyThemeEnabled = useGlassyTheme,
+                onToggleGlassyTheme = viewModel::setGlassyTheme,
                 autoPlayNextEnabled = isAutoPlayNextEnabled && activeProfile.autoplayNext,
                 autoPlayPreviewsEnabled = isAutoPlayPreviewsEnabled && activeProfile.autoplayPreviews,
                 spatialAudioEnabled = isSpatialAudioEnabled,
@@ -984,6 +992,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 }
             )
         }
+    }
     }
 }
 
