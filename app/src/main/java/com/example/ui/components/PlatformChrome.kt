@@ -140,4 +140,4 @@ internal fun PlatformBottomNavigation(selected: NavigationTab, profile: UserProf
 }
 
 @Composable
-internal fun platformNavigationHeight() = with(LocalDensity.current) { (24.sp.toDp() + 48.dp).coerceAtLeast(68.dp) }
+internal fun platformNavigationHeight() = with(LocalDensity.current) { (12.sp.toDp() * 2 + 48.dp).coerceAtLeast(68.dp) }

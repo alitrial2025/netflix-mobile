@@ -212,7 +212,8 @@ class ReferenceMobileScreensTest {
                 com.example.ui.glass.LocalGlassTheme provides remember { com.example.ui.glass.GlassThemeState(glassy) }) {
                 NetflixTheme(platform = com.example.data.model.PlatformAppearance.PRIME) {
                     Box(Modifier.fillMaxSize()) {
-                        NetflixTopBar(profile, CategoryFilter.ALL, null, { _, _ -> }, { downloads++ }, {}, {})
+                        NetflixTopBar(profile, CategoryFilter.ALL, null, onCategorySelected = { _, _ -> },
+                            onNewAndHotClick = {}, onDownloadsClick = { downloads++ }, onNotificationsClick = {})
                         NetflixBottomNav(selected, profile, { selected = it }, Modifier.align(Alignment.BottomCenter), isClipsAllowed = true)
                     }
                 }
