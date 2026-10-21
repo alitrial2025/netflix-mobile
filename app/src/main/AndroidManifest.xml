@@ -32,6 +32,7 @@
         </receiver>
         <activity
             android:name=".MainActivity"
+            android:supportsPictureInPicture="true"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:label="@string/app_name"

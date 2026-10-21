@@ -32,7 +32,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun NextEpisodeCard(
     state: PlayerState, autoPlay: Boolean, active: Boolean,
-    onNext: () -> Unit, onWatchCredits: () -> Unit, modifier: Modifier = Modifier
+    onNext: () -> Unit, onWatchCredits: () -> Unit, compact: Boolean = false, modifier: Modifier = Modifier
 ) {
     var remaining by remember(state.media?.id, state.episode?.id) { mutableIntStateOf(30) }
     var triggered by remember(state.media?.id, state.episode?.id) { mutableStateOf(false) }
@@ -43,6 +43,7 @@ internal fun NextEpisodeCard(
         while (remaining > 0) { delay(1000); remaining-- }
         if (!triggered) { triggered = true; latestNext() }
     }
+    if (compact) return // Keep the countdown above running without shrinking full-screen controls into PiP.
     Column(modifier.widthIn(max = 360.dp).background(Color(0xFF181818).copy(alpha = .97f), RoundedCornerShape(8.dp)).padding(16.dp)) {
         Text("Up next", color = Color.Gray, fontSize = 12.sp)
         Text(state.nextEpisode?.title.orEmpty(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,

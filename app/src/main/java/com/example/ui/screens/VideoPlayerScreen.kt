@@ -67,6 +67,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -196,6 +199,9 @@ fun VideoPlayerScreen(
     var brightnessLevel by remember { mutableFloatStateOf(0.75f) }
     var isBuffering by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val pipController = com.example.playback.LocalMobilePipController.current
+    val compactState = pipController?.compact?.collectAsState()
+    val inPip = compactState?.value == true
     val latestPlayerState by androidx.compose.runtime.rememberUpdatedState(playerState)
     val latestProgressCallback by rememberUpdatedState(onUpdateProgress)
     val latestTrailerEnded by rememberUpdatedState(onTrailerEnded)
@@ -207,7 +213,7 @@ fun VideoPlayerScreen(
     val latestSetIntroWindow by rememberUpdatedState(onSetIntroWindow)
     val lifecycleOwner = LocalLifecycleOwner.current
     var playbackActive by remember(lifecycleOwner) {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var slowLookup by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
@@ -478,6 +484,32 @@ fun VideoPlayerScreen(
         }
     }
 
+    var pipPlaybackState by remember(exoPlayer) { mutableStateOf(exoPlayer.playbackState) }
+    var pipPlayWhenReady by remember(exoPlayer) { mutableStateOf(exoPlayer.playWhenReady) }
+    var pipAspectRatio by remember(exoPlayer) { mutableFloatStateOf(16f / 9f) }
+    DisposableEffect(exoPlayer, pipController) {
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                pipPlaybackState = player.playbackState
+                pipPlayWhenReady = player.playWhenReady
+                val video = player.videoSize
+                if (video.width > 0 && video.height > 0) {
+                    pipAspectRatio = video.width * video.pixelWidthHeightRatio / video.height
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener); pipController?.clear() }
+    }
+    SideEffect {
+        pipController?.update(
+            canEnter = playerState.sourceId != "Trailer" && !playerState.isResolving &&
+                playerState.resolvedUrl != null && playerState.resolveError == null && playbackError == null &&
+                streamingAllowed && pipPlaybackState in listOf(Player.STATE_READY, Player.STATE_BUFFERING),
+            isPlaying = pipPlayWhenReady && playerState.isPlaying,
+            aspectRatio = pipAspectRatio)
+    }
+
     // Load stream whenever resolvedUrl, resolveHeaders or captions change
     LaunchedEffect(media.id, playerState.episode?.id, playerState.resolvedUrl, playerState.resolveHeaders, playerState.captions) {
         playbackError = null
@@ -589,8 +621,8 @@ fun VideoPlayerScreen(
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> playbackActive = true
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                Lifecycle.Event.ON_START -> playbackActive = true
+                Lifecycle.Event.ON_STOP -> {
                     playbackActive = false
                     reportProgress()
                     latestPersistProgress()
@@ -648,7 +680,7 @@ fun VideoPlayerScreen(
     }
 
     // Speed Selection Dialog
-    if (showSpeedDialog) {
+    if (!inPip && showSpeedDialog) {
         AlertDialog(
             onDismissRequest = { showSpeedDialog = false },
             title = { Text("Playback Speed", color = Color.White, fontWeight = FontWeight.Bold) },
@@ -693,7 +725,7 @@ fun VideoPlayerScreen(
     }
 
     // Audio & Subtitles Dialog
-    if (playerState.showAudioSubtitleDialog) {
+    if (!inPip && playerState.showAudioSubtitleDialog) {
         val currentAudioTracks = availableAudioTracks
         val currentSubTracks = if (availableSubtitleTracks.isNotEmpty()) availableSubtitleTracks else listOf(
             PlayerTrackOption("off", "Off", "", true)
@@ -889,7 +921,7 @@ fun VideoPlayerScreen(
     }
 
     // Episodes Bottom Sheet
-    if (playerState.showEpisodeDrawer && media.type == MediaType.TV_SHOW) {
+    if (!inPip && playerState.showEpisodeDrawer && media.type == MediaType.TV_SHOW) {
         ModalBottomSheet(
             onDismissRequest = { onShowEpisodesDrawer(false) },
             containerColor = NetflixDarkGray
@@ -1017,10 +1049,14 @@ fun VideoPlayerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(playerState.isResolving) {
-                if (!playerState.isResolving) {
+            .pointerInput(playerState.isResolving, inPip) {
+                if (!inPip && !playerState.isResolving) {
                     detectTapGestures(onTap = { onToggleControls() })
                 }
+            }
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInWindow()
+                if (!inPip) pipController?.setSourceRect(android.graphics.Rect(bounds.left.toInt(), bounds.top.toInt(), bounds.right.toInt(), bounds.bottom.toInt()))
             }
             .testTag("video_player_container")
     ) {
@@ -1071,7 +1107,7 @@ fun VideoPlayerScreen(
         val visiblePlaybackError = if (!streamingAllowed)
             "Connect to Wi-Fi or change Cellular Data in App Settings to continue playback."
             else playbackError ?: playerState.resolveError
-        if (visiblePlaybackError != null) {
+        if (!inPip && visiblePlaybackError != null) {
             Column(Modifier.fillMaxSize().background(Color.Black).padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Text(visiblePlaybackError, color = Color.White, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -1079,7 +1115,7 @@ fun VideoPlayerScreen(
                 TextButton(onClick = onClose) { Text("Back to title", color = Color.White) }
             }
         }
-        if (visiblePlaybackError == null && (playerState.isResolving || isBuffering)) {
+        if (!inPip && visiblePlaybackError == null && (playerState.isResolving || isBuffering)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1100,7 +1136,7 @@ fun VideoPlayerScreen(
 
         // Controls overlay (Only visible once resolved)
         AnimatedVisibility(
-            visible = visiblePlaybackError == null && !playerState.isResolving && !isBuffering && playerState.showControls,
+            visible = !inPip && visiblePlaybackError == null && !playerState.isResolving && !isBuffering && playerState.showControls,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.fillMaxSize()
@@ -1497,7 +1533,7 @@ fun VideoPlayerScreen(
         }
 
         val scrub = scrubPosition
-        if (scrub != null && !playerState.isLocked) {
+        if (!inPip && scrub != null && !playerState.isLocked) {
             val cue = remember(scrub, thumbnailCues) { seekThumbnailAt(thumbnailCues, scrub * 1000L) }
             Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp).background(Color(0xFF202020), RoundedCornerShape(6.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (cue != null) {
@@ -1510,7 +1546,7 @@ fun VideoPlayerScreen(
         var watchCredits by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
         val nearEnd = playerState.durationSec > 60 && playerState.currentPositionSec >= playerState.durationSec - 30
         LaunchedEffect(nearEnd) { if (!nearEnd) watchCredits = false }
-        if (playerState.hasEnded && playerState.sourceId != "Trailer" && !playerState.isLocked) {
+        if (!inPip && playerState.hasEnded && playerState.sourceId != "Trailer" && !playerState.isLocked) {
             PostPlayOverlay(playerState, recommendations,
                 onReplay = { watchCredits = false; exoPlayer.seekTo(0); onSeek(0); onReplay() },
                 onClose = onClose, onNext = { reportProgress(); onPlayNextEpisode() }, onRetryNext = onRetryNext,
@@ -1519,13 +1555,14 @@ fun VideoPlayerScreen(
         if (playerState.nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
             !playerState.isResolving && !watchCredits && (nearEnd || playerState.hasEnded)) {
             NextEpisodeCard(playerState, autoPlayNext, playbackActive && streamingAllowed,
+                compact = inPip,
                 onNext = { reportProgress(); onPlayNextEpisode() }, onWatchCredits = { watchCredits = true },
                 modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 48.dp))
         }
 
         // Animated "Skip Intro" pop-up on bottom-right
         AnimatedVisibility(
-            visible = playerState.showSkipIntro && !playerState.isLocked,
+            visible = !inPip && playerState.showSkipIntro && !playerState.isLocked,
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier

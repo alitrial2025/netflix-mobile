@@ -73,9 +73,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 class MainActivity : ComponentActivity() {
     private var viewModelInstance: NetflixViewModel? = null
+    private lateinit var pipController: com.example.playback.MobilePipController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pipController = com.example.playback.MobilePipController(this,
+            onTogglePlayback = { viewModelInstance?.togglePlayPause() },
+            onDismissPlayback = { viewModelInstance?.closePlayer() })
         enableEdgeToEdge()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
@@ -94,10 +98,32 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(intent) {
                     handleIntent(intent, viewModel)
                 }
-                NetflixApp(viewModel)
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.example.playback.LocalMobilePipController provides pipController
+                ) { NetflixApp(viewModel) }
                 }
             }
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        pipController.onUserLeaveHint()
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, configuration: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(inPip, configuration)
+        pipController.onModeChanged(inPip)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        pipController.onStop()
+    }
+
+    override fun onDestroy() {
+        pipController.destroy()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
