@@ -123,6 +123,7 @@ fun NewAndHotScreen(
     upcomingReleases: List<MediaItem> = emptyList(),
     recentReleases: List<MediaItem> = emptyList()
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var selectedTab by remember { mutableStateOf(NewAndHotTab.COMING_SOON) }
     val context = LocalContext.current
 
@@ -140,7 +141,7 @@ fun NewAndHotScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .statusBarsPadding()
     ) {
         // 2026 Netflix Top Bar with App Branding & Quick Action Suite
@@ -193,7 +194,7 @@ fun NewAndHotScreen(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .size(10.dp)
-                                    .background(NetflixRed, CircleShape)
+                                    .background(platformDesign.accent, CircleShape)
                             )
                         }
                     }
@@ -226,7 +227,7 @@ fun NewAndHotScreen(
             NewAndHotTab.values().forEach { tab ->
                 val isSelected = selectedTab == tab
                 val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else Color(0xFF262626),
+                    targetValue = if (isSelected) Color.White else platformDesign.surfaceColor(Color(0xFF262626)),
                     label = "tab_bg"
                 )
                 val textColor by animateColorAsState(
@@ -416,8 +417,8 @@ fun NewAndHotScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F))
+                            shape = RoundedCornerShape(platformDesign.corner(12.dp)),
+                            colors = CardDefaults.cardColors(containerColor = platformDesign.surfaceColor(Color(0xFF1F1F1F)))
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
@@ -427,7 +428,7 @@ fun NewAndHotScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
-                                        .background(NetflixRed, CircleShape),
+                                        .background(platformDesign.accent, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -485,6 +486,7 @@ fun ComingSoonFeedCard(
     onShareClick: () -> Unit,
     onItemClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val dateParts = (item.releaseDateBadge ?: "AUG 28").split(" ")
     val month = dateParts.firstOrNull() ?: "AUG"
     val day = dateParts.getOrNull(1) ?: "28"
@@ -528,8 +530,8 @@ fun ComingSoonFeedCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(190.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NetflixCardBg)
+                    .clip(RoundedCornerShape(platformDesign.corner(10.dp)))
+                    .background(platformDesign.raised)
             ) {
                 if (item.backdropUrl != null || item.posterUrl != null || item.bannerDrawableRes != null) {
                     AsyncImage(
@@ -634,13 +636,13 @@ fun ComingSoonFeedCard(
                         Icon(
                             imageVector = if (isReminded) Icons.Default.NotificationsActive else Icons.Default.Notifications,
                             contentDescription = "Remind Me",
-                            tint = if (isReminded) NetflixRed else Color.White,
+                            tint = if (isReminded) platformDesign.accent else Color.White,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (isReminded) "Reminded" else "Remind Me",
-                            color = if (isReminded) NetflixRed else Color.White.copy(alpha = 0.8f),
+                            color = if (isReminded) platformDesign.accent else Color.White.copy(alpha = 0.8f),
                             fontSize = 10.sp,
                             fontWeight = if (isReminded) FontWeight.Bold else FontWeight.Normal
                         )
@@ -749,6 +751,7 @@ private fun EveryonesWatchingFeedCard(
     onShareClick: () -> Unit,
     onItemClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -761,8 +764,8 @@ private fun EveryonesWatchingFeedCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(200.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(NetflixCardBg)
+                .clip(RoundedCornerShape(platformDesign.corner(10.dp)))
+                .background(platformDesign.raised)
         ) {
             if (item.backdropUrl != null || item.posterUrl != null || item.bannerDrawableRes != null) {
                 AsyncImage(
@@ -860,13 +863,13 @@ private fun EveryonesWatchingFeedCard(
                     Icon(
                         imageVector = if (isInWatchlist) Icons.Default.Check else Icons.Default.Add,
                         contentDescription = "My List",
-                        tint = if (isInWatchlist) NetflixRed else Color.White,
+                        tint = if (isInWatchlist) platformDesign.accent else Color.White,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isInWatchlist) "In List" else "My List",
-                        color = if (isInWatchlist) NetflixRed else Color.White.copy(alpha = 0.8f),
+                        color = if (isInWatchlist) platformDesign.accent else Color.White.copy(alpha = 0.8f),
                         fontSize = 10.sp
                     )
                 }
@@ -874,7 +877,7 @@ private fun EveryonesWatchingFeedCard(
                 // Play Button
                 Button(
                     onClick = onPlayClick,
-                    shape = RoundedCornerShape(4.dp),
+                    shape = RoundedCornerShape(platformDesign.corner(4.dp)),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                 ) {
@@ -904,8 +907,8 @@ private fun EveryonesWatchingFeedCard(
                 fontSize = 12.sp
             )
             Surface(
-                color = Color(0xFF333333),
-                shape = RoundedCornerShape(3.dp)
+                color = platformDesign.surfaceColor(Color(0xFF333333)),
+                shape = RoundedCornerShape(platformDesign.corner(3.dp))
             ) {
                 Text(
                     text = item.maturityRating,
@@ -923,7 +926,7 @@ private fun EveryonesWatchingFeedCard(
             Surface(
                 color = Color.Transparent,
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
-                shape = RoundedCornerShape(3.dp)
+                shape = RoundedCornerShape(platformDesign.corner(3.dp))
             ) {
                 Text(
                     text = "HD",
@@ -936,7 +939,7 @@ private fun EveryonesWatchingFeedCard(
             Surface(
                 color = Color.Transparent,
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
-                shape = RoundedCornerShape(3.dp)
+                shape = RoundedCornerShape(platformDesign.corner(3.dp))
             ) {
                 Text(
                     text = "Spatial Audio",
@@ -996,6 +999,7 @@ private fun Top10RankFeedCard(
     onShareClick: () -> Unit,
     onItemClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1028,8 +1032,8 @@ private fun Top10RankFeedCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(175.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NetflixCardBg)
+                    .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+                    .background(platformDesign.raised)
             ) {
                 if (item.backdropUrl != null || item.posterUrl != null || item.bannerDrawableRes != null) {
                     AsyncImage(
@@ -1056,7 +1060,7 @@ private fun Top10RankFeedCard(
 
                 // Top 10 Red Badge
                 Surface(
-                    color = NetflixRed,
+                    color = platformDesign.accent,
                     shape = RoundedCornerShape(bottomEnd = 6.dp),
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
@@ -1089,7 +1093,7 @@ private fun Top10RankFeedCard(
                     )
                     Text(
                         text = "#$rank in $categoryLabel Today",
-                        color = NetflixRed,
+                        color = platformDesign.accent,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1120,7 +1124,7 @@ private fun Top10RankFeedCard(
                         Icon(
                             imageVector = if (isInWatchlist) Icons.Default.Check else Icons.Default.Add,
                             contentDescription = "My List",
-                            tint = if (isInWatchlist) NetflixRed else Color.White,
+                            tint = if (isInWatchlist) platformDesign.accent else Color.White,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1166,13 +1170,14 @@ private fun GameFeedCard(
     onInstall: () -> Unit,
     onLaunch: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .testTag("game_${game.id}"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF181818))
+        shape = RoundedCornerShape(platformDesign.corner(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = platformDesign.surfaceColor(Color(0xFF181818)))
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // 16:9 Cinematic Gameplay Banner
@@ -1180,7 +1185,7 @@ private fun GameFeedCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(170.dp)
-                    .background(Color(0xFF222222))
+                    .background(platformDesign.surfaceColor(Color(0xFF222222)))
             ) {
                 if (game.bannerUrl != null || game.bannerRes != null) {
                     AsyncImage(
@@ -1219,8 +1224,8 @@ private fun GameFeedCard(
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(NetflixRed),
+                        .clip(RoundedCornerShape(platformDesign.corner(12.dp)))
+                        .background(platformDesign.accent),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1274,8 +1279,8 @@ private fun GameFeedCard(
                         Spacer(modifier = Modifier.height(4.dp))
                         LinearProgressIndicator(
                             progress = { game.downloadProgress },
-                            color = NetflixRed,
-                            trackColor = Color(0xFF333333),
+                            color = platformDesign.accent,
+                            trackColor = platformDesign.surfaceColor(Color(0xFF333333)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(4.dp)
@@ -1286,7 +1291,7 @@ private fun GameFeedCard(
                     Button(
                         onClick = onLaunch,
                         shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = NetflixRed, contentColor = Color.White),
+                        colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                     ) {
                         Text("Play", fontWeight = FontWeight.Bold, fontSize = 12.sp)

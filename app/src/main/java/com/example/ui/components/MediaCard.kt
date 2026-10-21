@@ -77,16 +77,18 @@ fun MediaPosterCard(
     isLocked: Boolean = false,
     onClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val isTallCard = height >= 300.dp
-    val imageModel = media.posterUrl ?: media.bannerDrawableRes
-    val cardShape = if (isTallCard) TallCardShape else StandardCardShape
+    val wide = platformDesign.wideCards && width > height
+    val imageModel = if (wide) media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes else media.posterUrl ?: media.bannerDrawableRes
+    val cardShape = if (!platformDesign.originalLayout) RoundedCornerShape(platformDesign.cardRadius) else if (isTallCard) TallCardShape else StandardCardShape
 
     Box(
         modifier = modifier
             .width(width)
             .height(height)
             .clip(cardShape)
-            .background(Color(0xFF141414))
+            .background(platformDesign.surfaceColor(Color(0xFF141414)))
             .clickable { onClick() }
             .testTag("media_card_${media.id}")
     ) {
@@ -110,6 +112,12 @@ fun MediaPosterCard(
             )
         }
 
+        if (wide) {
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .72f)))))
+            Text(media.title, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp))
+        }
+
         // Lock dimming overlay if locked
         if (isLocked) {
             Box(
@@ -120,7 +128,7 @@ fun MediaPosterCard(
         }
 
         // Top badges: Netflix 'N' Logo on top-left, Lock badge or TOP 10 badge on top-right
-        val hasTopLeftBadge = media.isOriginal
+        val hasTopLeftBadge = media.isOriginal && platformDesign.originalLayout
         val hasTopRightBadge = isLocked || (showRank && media.top10Rank != null)
         if (hasTopLeftBadge || hasTopRightBadge) {
             Row(
@@ -141,7 +149,7 @@ fun MediaPosterCard(
                         modifier = Modifier
                             .clip(BadgeShape)
                             .background(Color.Black.copy(alpha = 0.85f))
-                            .border(1.dp, NetflixRed.copy(alpha = 0.9f), BadgeShape)
+                            .border(1.dp, platformDesign.accent.copy(alpha = 0.9f), BadgeShape)
                             .padding(horizontal = if (isTallCard) 6.dp else 4.dp, vertical = if (isTallCard) 3.dp else 2.dp)
                     ) {
                         Row(
@@ -151,7 +159,7 @@ fun MediaPosterCard(
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = "Locked on Plan",
-                                tint = NetflixRed,
+                                tint = platformDesign.accent,
                                 modifier = Modifier.size(if (isTallCard) 11.dp else 9.dp)
                             )
                             Text(
@@ -166,7 +174,7 @@ fun MediaPosterCard(
                     Box(
                         modifier = Modifier
                             .clip(BadgeShape)
-                            .background(NetflixRed)
+                            .background(platformDesign.accent)
                             .padding(horizontal = if (isTallCard) 6.dp else 4.dp, vertical = if (isTallCard) 3.dp else 2.dp)
                     ) {
                         Text(
@@ -200,7 +208,7 @@ fun MediaPosterCard(
                         media.isComingSoon -> "Remind Me"
                         else -> "Top 10"
                     },
-                    surfaceColor = if (isReminded) NetflixRed else Color(0xFF1C1B24).copy(alpha = 0.92f),
+                    surfaceColor = if (isReminded) platformDesign.accent else Color(0xFF1C1B24).copy(alpha = 0.92f),
                     textColor = Color.White,
                     shape = BadgeShape,
                     leadingIcon = if (showBellBadge) (if (isReminded) Icons.Default.NotificationsActive else Icons.Default.Notifications) else null,
@@ -224,10 +232,11 @@ fun ContinueWatchingCard(
     onInfoClick: () -> Unit,
     onOptionsClick: () -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val episodeTag = remember(episodeTitle, media.type) { formatEpisodeBadge(episodeTitle, media) }
     val imageModel = media.posterUrl ?: media.bannerDrawableRes ?: media.backdropUrl
 
-    val cardShape = RoundedCornerShape(10.dp)
+    val cardShape = RoundedCornerShape(platformDesign.corner(10.dp))
 
     Column(
         modifier = modifier
@@ -256,7 +265,7 @@ fun ContinueWatchingCard(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF141414))
+                        .background(platformDesign.surfaceColor(Color(0xFF141414)))
                 ) {
                     Text(
                         text = media.title,
@@ -356,8 +365,8 @@ fun ContinueWatchingCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(3.dp),
-            color = NetflixRed,
-            trackColor = Color(0xFF333333)
+            color = platformDesign.accent,
+            trackColor = platformDesign.surfaceColor(Color(0xFF333333))
         )
 
         // Bottom Action Bar with Info (i) on left and 3 Dots (⋮) on right

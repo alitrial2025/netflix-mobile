@@ -34,6 +34,7 @@ internal fun NextEpisodeCard(
     state: PlayerState, autoPlay: Boolean, active: Boolean,
     onNext: () -> Unit, onWatchCredits: () -> Unit, compact: Boolean = false, modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var remaining by remember(state.media?.id, state.episode?.id) { mutableIntStateOf(30) }
     var triggered by remember(state.media?.id, state.episode?.id) { mutableStateOf(false) }
     val latestNext by rememberUpdatedState(onNext)
@@ -44,13 +45,13 @@ internal fun NextEpisodeCard(
         if (!triggered) { triggered = true; latestNext() }
     }
     if (compact) return // Keep the countdown above running without shrinking full-screen controls into PiP.
-    Column(modifier.widthIn(max = 360.dp).background(Color(0xFF181818).copy(alpha = .97f), RoundedCornerShape(8.dp)).padding(16.dp)) {
+    Column(modifier.widthIn(max = 360.dp).background(platformDesign.surfaceColor(Color(0xFF181818)).copy(alpha = .97f), RoundedCornerShape(platformDesign.corner(8.dp))).padding(16.dp)) {
         Text("Up next", color = Color.Gray, fontSize = 12.sp)
         Text(state.nextEpisode?.title.orEmpty(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onWatchCredits, modifier = Modifier.testTag("watch_credits_button")) { Text("Watch credits", color = Color.White) }
-            Button(onClick = { if (!triggered) { triggered = true; onNext() } }, shape = RoundedCornerShape(4.dp),
+            Button(onClick = { if (!triggered) { triggered = true; onNext() } }, shape = RoundedCornerShape(platformDesign.corner(4.dp)),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black), modifier = Modifier.testTag("next_episode_button")) {
                 Text(if (autoPlay) "Play in $remaining" else "Play next", fontWeight = FontWeight.Bold)
             }
@@ -64,6 +65,7 @@ internal fun PostPlayOverlay(
     onNext: () -> Unit, onRetryNext: () -> Unit, onRecommendation: (MediaItem) -> Unit,
     onRating: (String) -> Unit, modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Column(modifier.fillMaxSize().background(Color.Black.copy(alpha = .95f)).padding(horizontal = 32.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.Center) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -76,7 +78,7 @@ internal fun PostPlayOverlay(
             NetflixRatingAction(onRatingSelect = onRating)
         }
         Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onReplay, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black), shape = RoundedCornerShape(4.dp), modifier = Modifier.testTag("replay_button")) {
+            Button(onReplay, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black), shape = RoundedCornerShape(platformDesign.corner(4.dp)), modifier = Modifier.testTag("replay_button")) {
                 Icon(Icons.Default.PlayArrow, null); Text("Watch again", fontWeight = FontWeight.Bold)
             }
             if (state.nextEpisode != null) TextButton(onNext) { Text("Next episode", color = Color.White) }
@@ -88,7 +90,7 @@ internal fun PostPlayOverlay(
             Text("Your next watch", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(recommendations, key = { "${it.type}:${it.id}" }) { item ->
-                    Row(Modifier.width(220.dp).height(92.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF222222)).clickable { onRecommendation(item) }.testTag("post_play_${item.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(220.dp).height(92.dp).clip(RoundedCornerShape(platformDesign.corner(6.dp))).background(platformDesign.surfaceColor(Color(0xFF222222))).clickable { onRecommendation(item) }.testTag("post_play_${item.id}"), verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(item.posterUrl ?: item.backdropUrl ?: item.bannerDrawableRes, item.title, contentScale = ContentScale.Crop, modifier = Modifier.width(64.dp).fillMaxHeight())
                         Text(item.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(10.dp))
                     }

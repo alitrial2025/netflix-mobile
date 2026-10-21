@@ -139,6 +139,7 @@ fun ClipsScreen(
     spatialAudioEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var clipsMode by remember { mutableStateOf(ClipsMode.VERTICAL_FEED) }
     val clipItems = remember {
         (CatalogData.getTrending() + CatalogData.getComingSoon()).distinctBy { "${it.type}:${it.id}" }
@@ -147,7 +148,7 @@ fun ClipsScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .testTag("clips_screen")
     ) {
         if (!streamingAllowed) {
@@ -453,6 +454,7 @@ private fun TikTokClipItemView(
     onMediaClick: () -> Unit,
     onPlaybackRequested: (Boolean) -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     // Double tap heart animation state
     var showHeartAnimation by remember { mutableStateOf(false) }
     var showPlayPauseControls by remember { mutableStateOf(false) }
@@ -560,7 +562,7 @@ private fun TikTokClipItemView(
             Icon(
                 imageVector = Icons.Default.Favorite,
                 contentDescription = "Liked",
-                tint = NetflixRed,
+                tint = platformDesign.accent,
                 modifier = Modifier.size(110.dp)
             )
         }
@@ -628,6 +630,7 @@ internal fun ClipDiscoveryOverlay(
     isLiked: Boolean = false,
     onToggleLike: () -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Box(modifier) {
         Column(
             modifier = Modifier
@@ -727,7 +730,7 @@ internal fun ClipDiscoveryOverlay(
                 modifier = Modifier
                     .size(60.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF252525))
+                    .background(platformDesign.surfaceColor(Color(0xFF252525)))
                     .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape)
                     .clickable(role = Role.Button, onClick = onMediaClick)
                     .testTag("clip_disc_btn")
@@ -1028,12 +1031,13 @@ private fun Top10RankCard(
     onClick: () -> Unit,
     onPlay: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(NetflixCardBg)
-            .border(1.dp, NetflixBorderGray, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(platformDesign.corner(10.dp)))
+            .background(platformDesign.raised)
+            .border(1.dp, platformDesign.outline, RoundedCornerShape(platformDesign.corner(10.dp)))
             .clickable { onClick() }
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1046,7 +1050,7 @@ private fun Top10RankCard(
         ) {
             Text(
                 text = "#$rank",
-                color = NetflixRed,
+                color = platformDesign.accent,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Black
             )
@@ -1054,7 +1058,7 @@ private fun Top10RankCard(
             Box(
                 modifier = Modifier
                     .size(width = 80.dp, height = 48.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
                     .background(Color.Black)
             ) {
                 AsyncImage(

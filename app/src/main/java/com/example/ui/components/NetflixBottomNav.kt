@@ -47,6 +47,11 @@ fun NetflixBottomNav(
     isClipsAllowed: Boolean = false,
     ambientColorProvider: () -> Color = { Color.Black }
 ) {
+    val design = com.example.ui.theme.LocalPlatformDesign.current
+    if (!design.originalLayout) {
+        PlatformBottomNavigation(selectedTab, activeProfile, onTabSelected, modifier, isClipsAllowed)
+        return
+    }
     val tabs = remember(isClipsAllowed) {
         if (isClipsAllowed) listOf(NavigationTab.HOME, NavigationTab.CLIPS, NavigationTab.SEARCH)
         else listOf(NavigationTab.HOME, NavigationTab.SEARCH)

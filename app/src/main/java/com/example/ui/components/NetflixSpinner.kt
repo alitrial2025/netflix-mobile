@@ -28,6 +28,8 @@ fun NetflixSpinner(
     color: Color = Color(0xFFE50914),
     percentage: Int? = null
 ) {
+    val design = com.example.ui.theme.LocalPlatformDesign.current
+    val spinnerColor = if (!design.originalLayout && color == Color(0xFFE50914)) design.accent else color
     val infiniteTransition = rememberInfiniteTransition(label = "netflixSpinner")
     val spinnerRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -59,7 +61,7 @@ fun NetflixSpinner(
             withTransform({
                 scale(scaleX, scaleY, pivot = Offset.Zero)
             }) {
-                drawPath(pathSpinner, color)
+                drawPath(pathSpinner, spinnerColor)
             }
         }
 

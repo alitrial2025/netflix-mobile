@@ -94,6 +94,7 @@ fun ProfilePickerSheet(
     onUpgradePlan: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
     var isManageMode by remember { mutableStateOf(false) }
     var lockedProfileToUnlock by remember { mutableStateOf<UserProfile?>(null) }
@@ -105,7 +106,7 @@ fun ProfilePickerSheet(
     val imageModel = com.example.ui.components.posterModel(featuredMedia)
     androidx.activity.compose.BackHandler { if (isManageMode) isManageMode = false else onDismiss() }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(platformDesign.background)) {
         val footerHeight = (maxHeight * .35f).coerceIn(300.dp, 390.dp)
         if (imageModel != null) {
             AsyncImage(model = imageModel, contentDescription = featuredMedia?.title,
@@ -131,7 +132,7 @@ fun ProfilePickerSheet(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("TOP\n10", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black,
                             lineHeight = 10.sp, textAlign = TextAlign.Center,
-                            modifier = Modifier.background(NetflixRed, RoundedCornerShape(2.dp)).padding(3.dp))
+                            modifier = Modifier.background(platformDesign.accent, RoundedCornerShape(2.dp)).padding(3.dp))
                         Text("No. $rank in ${if (media.type == com.example.data.model.MediaType.TV_SHOW) "Series" else "Films"} Today",
                             color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
@@ -242,7 +243,7 @@ fun ProfilePickerSheet(
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = NetflixRed,
+                                tint = platformDesign.accent,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -276,7 +277,7 @@ fun ProfilePickerSheet(
                                 Box(
                                     modifier = Modifier
                                         .size(48.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(RoundedCornerShape(platformDesign.corner(10.dp)))
                                         .background(
                                             if (isFilled) Color.White.copy(alpha = 0.15f)
                                             else Color.White.copy(alpha = 0.05f)
@@ -284,11 +285,11 @@ fun ProfilePickerSheet(
                                         .border(
                                             width = if (isFilled) 2.dp else 1.dp,
                                             color = when {
-                                                pinError != null -> NetflixRed
+                                                pinError != null -> platformDesign.accent
                                                 isFilled -> Color.White
                                                 else -> Color.White.copy(alpha = 0.2f)
                                             },
-                                            shape = RoundedCornerShape(10.dp)
+                                            shape = RoundedCornerShape(platformDesign.corner(10.dp))
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -297,7 +298,7 @@ fun ProfilePickerSheet(
                                             modifier = Modifier
                                                 .size(14.dp)
                                                 .clip(CircleShape)
-                                                .background(if (pinError != null) NetflixRed else Color.White)
+                                                .background(if (pinError != null) platformDesign.accent else Color.White)
                                         )
                                     }
                                 }
@@ -329,7 +330,7 @@ fun ProfilePickerSheet(
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = pinError!!,
-                                color = NetflixRed,
+                                color = platformDesign.accent,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 textAlign = TextAlign.Center
@@ -358,10 +359,10 @@ fun ProfilePickerSheet(
                                 onClick = { unlockProfile() },
                                 enabled = enteredPin.length == 4,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = NetflixRed,
-                                    contentColor = Color.White
+                                    containerColor = platformDesign.accent,
+                                    contentColor = platformDesign.onAccent
                                 ),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(platformDesign.corner(8.dp)),
                                 modifier = Modifier.weight(1f).testTag("profile_pin_unlock")
                             ) {
                                 Text(text = "UNLOCK", fontWeight = FontWeight.Bold)

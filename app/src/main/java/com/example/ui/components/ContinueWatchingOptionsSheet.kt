@@ -74,6 +74,7 @@ fun ContinueWatchingOptionsSheet(
     onLikeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
 
     Box(
@@ -121,7 +122,7 @@ fun ContinueWatchingOptionsSheet(
                 Box(
                     modifier = Modifier
                         .size(width = 46.dp, height = 66.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                         .background(Color(0xFF2B2B2B))
                 ) {
                     if (media.posterUrl != null || media.bannerDrawableRes != null) {
@@ -223,7 +224,7 @@ fun ContinueWatchingOptionsSheet(
                 icon = Icons.Outlined.Cancel,
                 title = "Remove from row",
                 subtitle = "Hide from Continue Watching list",
-                iconTint = NetflixRed,
+                iconTint = platformDesign.accent,
                 onClick = onRemoveFromRowClick,
                 testTag = "option_remove_from_row"
             )

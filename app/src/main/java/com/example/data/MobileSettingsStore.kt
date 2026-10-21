@@ -2,10 +2,10 @@ package com.example.data
 
 import android.content.SharedPreferences
 
-enum class MobileSetting(val key: String) {
+enum class MobileSetting(val key: String, val defaultValue: Boolean = true) {
     WIFI_ONLY_DOWNLOADS("pref_wifi_only_downloads"), HIGH_QUALITY("pref_high_quality"),
     AUTOPLAY_NEXT("pref_autoplay_next"), AUTOPLAY_PREVIEWS("pref_autoplay_previews"),
-    GLASSY_THEME("pref_glassy_theme"), SPATIAL_AUDIO("pref_spatial_audio")
+    GLASSY_THEME("pref_glassy_theme"), PLATFORMS("pref_platforms", false), SPATIAL_AUDIO("pref_spatial_audio")
 }
 
 enum class CellularDataMode(val label: String) {
@@ -18,8 +18,22 @@ enum class CellularDataMode(val label: String) {
 }
 
 class MobileSettingsStore(private val prefs: SharedPreferences) {
-    fun get(setting: MobileSetting) = prefs.getBoolean(setting.key, true)
+    fun get(setting: MobileSetting) = prefs.getBoolean(setting.key, setting.defaultValue)
     fun set(setting: MobileSetting, value: Boolean) { prefs.edit().putBoolean(setting.key, value).apply() }
+    var selectedPlatform: com.example.data.model.PlatformAppearance
+        get() = com.example.data.model.PlatformAppearance.fromKey(prefs.getString("pref_platform_style", null))
+        set(value) { prefs.edit().putString("pref_platform_style", value.key).apply() }
+    val effectivePlatform: com.example.data.model.PlatformAppearance
+        get() = com.example.data.model.PlatformAppearance.effective(get(MobileSetting.PLATFORMS), selectedPlatform)
+    fun setPlatformsEnabled(enabled: Boolean, currentCategory: String? = null) {
+        val selected = com.example.data.model.PlatformAppearance.fromCategory(currentCategory)
+        prefs.edit().putBoolean(MobileSetting.PLATFORMS.key, enabled).apply {
+            if (enabled && selected != null) putString("pref_platform_style", selected.key)
+        }.apply()
+    }
+    fun selectPlatformCategory(label: String?) {
+        if (get(MobileSetting.PLATFORMS)) com.example.data.model.PlatformAppearance.fromCategory(label)?.let { selectedPlatform = it }
+    }
     var cellularDataMode: CellularDataMode
         get() = CellularDataMode.fromLabel(prefs.getString("pref_cellular_data", null).orEmpty())
         set(value) { prefs.edit().putString("pref_cellular_data", value.label).apply() }

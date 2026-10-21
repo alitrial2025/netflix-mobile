@@ -79,6 +79,7 @@ fun NetflixTopBar(
     scrollFractionProvider: () -> Float = { 0f },
     onCastClick: () -> Unit = {}
 ) {
+    val design = com.example.ui.theme.LocalPlatformDesign.current
     var showCategoriesDropdown by remember { mutableStateOf(false) }
     val isFilterActive = currentCategory != CategoryFilter.ALL || selectedGenre != null
 
@@ -87,6 +88,8 @@ fun NetflixTopBar(
             .fillMaxWidth()
             .drawBehind {
                 val fraction = scrollFractionProvider().coerceIn(0f, 1f)
+                if (!design.originalLayout && design.appearance != com.example.data.model.PlatformAppearance.APPLE)
+                    drawRect(design.background)
                 drawRect(
                     Brush.verticalGradient(
                         listOf(
@@ -99,7 +102,9 @@ fun NetflixTopBar(
             .statusBarsPadding()
             .padding(top = 4.dp, bottom = 6.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        if (!design.originalLayout) PlatformHomeHeader(
+            { onCategorySelected(CategoryFilter.ALL, null) }, onCastClick, onDownloadsClick, onNotificationsClick, unreadNotificationCount)
+        else Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             GlassPanel(Modifier.weight(1f, fill = false).heightIn(min = 48.dp).testTag("top_bar_brand_glass")) {
             Row(Modifier.heightIn(min = 48.dp)
@@ -245,7 +250,7 @@ fun NetflixTopBar(
                             onDismissRequest = { showCategoriesDropdown = false },
                             modifier = Modifier.width(248.dp).heightIn(max = 360.dp),
                             shape = RoundedCornerShape(16.dp),
-                            containerColor = Color(0xFF242226),
+                            containerColor = design.surfaceColor(Color(0xFF242226)),
                             tonalElevation = 0.dp
                         ) {
                             val typeFilter = currentCategory.takeIf {
@@ -299,7 +304,11 @@ private fun CategoryPill(
     testTag: String = "category_pill_${label.lowercase().replace(" ", "_").replace("&", "and")}",
     endShape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(13.dp)
 ) {
-    val shape = endShape
+    val design = com.example.ui.theme.LocalPlatformDesign.current
+    val shape = if (design.originalLayout) endShape else RoundedCornerShape(design.controlRadius)
+    val filled = isSelected && design.appearance !in setOf(com.example.data.model.PlatformAppearance.PRIME,
+        com.example.data.model.PlatformAppearance.DISNEY, com.example.data.model.PlatformAppearance.HOTSTAR)
+    val chipText = if (filled && !design.originalLayout) design.onAccent else Color.White
     Box(
         Modifier.heightIn(min = 48.dp).clip(shape)
             .clickable(role = Role.Button, onClick = onClick)
@@ -311,22 +320,24 @@ private fun CategoryPill(
         contentAlignment = Alignment.Center
     ) {
         Row(
-            Modifier.height(40.dp).referenceGlass(shape, isSelected)
+            Modifier.height(40.dp).then(if (design.originalLayout) Modifier.referenceGlass(shape, isSelected)
+                else Modifier.clip(shape).background(if (filled) design.accent else design.surface.copy(alpha = .94f))
+                    .border(.7.dp, if (isSelected) design.accent else design.outline, shape))
                 .padding(horizontal = if (label.isEmpty()) 14.dp else 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             if (leadingIcon != null) {
-                Icon(leadingIcon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(leadingIcon, null, tint = chipText, modifier = Modifier.size(20.dp))
                 if (label.isNotEmpty()) Spacer(Modifier.width(5.dp))
             }
             if (label.isNotEmpty()) {
-                Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(label, color = chipText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
             if (trailingIcon != null) {
                 Spacer(Modifier.width(4.dp))
                 Icon(
-                    trailingIcon, null, tint = Color.White.copy(alpha = .90f),
+                    trailingIcon, null, tint = chipText.copy(alpha = .90f),
                     modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = trailingIconRotation }
                 )
             }

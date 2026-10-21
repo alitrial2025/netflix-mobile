@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            NetflixTheme {
+            com.example.ui.theme.MobileAppTheme {
                 com.example.update.UpdateGateHost {
                 val viewModel: NetflixViewModel = viewModel()
                 viewModelInstance = viewModel
@@ -155,6 +155,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun NetflixApp(viewModel: NetflixViewModel) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val categoryFilter by viewModel.categoryFilter.collectAsStateWithLifecycle()
     val selectedCategoryGenre by viewModel.selectedCategoryGenre.collectAsStateWithLifecycle()
@@ -199,6 +200,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val allocatedStorageGb by viewModel.allocatedStorageGb.collectAsStateWithLifecycle()
     val isWifiOnlyEnabled by viewModel.isWifiOnlyEnabled.collectAsStateWithLifecycle()
     val useGlassyTheme by viewModel.useGlassyTheme.collectAsStateWithLifecycle()
+    val platformsEnabled by viewModel.platformsEnabled.collectAsStateWithLifecycle()
     val isHighQualityEnabled by viewModel.isHighQualityEnabled.collectAsStateWithLifecycle()
     val isAutoPlayNextEnabled by viewModel.isAutoPlayNextEnabled.collectAsStateWithLifecycle()
     val isAutoPlayPreviewsEnabled by viewModel.isAutoPlayPreviewsEnabled.collectAsStateWithLifecycle()
@@ -305,7 +307,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .nestedScroll(glassTheme.scrollConnection)
-            .background(NetflixBlack)
+            .background(platformDesign.background)
     ) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -371,6 +373,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                     HomeScreen(
                                         catalogMedia = homeCatalog,
                                         personalizedMedia = personalizedMedia,
+                                        watchlistIds = watchlist.map { it.id }.toSet(),
                                         userSubscription = userSubscription,
                                         reminders = reminders,
                                         onToggleReminder = stableOnToggleReminder,
@@ -817,6 +820,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                 smartDownloadsEnabled = isSmartDownloadsEnabled && userSubscription.isSmartNextEpisodeAllowed,
                 wifiOnlyEnabled = isWifiOnlyEnabled,
                 highQualityEnabled = isHighQualityEnabled,
+                platformsEnabled = platformsEnabled,
+                onTogglePlatforms = viewModel::setPlatformsEnabled,
                 glassyThemeEnabled = useGlassyTheme,
                 onToggleGlassyTheme = viewModel::setGlassyTheme,
                 autoPlayNextEnabled = isAutoPlayNextEnabled && activeProfile.autoplayNext,
@@ -943,7 +948,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(NetflixBlack),
+                    .background(platformDesign.background),
                 contentAlignment = Alignment.Center
             ) {
                 NetflixSpinner(
@@ -987,7 +992,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
         if (showTrailerEndPrompt) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { viewModel.dismissTrailerEndPrompt() },
-                containerColor = Color(0xFF1A1A1A),
+                containerColor = platformDesign.surfaceColor(Color(0xFF1A1A1A)),
                 titleContentColor = Color.White,
                 textContentColor = Color.White,
                 title = { androidx.compose.material3.Text("Trailer Ended", color = Color.White) },
@@ -1004,10 +1009,10 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                             viewModel.openAuthScreen(true)
                         },
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = com.example.ui.theme.NetflixRed
+                            containerColor = platformDesign.accent, contentColor = platformDesign.onAccent
                         )
                     ) {
-                        androidx.compose.material3.Text("Sign In / Sign Up", color = Color.White)
+                        androidx.compose.material3.Text("Sign In / Sign Up", color = platformDesign.onAccent)
                     }
                 },
                 dismissButton = {

@@ -88,6 +88,7 @@ fun HomeScreen(
     onRetryCategory: () -> Unit = {},
     onClearCategory: () -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val filtering = selectedGenre != null || categoryFilter == CategoryFilter.TV_SHOWS || categoryFilter == CategoryFilter.MOVIES
     val homeCatalog = remember(catalogMedia, categoryFilter, selectedGenre, catalogIsScoped) {
         catalogMedia.filter { media ->
@@ -121,7 +122,7 @@ fun HomeScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(NetflixBlack),
+                .background(platformDesign.background),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
@@ -149,8 +150,8 @@ fun HomeScreen(
         return
     }
 
-    LaunchedEffect(heroMedia.id, heroMedia.type, artworkNetworkAvailable) {
-        if (artworkNetworkAvailable) onHeroVisible(heroMedia)
+    LaunchedEffect(heroMedia.id, heroMedia.type, artworkNetworkAvailable, platformDesign.originalLayout) {
+        if (artworkNetworkAvailable && platformDesign.originalLayout) onHeroVisible(heroMedia)
     }
 
     // Extracted dynamic background colors from hero poster
@@ -160,12 +161,12 @@ fun HomeScreen(
     val defaultTop = remember(heroMedia.id) { Color(0xFF3D3E32) }
     val defaultBottom = remember(heroMedia.id) { Color(0xFF20211A) }
 
-    val currentTopColor = extractedTopColor ?: defaultTop
-    val currentBottomColor = extractedBottomColor ?: defaultBottom
+    val currentTopColor = if (platformDesign.originalLayout) extractedTopColor ?: defaultTop else platformDesign.background
+    val currentBottomColor = if (platformDesign.originalLayout) extractedBottomColor ?: defaultBottom else platformDesign.background
     val showGames = games.isNotEmpty() && userSubscription.isGamesAllowed && categoryFilter == CategoryFilter.ALL && selectedGenre == null
 
     // Ambient color propagation for bottom navigation bar blend (called once on settle, not per-frame)
-    LaunchedEffect(heroMedia.id, extractedBottomColor) {
+    LaunchedEffect(heroMedia.id, extractedBottomColor, platformDesign) {
         onAmbientColorChange(currentBottomColor)
     }
 
@@ -191,7 +192,9 @@ fun HomeScreen(
     val cinematic = viewportWidthDp >= 600f || viewportWidthDp > viewportHeightDp
     val cinematicHeight = minOf(viewportWidthDp * 9f / 16f, viewportHeightDp * .76f)
         .coerceAtLeast(minOf(280f, viewportHeightDp * .76f)).dp
-    val railCardWidth = if (cinematic) (viewportWidthDp / 6.2f).dp.coerceIn(100.dp, 180.dp)
+    val railCardWidth = if (platformDesign.wideCards) {
+        (viewportWidthDp / if (cinematic) 3.2f else 1.6f).dp.coerceIn(180.dp, 300.dp)
+    } else if (cinematic) (viewportWidthDp / 6.2f).dp.coerceIn(100.dp, 180.dp)
         else ((viewportWidthDp - 48) / 3.35f).dp.coerceAtLeast(92.dp)
 
     val gradientEndPx = remember(heroCardHeight, density) {
@@ -200,7 +203,7 @@ fun HomeScreen(
 
     // Cache categorized rows for performance and consistency (Offloaded to Dispatchers.Default to prevent UI thread lag)
     val sectionState = androidx.compose.runtime.key(categoryFilter, selectedGenre) { produceState(emptyList<MediaSection>(), homeCatalog, personalizedMedia,
-        categoryFilter, selectedGenre, activeProfile.name, railCardWidth) {
+        categoryFilter, selectedGenre, activeProfile.name, railCardWidth, platformDesign) {
         value = withContext(Dispatchers.Default) {
             val rawSections = mutableListOf<Triple<String, String, List<MediaItem>>>()
             val movies = homeCatalog.filter { it.type == MediaType.MOVIE && !it.isComingSoon }
@@ -387,7 +390,7 @@ fun HomeScreen(
                     items = items,
                     isTop10 = isTop10,
                     cardWidth = railCardWidth,
-                    cardHeight = railCardWidth * 1.5f
+                    cardHeight = railCardWidth / platformDesign.cardAspectRatio
                 )
             }
         }
@@ -423,20 +426,20 @@ fun HomeScreen(
     val isMediaLocked = remember(userSubscription) {
         { media: MediaItem -> userSubscription.isMediaLocked(media.id, media.title) }
     }
-    Box(modifier = modifier.fillMaxSize().background(Color.Black).onSizeChanged {
+    Box(modifier = modifier.fillMaxSize().background(platformDesign.background).onSizeChanged {
         val measuredHeight = it.height / density.density
         val measuredWidth = it.width / density.density
         if (measuredHeight > 0f && measuredHeight != viewportHeightDp) viewportHeightDp = measuredHeight
         if (measuredWidth > 0f && measuredWidth != viewportWidthDp) viewportWidthDp = measuredWidth
     }) {
         // A separate draw layer: scrolling this shader cannot invalidate the row subtree.
-        HomeBackdrop(if (cinematic) Color.Black else currentTopColor,
-            if (cinematic) Color.Black else currentBottomColor, gradientEndPx, { backdropOffset.value })
+        HomeBackdrop(if (cinematic) platformDesign.background else currentTopColor,
+            if (cinematic) platformDesign.background else currentBottomColor, gradientEndPx, { backdropOffset.value })
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().testTag("home_vertical_list"), contentPadding = PaddingValues(bottom = com.example.ui.components.navigationContentClearance())) {
             item(key = "hero", contentType = "hero") {
             Column(Modifier.onSizeChanged { setItemHeight("hero", it.height) }) {
             // Top Spacing matching status bar + NetflixTopBar height with breathing room
-            if (!cinematic) {
+            if (!cinematic && platformDesign.originalLayout) {
                 Spacer(modifier = Modifier.statusBarsPadding())
                 Spacer(modifier = Modifier.height(116.dp))
             }
@@ -459,7 +462,23 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                if (cinematic) {
+                if (!platformDesign.originalLayout) {
+                    val fraction = when (platformDesign.appearance) {
+                        com.example.data.model.PlatformAppearance.PRIME -> .54f
+                        com.example.data.model.PlatformAppearance.HOTSTAR -> .80f
+                        com.example.data.model.PlatformAppearance.APPLE -> .78f
+                        else -> .74f
+                    }
+                    val candidates = remember(homeCatalog, heroMedia.id, heroMedia.type) {
+                        (listOf(heroMedia) + homeCatalog.filterNot { it.isComingSoon }).distinctBy { it.type to it.id }.take(5)
+                    }
+                    com.example.ui.components.PlatformHeroCarousel(candidates, "$categoryFilter:$selectedGenre",
+                        height = if (cinematic) cinematicHeight else (viewportHeightDp * fraction).dp.coerceAtLeast(420.dp),
+                        wide = cinematic, networkAvailable = artworkNetworkAvailable,
+                        inList = { item -> watchlistIds?.contains(item.id) ?: isWatchlistContains(item.id) },
+                        isLocked = { userSubscription.isMediaLocked(it.id, it.title) }, onPlay = onPlayClick,
+                        onList = onWatchlistToggle, onInfo = onMediaClick, onVisible = onHeroVisible)
+                } else if (cinematic) {
                     CinematicHeroBanner(
                         media = heroMedia,
                         isInWatchlist = isInWatchlist,

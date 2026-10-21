@@ -108,6 +108,7 @@ fun GamesScreen(
     scrollState: ScrollState = rememberScrollState(),
     listState: LazyListState = rememberLazyListState()
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     if (games.isEmpty()) return
 
     val heroGame = games.first()
@@ -197,7 +198,7 @@ fun GamesScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(platformDesign.background)
             .drawWithCache {
                 val gradient = Brush.verticalGradient(
                     colorStops = arrayOf(
@@ -343,6 +344,7 @@ fun GameHeroBanner(
     parallaxOffsetProvider: () -> Float = { 0f },
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
 
     val animatedCardBottomBg by animateColorAsState(
@@ -431,7 +433,7 @@ fun GameHeroBanner(
                                 listOf(
                                     Color(0xFF1E1B2E),
                                     Color(0xFF14121F),
-                                    NetflixBlack
+                                    platformDesign.background
                                 )
                             )
                         )
@@ -579,7 +581,7 @@ fun GameHeroBanner(
                             containerColor = Color.White,
                             contentColor = Color.Black
                         ),
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(platformDesign.corner(6.dp)),
                         modifier = Modifier
                             .height(40.dp)
                             .weight(1f)
@@ -617,12 +619,12 @@ fun GameHeroBanner(
                         modifier = Modifier
                             .height(40.dp)
                             .weight(1f)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
                             .background(Color(0xFF212121).copy(alpha = 0.80f))
                             .border(
                                 width = 1.dp,
                                 brush = listGlassBorder,
-                                shape = RoundedCornerShape(6.dp)
+                                shape = RoundedCornerShape(platformDesign.corner(6.dp))
                             )
                             .clickable { onDetailsClick() }
                             .testTag("games_hero_details_button"),
@@ -692,8 +694,9 @@ fun Top10GamePosterCard(
     game: GameItem,
     onClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(6.dp)
+    val cardShape = RoundedCornerShape(platformDesign.corner(6.dp))
 
     Box(
         modifier = Modifier
@@ -800,8 +803,9 @@ fun GamePosterCard(
     game: GameItem,
     onClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(6.dp)
+    val cardShape = RoundedCornerShape(platformDesign.corner(6.dp))
 
     Column(
         modifier = Modifier
@@ -883,13 +887,14 @@ fun GameDetailSheet(
     game: GameItem,
     onDismiss: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF141414),
+        containerColor = platformDesign.surfaceColor(Color(0xFF141414)),
         dragHandle = null
     ) {
         Column(
@@ -927,7 +932,7 @@ fun GameDetailSheet(
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color(0xFF141414)),
+                                colors = listOf(Color.Transparent, platformDesign.surfaceColor(Color(0xFF141414))),
                                 startY = 300f
                             )
                         )
@@ -988,7 +993,7 @@ fun GameDetailSheet(
                 ) {
                     Box(
                         modifier = Modifier
-                            .background(Color(0xFF2E2E38), RoundedCornerShape(3.dp))
+                            .background(Color(0xFF2E2E38), RoundedCornerShape(platformDesign.corner(3.dp)))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -1033,19 +1038,19 @@ fun GameDetailSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(46.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                    shape = RoundedCornerShape(6.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+                    shape = RoundedCornerShape(platformDesign.corner(6.dp))
                 ) {
                     Icon(
                         imageVector = Icons.Default.GetApp,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = platformDesign.onAccent,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Get Game",
-                        color = Color.White,
+                        color = platformDesign.onAccent,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1067,7 +1072,7 @@ fun GameDetailSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1E1D24), RoundedCornerShape(8.dp))
+                        .background(Color(0xFF1E1D24), RoundedCornerShape(platformDesign.corner(8.dp)))
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceAround

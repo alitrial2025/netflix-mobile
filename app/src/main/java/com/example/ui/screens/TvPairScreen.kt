@@ -47,11 +47,12 @@ fun TvPairScreen(
     onOpenSubscription: () -> Unit = {},
     onBack: () -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxSize(), color = NetflixBlack) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Surface(modifier = Modifier.fillMaxSize(), color = platformDesign.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(NetflixBlack)
+                .background(platformDesign.background)
                 .statusBarsPadding()
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -60,7 +61,7 @@ fun TvPairScreen(
             Icon(
                 imageVector = Icons.Default.Tv,
                 contentDescription = null,
-                tint = NetflixRed
+                tint = platformDesign.accent
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text(

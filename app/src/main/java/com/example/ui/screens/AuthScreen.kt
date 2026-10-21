@@ -125,6 +125,7 @@ fun AuthScreen(
     onClose: () -> Unit,
     onOpenTvPair: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val pages = remember {
         listOf(
             OnboardingPageData(
@@ -173,7 +174,7 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .testTag("netflix_onboarding_landing_screen")
     ) {
         // 1. Cinematic Background Poster Wall Image
@@ -261,7 +262,7 @@ fun AuthScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                             .clickable { showPrivacySheet = true }
                             .padding(horizontal = 6.dp, vertical = 6.dp)
                             .testTag("onboarding_privacy_btn")
@@ -275,7 +276,7 @@ fun AuthScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                             .clickable { showFaqSheet = true }
                             .padding(horizontal = 6.dp, vertical = 6.dp)
                             .testTag("onboarding_faqs_btn")
@@ -289,7 +290,7 @@ fun AuthScreen(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                             .clickable { showHelpSheet = true }
                             .padding(horizontal = 6.dp, vertical = 6.dp)
                             .testTag("onboarding_help_btn")
@@ -298,8 +299,8 @@ fun AuthScreen(
                     // SIGN IN (Red / Dark Accent Pill)
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(NetflixRed)
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
+                            .background(platformDesign.accent)
                             .clickable {
                                 authModalInitialTab = 0
                                 showAuthModal = true
@@ -309,7 +310,7 @@ fun AuthScreen(
                     ) {
                         Text(
                             text = "SIGN IN",
-                            color = Color.White,
+                            color = platformDesign.onAccent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp
@@ -349,7 +350,7 @@ fun AuthScreen(
                         Icon(
                             imageVector = pageData.icon,
                             contentDescription = pageData.title,
-                            tint = NetflixRed,
+                            tint = platformDesign.accent,
                             modifier = Modifier.size(34.dp)
                         )
                     }
@@ -423,7 +424,7 @@ fun AuthScreen(
                             label = "dot_width"
                         )
                         val color by animateColorAsState(
-                            targetValue = if (isSelected) NetflixRed else Color.White.copy(alpha = 0.35f),
+                            targetValue = if (isSelected) platformDesign.accent else Color.White.copy(alpha = 0.35f),
                             animationSpec = tween(300),
                             label = "dot_color"
                         )
@@ -451,10 +452,10 @@ fun AuthScreen(
                         showAuthModal = true
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = NetflixRed,
-                        contentColor = Color.White
+                        containerColor = platformDesign.accent,
+                        contentColor = platformDesign.onAccent
                     ),
-                    shape = RoundedCornerShape(4.dp),
+                    shape = RoundedCornerShape(platformDesign.corner(4.dp)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
@@ -483,7 +484,7 @@ fun AuthScreen(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                             .clickable { onClose() }
                             .padding(vertical = 6.dp, horizontal = 8.dp)
                             .testTag("onboarding_browse_guest_btn")
@@ -493,7 +494,7 @@ fun AuthScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                             .clickable {
                                 onClose()
                                 onOpenTvPair()
@@ -527,7 +528,7 @@ fun AuthScreen(
         ModalBottomSheet(
             onDismissRequest = { if (!authRequestRunning) showAuthModal = false },
             sheetState = bottomSheetState,
-            containerColor = Color(0xFF141414),
+            containerColor = platformDesign.surfaceColor(Color(0xFF141414)),
             contentColor = Color.White,
             dragHandle = {
                 Box(
@@ -566,7 +567,7 @@ fun AuthScreen(
     if (showPrivacySheet) {
         ModalBottomSheet(
             onDismissRequest = { showPrivacySheet = false },
-            containerColor = Color(0xFF141414),
+            containerColor = platformDesign.surfaceColor(Color(0xFF141414)),
             contentColor = Color.White,
             dragHandle = {
                 Box(
@@ -592,7 +593,7 @@ fun AuthScreen(
                 showFaqSheet = false
                 showHelpSheet = false
             },
-            containerColor = Color(0xFF141414),
+            containerColor = platformDesign.surfaceColor(Color(0xFF141414)),
             contentColor = Color.White,
             dragHandle = {
                 Box(
@@ -627,6 +628,7 @@ private fun AuthModalContent(
     onClose: () -> Unit,
     onOpenTvPair: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var selectedTab by remember { mutableIntStateOf(initialTab) } // 0 = Sign In, 1 = Sign Up
     var emailInput by remember { mutableStateOf(currentEmail ?: "") }
     var passwordInput by remember { mutableStateOf("") }
@@ -678,15 +680,15 @@ private fun AuthModalContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF222222))
+                .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+                .background(platformDesign.surfaceColor(Color(0xFF222222)))
                 .padding(4.dp)
         ) {
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (selectedTab == 0) NetflixRed else Color.Transparent)
+                    .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                    .background(if (selectedTab == 0) platformDesign.accent else Color.Transparent)
                     .clickable(enabled = !isLoading) {
                         selectedTab = 0
                         errorMessage = null
@@ -705,8 +707,8 @@ private fun AuthModalContent(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (selectedTab == 1) NetflixRed else Color.Transparent)
+                    .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                    .background(if (selectedTab == 1) platformDesign.accent else Color.Transparent)
                     .clickable(enabled = !isLoading) {
                         selectedTab = 1
                         errorMessage = null
@@ -734,9 +736,9 @@ private fun AuthModalContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(NetflixRed.copy(alpha = 0.2f))
-                    .border(1.dp, NetflixRed, RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                    .background(platformDesign.accent.copy(alpha = 0.2f))
+                    .border(1.dp, platformDesign.accent, RoundedCornerShape(platformDesign.corner(6.dp)))
                     .padding(12.dp)
             ) {
                 Text(
@@ -772,11 +774,11 @@ private fun AuthModalContent(
                 imeAction = ImeAction.Next
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF262626),
-                unfocusedContainerColor = Color(0xFF262626),
-                focusedBorderColor = NetflixRed,
+                focusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                unfocusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                focusedBorderColor = platformDesign.accent,
                 unfocusedBorderColor = Color(0xFF404040),
-                focusedLabelColor = NetflixRed,
+                focusedLabelColor = platformDesign.accent,
                 unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
@@ -823,11 +825,11 @@ private fun AuthModalContent(
                 onDone = { focusManager.clearFocus() }
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF262626),
-                unfocusedContainerColor = Color(0xFF262626),
-                focusedBorderColor = NetflixRed,
+                focusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                unfocusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                focusedBorderColor = platformDesign.accent,
                 unfocusedBorderColor = Color(0xFF404040),
-                focusedLabelColor = NetflixRed,
+                focusedLabelColor = platformDesign.accent,
                 unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
@@ -865,11 +867,11 @@ private fun AuthModalContent(
                     onDone = { focusManager.clearFocus() }
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF262626),
-                    unfocusedContainerColor = Color(0xFF262626),
-                    focusedBorderColor = NetflixRed,
+                    focusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                    unfocusedContainerColor = platformDesign.surfaceColor(Color(0xFF262626)),
+                    focusedBorderColor = platformDesign.accent,
                     unfocusedBorderColor = Color(0xFF404040),
-                    focusedLabelColor = NetflixRed,
+                    focusedLabelColor = platformDesign.accent,
                     unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
@@ -920,21 +922,21 @@ private fun AuthModalContent(
                     onSignUp(emailInput.trim(), passwordInput, onSuccess, onError)
                 }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+            shape = RoundedCornerShape(platformDesign.corner(4.dp)),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
                 .testTag("auth_submit_button")
         ) {
             if (isLoading) {
-                NetflixSpinner(size = 24.dp, color = Color.White)
+                NetflixSpinner(size = 24.dp, color = platformDesign.onAccent)
             } else {
                 Text(
                     text = if (selectedTab == 0) "Sign In" else "Get Started",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = platformDesign.onAccent
                 )
             }
         }
@@ -945,8 +947,8 @@ private fun AuthModalContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFF222222))
+                .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                .background(platformDesign.surfaceColor(Color(0xFF222222)))
                 .clickable(enabled = !isLoading) { onOpenTvPair() }
                 .padding(vertical = 12.dp, horizontal = 16.dp),
             contentAlignment = Alignment.Center
@@ -955,7 +957,7 @@ private fun AuthModalContent(
                 Icon(
                     imageVector = Icons.Default.Tv,
                     contentDescription = null,
-                    tint = NetflixRed,
+                    tint = platformDesign.accent,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -977,7 +979,7 @@ private fun AuthModalContent(
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                 .clickable(enabled = !isLoading) { onClose() }
                 .padding(vertical = 6.dp, horizontal = 10.dp)
         )
@@ -989,6 +991,7 @@ private fun AuthModalContent(
 // ==========================================
 @Composable
 private fun PrivacySheetContent(onClose: () -> Unit) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val scrollState = rememberScrollState()
 
     Column(
@@ -1007,7 +1010,7 @@ private fun PrivacySheetContent(onClose: () -> Unit) {
                 Icon(
                     imageVector = Icons.Default.Security,
                     contentDescription = null,
-                    tint = NetflixRed,
+                    tint = platformDesign.accent,
                     modifier = Modifier.size(26.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1067,19 +1070,20 @@ private fun PrivacySheetContent(onClose: () -> Unit) {
 
         Button(
             onClick = onClose,
-            colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+            shape = RoundedCornerShape(platformDesign.corner(4.dp)),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text("Got It", fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Got It", fontWeight = FontWeight.Bold, color = platformDesign.onAccent)
         }
     }
 }
 
 @Composable
 private fun PrivacyBulletItem(icon: ImageVector, title: String, description: String) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1096,7 +1100,7 @@ private fun PrivacyBulletItem(icon: ImageVector, title: String, description: Str
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = NetflixRed,
+                tint = platformDesign.accent,
                 modifier = Modifier.size(20.dp)
             )
         }
@@ -1124,6 +1128,7 @@ private fun PrivacyBulletItem(icon: ImageVector, title: String, description: Str
 // ==========================================
 @Composable
 private fun FaqSheetContent(onClose: () -> Unit) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val scrollState = rememberScrollState()
 
     val faqs = remember {
@@ -1155,7 +1160,7 @@ private fun FaqSheetContent(onClose: () -> Unit) {
                 Icon(
                     imageVector = Icons.Default.QuestionAnswer,
                     contentDescription = null,
-                    tint = NetflixRed,
+                    tint = platformDesign.accent,
                     modifier = Modifier.size(26.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1185,8 +1190,8 @@ private fun FaqSheetContent(onClose: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF222222))
+                    .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                    .background(platformDesign.surfaceColor(Color(0xFF222222)))
                     .clickable {
                         expandedIndex = if (isExpanded) -1 else index
                     }
@@ -1224,7 +1229,7 @@ private fun FaqSheetContent(onClose: () -> Unit) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(1.dp)
-                                    .background(Color(0xFF333333))
+                                    .background(platformDesign.surfaceColor(Color(0xFF333333)))
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
@@ -1243,13 +1248,13 @@ private fun FaqSheetContent(onClose: () -> Unit) {
 
         Button(
             onClick = onClose,
-            colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+            shape = RoundedCornerShape(platformDesign.corner(4.dp)),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
+            Text("Done", fontWeight = FontWeight.Bold, color = platformDesign.onAccent)
         }
     }
 }

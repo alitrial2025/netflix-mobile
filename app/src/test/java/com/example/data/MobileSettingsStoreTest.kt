@@ -21,13 +21,39 @@ class MobileSettingsStoreTest {
         val prefs = ApplicationProvider.getApplicationContext<Application>().getSharedPreferences("settings-test", Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         val first = MobileSettingsStore(prefs)
-        MobileSetting.entries.forEach { assertTrue(first.get(it)); first.set(it, false) }
+        MobileSetting.entries.forEach { assertEquals(it.defaultValue, first.get(it)); first.set(it, false) }
         first.cellularDataMode = CellularDataMode.SAVE_DATA
         val restored = MobileSettingsStore(prefs)
         MobileSetting.entries.forEach { assertFalse(restored.get(it)) }
         assertEquals(CellularDataMode.SAVE_DATA, restored.cellularDataMode)
         prefs.edit().putString("pref_cellular_data", "invalid").commit()
         assertEquals(CellularDataMode.AUTOMATIC, MobileSettingsStore(prefs).cellularDataMode)
+    }
+
+    @Test fun platformAppearanceIsOptInPersistsAndOnlyServiceSelectionsChangeIt() {
+        val prefs = ApplicationProvider.getApplicationContext<Application>().getSharedPreferences("platform-settings-test", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val store = MobileSettingsStore(prefs)
+        val original = com.example.data.model.PlatformAppearance.ORIGINAL
+        assertFalse(store.get(MobileSetting.PLATFORMS))
+        store.selectPlatformCategory("Prime Video")
+        assertEquals(original, store.effectivePlatform)
+        assertEquals(original, store.selectedPlatform)
+        store.setPlatformsEnabled(true, "Prime Video")
+        assertEquals(com.example.data.model.PlatformAppearance.PRIME, store.effectivePlatform)
+        store.selectPlatformCategory("Dramas")
+        store.selectPlatformCategory(null)
+        assertEquals(com.example.data.model.PlatformAppearance.PRIME, store.effectivePlatform)
+        store.selectPlatformCategory("Disney+")
+        assertEquals(com.example.data.model.PlatformAppearance.DISNEY, MobileSettingsStore(prefs).effectivePlatform)
+        store.setPlatformsEnabled(false)
+        assertEquals(original, MobileSettingsStore(prefs).effectivePlatform)
+        store.setPlatformsEnabled(true)
+        assertEquals(com.example.data.model.PlatformAppearance.DISNEY, MobileSettingsStore(prefs).effectivePlatform)
+        store.selectPlatformCategory("Netflix")
+        assertEquals(com.example.data.model.PlatformAppearance.NETFLIX, store.effectivePlatform)
+        prefs.edit().putString("pref_platform_style", "unrecognized").commit()
+        assertEquals(original, store.effectivePlatform)
     }
 
     @Test fun cellularPoliciesEnforceWifiDataSavingAndMembershipResolutionLimits() {

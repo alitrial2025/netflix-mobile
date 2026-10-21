@@ -126,6 +126,7 @@ fun MyNetflixScreen(
     onPlayMoment: (SavedMoment) -> Unit = {},
     onRemoveMoment: (SavedMoment) -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var showAllMoments by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
     var showAllMyList by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
     var showAllLiked by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
@@ -148,25 +149,25 @@ fun MyNetflixScreen(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Delete all downloads?") },
             text = { Text("Downloaded movies and episodes will be removed from this device.") },
-            containerColor = Color(0xFF202020),
+            containerColor = platformDesign.surfaceColor(Color(0xFF202020)),
             titleContentColor = Color.White,
             textContentColor = Color(0xFFCCCCCC),
             confirmButton = {
                 TextButton(onClick = { showClearDialog = false; onClearAllDownloads() }) {
-                    Text("Delete all", color = NetflixRed)
+                    Text("Delete all", color = platformDesign.accent)
                 }
             },
             dismissButton = { TextButton(onClick = { showClearDialog = false }) { Text("Cancel", color = Color.White) } }
         )
     }
 
-    Box(modifier.fillMaxSize().background(Color(0xFF0B0B0B)).statusBarsPadding().testTag("my_netflix_screen")) {
+    Box(modifier.fillMaxSize().background(platformDesign.surfaceColor(Color(0xFF0B0B0B))).statusBarsPadding().testTag("my_netflix_screen")) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 78.dp, bottom = com.example.ui.components.navigationContentClearance())) {
 
         if (userSubscription.isGuest) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp)
-                    .clip(RoundedCornerShape(8.dp)).background(Color(0xFF211517))
+                    .clip(RoundedCornerShape(platformDesign.corner(8.dp))).background(Color(0xFF211517))
                     .padding(12.dp).testTag("my_netflix_guest_banner"),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -178,10 +179,10 @@ fun MyNetflixScreen(
                 }
                 Spacer(Modifier.width(10.dp))
                 Button(onClick = if (isAuthenticated) onOpenSubscription else onOpenAuth,
-                    colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                    shape = RoundedCornerShape(5.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+                    shape = RoundedCornerShape(platformDesign.corner(5.dp)),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(if (isAuthenticated) "View Plans" else "Sign In", color = Color.White,
+                    Text(if (isAuthenticated) "View Plans" else "Sign In", color = platformDesign.onAccent,
                         fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -213,7 +214,7 @@ fun MyNetflixScreen(
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.testTag("continue_watching_row")) {
                 items(continueWatchingList, key = { "${it.first.type}:${it.first.id}" }) { (media, progress) ->
-                    Column(Modifier.width(112.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF1B1B1B))) {
+                    Column(Modifier.width(112.dp).clip(RoundedCornerShape(platformDesign.corner(5.dp))).background(platformDesign.surfaceColor(Color(0xFF1B1B1B)))) {
                         Box(Modifier.fillMaxWidth().height(164.dp).clickable { onPlayClick(media) }.testTag("continue_card_${media.id}")) {
                             LibraryArtwork(media, Modifier.fillMaxSize())
                             Box(Modifier.align(Alignment.Center).size(42.dp).background(Color.Black.copy(alpha = .55f), CircleShape)
@@ -222,7 +223,7 @@ fun MyNetflixScreen(
                             }
                             LinearProgressIndicator(progress = {
                                 if (progress.totalSeconds > 0) (progress.positionSeconds.toFloat() / progress.totalSeconds).coerceIn(0f, 1f) else 0f
-                            }, color = NetflixRed, trackColor = Color(0xFF555555), modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp))
+                            }, color = platformDesign.accent, trackColor = Color(0xFF555555), modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp))
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             IconButton(onClick = { onMediaClick(media) }, modifier = Modifier.size(40.dp).testTag("continue_info_${media.id}")) {
@@ -258,8 +259,8 @@ fun MyNetflixScreen(
             LibraryHeading("Watch history")
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("watch_history_row")) {
                 items(watchHistory.distinctBy { it.type to it.mediaId }, key = { "${it.type}:${it.mediaId}" }) { item ->
-                    Column(Modifier.width(112.dp).clip(RoundedCornerShape(5.dp)).clickable { onHistoryClick(item) }.testTag("watch_history_${item.mediaId}")) {
-                        Box(Modifier.fillMaxWidth().height(164.dp).background(Color(0xFF202020)), contentAlignment = Alignment.Center) {
+                    Column(Modifier.width(112.dp).clip(RoundedCornerShape(platformDesign.corner(5.dp))).clickable { onHistoryClick(item) }.testTag("watch_history_${item.mediaId}")) {
+                        Box(Modifier.fillMaxWidth().height(164.dp).background(platformDesign.surfaceColor(Color(0xFF202020))), contentAlignment = Alignment.Center) {
                             if (item.posterUrl.isNotBlank()) AsyncImage(item.posterUrl, item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                             else Text(item.title, color = Color.White, textAlign = TextAlign.Center, maxLines = 3, modifier = Modifier.padding(8.dp))
                         }
@@ -300,7 +301,7 @@ fun MyNetflixScreen(
         ) {
             GlassPanel(Modifier.weight(1f)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                     .clickable {
                         if (isAuthenticated) onSwitchProfileClick()
                         else { onShowToast("Sign in to create and manage profiles."); onOpenAuth() }
@@ -331,7 +332,7 @@ fun MyNetflixScreen(
                 }
                 if (unreadCount > 0) {
                     Box(Modifier.align(Alignment.TopEnd).padding(top = 3.dp, end = 3.dp)
-                        .background(NetflixRed, CircleShape).padding(horizontal = 4.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
+                        .background(platformDesign.accent, CircleShape).padding(horizontal = 4.dp, vertical = 1.dp), contentAlignment = Alignment.Center) {
                         Text(if (unreadCount > 99) "99+" else "$unreadCount", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -345,10 +346,11 @@ fun MyNetflixScreen(
 
 @Composable
 private fun LibraryHeading(title: String, onSeeAll: (() -> Unit)? = null, seeAllTag: String = "") {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = Color.White, fontSize = 18.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (onSeeAll != null) {
-            Row(Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onSeeAll).padding(start = 8.dp, top = 8.dp, bottom = 8.dp).testTag(seeAllTag), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.clip(RoundedCornerShape(platformDesign.corner(4.dp))).clickable(onClick = onSeeAll).padding(start = 8.dp, top = 8.dp, bottom = 8.dp).testTag(seeAllTag), verticalAlignment = Alignment.CenterVertically) {
                 Text("See all", color = Color.White, fontSize = 13.sp)
                 Spacer(Modifier.width(5.dp))
                 Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = Color.White, modifier = Modifier.size(13.dp))
@@ -359,8 +361,9 @@ private fun LibraryHeading(title: String, onSeeAll: (() -> Unit)? = null, seeAll
 
 @Composable
 private fun MomentsEmptyState(onOpenClips: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(5.dp))
-        .background(Color(0xFF171717)).padding(16.dp)) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(platformDesign.corner(5.dp)))
+        .background(platformDesign.surfaceColor(Color(0xFF171717))).padding(16.dp)) {
         Text("Your favourite scenes, all together.", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text("Tap Save moment in the player to keep a scene here.", color = Color(0xFFAAAAAA), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         TextButton(onClick = onOpenClips, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("my_netflix_clips")) {
@@ -376,6 +379,7 @@ private fun LibraryPosterRail(
     title: String, media: List<MediaItem>, tag: String, onMediaClick: (MediaItem) -> Unit,
     onSeeAll: (() -> Unit)? = null, seeAllTag: String = "", emptyText: String = "", onExplore: (() -> Unit)? = null
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     LibraryHeading(title, if (media.isNotEmpty()) onSeeAll else null, seeAllTag)
     if (media.isEmpty()) {
         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -387,13 +391,13 @@ private fun LibraryPosterRail(
         }
     } else {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val cardWidth = ((maxWidth - 48.dp) / 3f).coerceIn(100.dp, 140.dp)
+            val cardWidth = if (platformDesign.wideCards) ((maxWidth - 48.dp) / 1.6f).coerceIn(180.dp, 280.dp) else ((maxWidth - 48.dp) / 3f).coerceIn(100.dp, 140.dp)
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag(tag)) {
                 items(media, key = { "${it.type}:${it.id}" }) { item ->
-                    Box(Modifier.width(cardWidth).height(cardWidth * 1.5f).clip(RoundedCornerShape(5.dp))
+                    Box(Modifier.width(cardWidth).height(cardWidth / platformDesign.cardAspectRatio).clip(RoundedCornerShape(platformDesign.corner(5.dp)))
                         .clickable { onMediaClick(item) }.testTag("${tag}_${item.id}")) {
-                        LibraryArtwork(item, Modifier.fillMaxSize())
-                        if (item.isOriginal) NetflixNLogo(size = 15.dp, modifier = Modifier.align(Alignment.TopStart).padding(4.dp))
+                        LibraryArtwork(item, Modifier.fillMaxSize(), landscape = platformDesign.wideCards)
+                        if (item.isOriginal && platformDesign.originalLayout) NetflixNLogo(size = 15.dp, modifier = Modifier.align(Alignment.TopStart).padding(4.dp))
                     }
                 }
             }
@@ -404,7 +408,8 @@ private fun LibraryPosterRail(
 
 @Composable
 private fun LibraryArtwork(media: MediaItem, modifier: Modifier = Modifier, landscape: Boolean = false) {
-    Box(modifier.background(Color(0xFF202020)), contentAlignment = Alignment.Center) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Box(modifier.background(platformDesign.surfaceColor(Color(0xFF202020))), contentAlignment = Alignment.Center) {
         val url = if (landscape) media.backdropUrl ?: media.posterUrl else media.posterUrl ?: media.backdropUrl
         when {
             !url.isNullOrBlank() -> AsyncImage(url, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -416,8 +421,9 @@ private fun LibraryArtwork(media: MediaItem, modifier: Modifier = Modifier, land
 
 @Composable
 private fun LibraryUtilityRow(title: String, subtitle: String, tag: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(6.dp))
-        .background(Color(0xFF171717)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 15.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+        .background(platformDesign.surfaceColor(Color(0xFF171717))).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 15.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
         icon(); Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -430,12 +436,13 @@ private fun LibraryUtilityRow(title: String, subtitle: String, tag: String, onCl
 
 @Composable
 private fun LibraryCollectionDialog(title: String, media: List<MediaItem>, onMediaClick: (MediaItem) -> Unit, onDismiss: () -> Unit, onRemove: ((MediaItem) -> Unit)? = null) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var filter by rememberSaveable { mutableStateOf(MyListFilter.ALL) }
     val filtered = remember(media, filter) {
         media.filter { filter == MyListFilter.ALL || (filter == MyListFilter.TV_SHOWS && it.type == MediaType.TV_SHOW) || (filter == MyListFilter.MOVIES && it.type == MediaType.MOVIE) }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF0B0B0B)).systemBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(platformDesign.surfaceColor(Color(0xFF0B0B0B))).systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close $title", tint = Color.White) }
@@ -449,8 +456,8 @@ private fun LibraryCollectionDialog(title: String, media: List<MediaItem>, onMed
             LazyVerticalGrid(columns = GridCells.Adaptive(100.dp), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(filtered, key = { "${it.type}:${it.id}" }) { item ->
                     Column {
-                        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(5.dp)).clickable { onDismiss(); onMediaClick(item) }) {
-                            LibraryArtwork(item, Modifier.fillMaxSize())
+                        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(platformDesign.corner(5.dp))).clickable { onDismiss(); onMediaClick(item) }) {
+                            LibraryArtwork(item, Modifier.fillMaxSize(), landscape = platformDesign.wideCards)
                         }
                         Text(item.title, color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                         if (onRemove != null) TextButton(onClick = { onRemove(item) }, contentPadding = PaddingValues(0.dp)) {
@@ -472,11 +479,12 @@ private fun SavedMomentCard(
     onShowToast: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
     var showMenu by remember(moment.id) { mutableStateOf(false) }
     val startTime = momentTimestamp(moment.positionSeconds)
     val episode = if (moment.episodeNumber != null && moment.seasonNumber != null) " | S${moment.seasonNumber}:E${moment.episodeNumber}" else ""
-    Column(modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFF191919)).testTag("saved_moment_${moment.id}")) {
+    Column(modifier.clip(RoundedCornerShape(platformDesign.corner(4.dp))).background(Color(0xFF191919)).testTag("saved_moment_${moment.id}")) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clickable { onPlay(moment) }) {
             LibraryArtwork(moment.media, Modifier.fillMaxSize(), landscape = true)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .6f)))))
@@ -521,8 +529,9 @@ private fun SavedMomentsDialog(
     moments: List<SavedMoment>, onPlay: (SavedMoment) -> Unit, onRemove: (SavedMoment) -> Unit,
     onShowToast: (String) -> Unit, onDismiss: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF0B0B0B)).systemBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(platformDesign.surfaceColor(Color(0xFF0B0B0B))).systemBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Moments you've saved", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, modifier = Modifier.weight(1f))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close saved moments", tint = Color.White) }

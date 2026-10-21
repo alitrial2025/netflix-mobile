@@ -20,6 +20,11 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun GlassHeader(title: String, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier,
                 backTag: String = "glass_header_back", actions: @Composable RowScope.() -> Unit = {}) {
+    val design = com.example.ui.theme.LocalPlatformDesign.current
+    if (!design.originalLayout) {
+        com.example.ui.components.PlatformToolbar(title, onBack, modifier, backTag, actions)
+        return
+    }
     Row(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) GlassPanel(Modifier.size(48.dp), CircleShape) {

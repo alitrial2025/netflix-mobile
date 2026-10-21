@@ -51,6 +51,7 @@ fun SearchScreen(
     onShowToast: (String) -> Unit = {}, modifier: Modifier = Modifier,
     isSearching: Boolean = false, searchError: String? = null
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
     val focus = LocalFocusManager.current
     var type by rememberSaveable { mutableStateOf("All") }
@@ -58,7 +59,7 @@ fun SearchScreen(
     val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onQueryChange)
     }
-    Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
+    Column(modifier.fillMaxSize().background(platformDesign.background).statusBarsPadding()) {
         GlassHeader("Search") {
             IconButton(onOpenCast) { Icon(painterResource(R.drawable.ic_outline_cast),
                 if (connectedCastDevice != null) "Connected to TV" else "Cast", tint = Color.White) }
@@ -71,19 +72,19 @@ fun SearchScreen(
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM).putExtra(RecognizerIntent.EXTRA_PROMPT, "Find a movie or show")
                     try { voice.launch(intent) } catch (_: android.content.ActivityNotFoundException) { onShowToast("Voice search isn't available on this device.") }
                 }) { Icon(Icons.Default.MicNone, "Voice search", tint = Color.LightGray) }
-            }, singleLine = true, shape = RoundedCornerShape(4.dp),
+            }, singleLine = true, shape = RoundedCornerShape(if (platformDesign.originalLayout) 4.dp else platformDesign.controlRadius),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
-            colors = TextFieldDefaults.colors(focusedContainerColor = Color(0xFF282828), unfocusedContainerColor = Color(0xFF282828), focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+            colors = TextFieldDefaults.colors(focusedContainerColor = platformDesign.surfaceColor(Color(0xFF282828)), unfocusedContainerColor = platformDesign.surfaceColor(Color(0xFF282828)), focusedTextColor = Color.White, unfocusedTextColor = Color.White,
                 focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = Color.White),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("search_text_field"))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 12.dp)) {
             items(listOf("All", "Series", "Films"), key = { "type:$it" }) { label ->
                 FilterChip(type == label, onClick = { type = label }, label = { Text(label) }, shape = RoundedCornerShape(50),
-                    colors = FilterChipDefaults.filterChipColors(labelColor = Color.LightGray, selectedContainerColor = Color.White, selectedLabelColor = Color.Black), modifier = Modifier.testTag("search_filter_$label"))
+                    colors = FilterChipDefaults.filterChipColors(labelColor = Color.LightGray, selectedContainerColor = platformDesign.primary, selectedLabelColor = platformDesign.onPrimary), modifier = Modifier.testTag("search_filter_$label"))
             }
             items(listOf("Drama", "Comedy", "Action", "Thriller"), key = { "genre:$it" }) { label ->
                 FilterChip(selectedGenre == label, onClick = { onGenreFilterSelect(label) }, label = { Text(label) }, shape = RoundedCornerShape(50),
-                    colors = FilterChipDefaults.filterChipColors(labelColor = Color.LightGray, selectedContainerColor = Color.White, selectedLabelColor = Color.Black))
+                    colors = FilterChipDefaults.filterChipColors(labelColor = Color.LightGray, selectedContainerColor = platformDesign.primary, selectedLabelColor = platformDesign.onPrimary))
             }
         }
         if (searchError != null) Text(searchError, color = Color.LightGray, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag("search_status"))
@@ -98,7 +99,7 @@ fun SearchScreen(
             LazyColumn(Modifier.weight(1f).testTag("search_top_list"), contentPadding = PaddingValues(bottom = com.example.ui.components.navigationContentClearance()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 item { Text("Top Searches", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 21.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
                 items(results.sortedByDescending { it.isTrending }.take(24), key = { "${it.type}:${it.id}" }, contentType = { "search_title" }) { media ->
-                    Row(Modifier.fillMaxWidth().background(Color(0xFF1B1B1B)).clickable { onMediaClick(media) }.testTag("top_search_${media.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(platformDesign.surfaceColor(Color(0xFF1B1B1B))).clickable { onMediaClick(media) }.testTag("top_search_${media.id}"), verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.width(132.dp).height(76.dp))
                         Text(media.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
                         IconButton(onClick = { onPlayClick(media) }, modifier = Modifier.testTag("top_search_play_${media.id}")) {
@@ -110,11 +111,11 @@ fun SearchScreen(
             }
         } else {
             Text("Movies & Shows (${results.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            LazyVerticalGrid(GridCells.Fixed(3), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = com.example.ui.components.navigationContentClearance()),
+            LazyVerticalGrid(if (platformDesign.originalLayout) GridCells.Fixed(3) else GridCells.Adaptive(if (platformDesign.wideCards) 180.dp else 112.dp), modifier = Modifier.weight(1f).testTag("search_results_grid"), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = com.example.ui.components.navigationContentClearance()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 gridItems(results, key = { "${it.type}:${it.id}" }, contentType = { "poster" }) { media ->
                     Column(Modifier.clickable { onMediaClick(media) }.testTag("search_result_${media.id}")) {
-                        AsyncImage(media.posterUrl ?: media.backdropUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(4.dp)).background(Color(0xFF252525)))
+                        AsyncImage(if (platformDesign.wideCards) media.backdropUrl ?: media.posterUrl ?: media.bannerDrawableRes else media.posterUrl ?: media.backdropUrl ?: media.bannerDrawableRes, media.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(platformDesign.cardAspectRatio).clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surfaceColor(Color(0xFF252525))))
                         Text(media.title, color = Color.LightGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
                     }
                 }

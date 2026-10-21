@@ -1,5 +1,7 @@
 package com.example.ui.glass
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,7 +49,14 @@ fun GlassPanel(
     content: @Composable BoxScope.() -> Unit
 ) {
     val theme = LocalGlassTheme.current
+    val design = com.example.ui.theme.LocalPlatformDesign.current
     val frosted = theme?.glassy == true
+    if (!design.originalLayout) {
+        val platformShape = if (shape == RoundedCornerShape(50)) RoundedCornerShape(design.controlRadius) else shape
+        Box(modifier.clip(platformShape).background(if (frosted) design.surface.copy(alpha = .96f) else design.background)
+            .then(if (frosted) Modifier.border(.5.dp, design.outline.copy(alpha = .6f), platformShape) else Modifier), content = content)
+        return
+    }
     Box(modifier.shadow(if (frosted) 8.dp else 5.dp, shape,
         ambientColor = Color.Black.copy(alpha = .20f), spotColor = Color.Black.copy(alpha = .26f)).clip(shape)) {
         Box(Modifier.matchParentSize().drawWithCache {

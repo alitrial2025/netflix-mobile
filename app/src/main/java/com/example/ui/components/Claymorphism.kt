@@ -274,6 +274,7 @@ fun ClayButton(
     height: Dp = 44.dp,
     testTag: String = "clay_button"
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
@@ -284,7 +285,7 @@ fun ClayButton(
     )
 
     val surfaceColor = when {
-        isDestructive -> NetflixRed
+        isDestructive -> platformDesign.accent
         isPrimary -> Color(0xFFF3F3F5)
         else -> Color(0xFF26242E)
     }
@@ -309,7 +310,7 @@ fun ClayButton(
                 shape = shape,
                 surfaceColor = surfaceColor,
                 highlightColor = Color.White,
-                shadowColor = if (isDestructive) NetflixRed.copy(alpha = 0.6f) else Color.Black,
+                shadowColor = if (isDestructive) platformDesign.accent.copy(alpha = 0.6f) else Color.Black,
                 elevation = elevation,
                 strokeWidth = 1.2.dp,
                 highlightAlpha = highlightAlpha,

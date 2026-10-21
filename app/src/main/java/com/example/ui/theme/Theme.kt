@@ -29,11 +29,27 @@ private val NetflixColorScheme = darkColorScheme(
 
 @Composable
 fun NetflixTheme(
+    platform: com.example.data.model.PlatformAppearance = com.example.data.model.PlatformAppearance.ORIGINAL,
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = NetflixColorScheme,
-        typography = Typography,
-        content = content
-    )
+    val design = platformDesign(platform)
+    val scheme = if (design.originalLayout) NetflixColorScheme else darkColorScheme(
+        primary = design.accent, onPrimary = design.onAccent,
+        primaryContainer = design.raised, onPrimaryContainer = Color.White,
+        secondary = design.accent, onSecondary = design.onAccent,
+        secondaryContainer = design.raised, onSecondaryContainer = Color.White,
+        tertiary = design.accent, onTertiary = design.onAccent,
+        background = design.background, onBackground = Color.White,
+        surface = design.surface, onSurface = Color.White,
+        surfaceVariant = design.raised, onSurfaceVariant = Color(0xFFD4D8E1),
+        outline = design.outline, surfaceContainer = design.surface, surfaceContainerHigh = design.raised)
+    val typography = if (design.originalLayout) Typography else Typography.copy(
+        displayLarge = Typography.displayLarge.copy(fontWeight = design.titleWeight),
+        displayMedium = Typography.displayMedium.copy(fontWeight = design.titleWeight),
+        titleLarge = Typography.titleLarge.copy(fontWeight = design.titleWeight),
+        titleMedium = Typography.titleMedium.copy(fontWeight = design.titleWeight))
+    androidx.compose.runtime.CompositionLocalProvider(LocalPlatformDesign provides design) {
+        MaterialTheme(colorScheme = scheme, typography = typography,
+            shapes = if (design.originalLayout) androidx.compose.material3.Shapes() else design.shapes(), content = content)
+    }
 }

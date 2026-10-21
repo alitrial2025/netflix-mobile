@@ -28,6 +28,7 @@ class SettingsInteractionTest {
                 onClose = { events += "close" }, onToggleSmartDownloads = { events += "smart:$it" },
                 onToggleWifiOnly = { events += "wifi:$it" }, onToggleHighQuality = { events += "quality:$it" },
                 onToggleGlassyTheme = { events += "glass:$it" },
+                onTogglePlatforms = { events += "platforms:$it" },
                 onToggleAutoPlayNext = { events += "next:$it" }, onToggleAutoPlayPreviews = { events += "previews:$it" },
                 onToggleSpatialAudio = { events += "spatial:$it" }, onSetCellularData = { events += "cellular:$it" },
                 onRunDiagnosticTest = { events += "diagnostic" }, onClearAllDownloads = { events += "delete" },
@@ -87,6 +88,13 @@ class SettingsInteractionTest {
         assertFalse(events.contains("signout"))
         rule.onNodeWithTag("settings_confirm_sign_out").performClick()
         assertEquals(listOf("close", "signout"), events.takeLast(2))
+    }
+
+    @Test fun platformsToggleIsOffInitiallyAndWorksWithoutChangingMembership() {
+        val events = mutableListOf<String>()
+        settings(events, paid = false)
+        rule.onNodeWithTag("settings_toggle_Platforms").performScrollTo().assertIsOff().performClick()
+        assertEquals(listOf("platforms:true"), events)
     }
 
     @Test fun basicMembershipCannotEnablePremiumSpatialAudio() {

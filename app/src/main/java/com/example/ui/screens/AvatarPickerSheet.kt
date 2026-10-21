@@ -70,6 +70,7 @@ fun AvatarPickerSheet(
     onSelectAvatar: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var selectedCategory by rememberSaveable { mutableStateOf(ALL_ICONS) }
     val categories = ProfileIconCatalog.categories
     val category = remember(selectedCategory) { categories.firstOrNull { it.id == selectedCategory } }
@@ -86,7 +87,7 @@ fun AvatarPickerSheet(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -124,8 +125,8 @@ fun AvatarPickerSheet(
                     contentDescription = "Current Icon",
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                        .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                        .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(platformDesign.corner(6.dp))),
                     contentScale = ContentScale.Crop
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -164,11 +165,11 @@ fun AvatarPickerSheet(
                 Box(
                     modifier = Modifier
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(NetflixCardBg)
+                        .clip(RoundedCornerShape(platformDesign.corner(10.dp)))
+                        .background(platformDesign.raised)
                         .then(
-                            if (isCurrent) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp))
-                            else Modifier.border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                            if (isCurrent) Modifier.border(2.dp, Color.White, RoundedCornerShape(platformDesign.corner(10.dp)))
+                            else Modifier.border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(platformDesign.corner(10.dp)))
                         )
                         .clickable(role = Role.Button, onClickLabel = "Use profile icon") { onSelectAvatar(url) }
                         .semantics { selected = isCurrent }

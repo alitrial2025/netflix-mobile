@@ -49,6 +49,7 @@ fun ProfileLoadingOverlay(
     isWarmupFinished: Boolean = false,
     onAnimationComplete: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var isPhase1Loading by remember { mutableStateOf(true) }
     var assimilationProgress by remember { mutableFloatStateOf(0f) }
     var pulseProgress by remember { mutableFloatStateOf(0f) }
@@ -152,7 +153,7 @@ fun ProfileLoadingOverlay(
                 val ringRadius = with(density) { 18.dp.toPx() } + (with(density) { 28.dp.toPx() } * animatedPulseProgress)
                 val ringAlpha = (1f - animatedPulseProgress).coerceIn(0f, 1f)
                 drawCircle(
-                    color = NetflixRed.copy(alpha = ringAlpha),
+                    color = platformDesign.accent.copy(alpha = ringAlpha),
                     radius = ringRadius,
                     center = androidx.compose.ui.geometry.Offset(targetX, targetY),
                     style = Stroke(width = with(density) { 3.dp.toPx() })

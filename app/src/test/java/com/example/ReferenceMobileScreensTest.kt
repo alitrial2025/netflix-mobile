@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -150,6 +151,187 @@ class ReferenceMobileScreensTest {
         assertTrue("Floating navigation needs side margins", bounds.first().left > root.left && bounds.last().right < root.right)
         assertTrue("Floating navigation must leave bottom breathing room", bounds.first().bottom <= root.bottom - 8f)
         bounds.forEach { assertTrue("Each tab needs a usable tap target", it.width >= 48f && it.height >= 48f) }
+    }
+
+    @Test fun platformHomeDesignsRetainPlayListAndNavigationAcrossEveryService() {
+        var appearance by mutableStateOf(com.example.data.model.PlatformAppearance.PRIME)
+        var played = 0
+        var listed = 0
+        var navigated: NavigationTab? = null
+        rule.setContent { NetflixTheme(platform = appearance) {
+            Box(Modifier.fillMaxSize()) {
+                HomeScreen(profile, CategoryFilter.CATEGORIES, appearance.label, emptyList(), { false }, {},
+                    { played++ }, { listed++ }, catalogMedia = listOf(show, movie), catalogIsScoped = true, userSubscription = membership)
+                NetflixTopBar(profile, CategoryFilter.CATEGORIES, appearance.label, { _, _ -> }, {}, {}, {})
+                NetflixBottomNav(NavigationTab.HOME, profile, { navigated = it }, Modifier.align(Alignment.BottomCenter), isClipsAllowed = true)
+            }
+        } }
+        val styles = com.example.data.model.PlatformAppearance.entries.filter { !com.example.ui.theme.platformDesign(it).originalLayout }
+        styles.forEachIndexed { index, style ->
+            rule.runOnIdle { appearance = style }
+            rule.onNodeWithTag("platform_hero_${style.key}").assertIsDisplayed()
+            rule.onNodeWithTag("platform_navigation_${style.key}").assertIsDisplayed()
+            artworkReady(show.logoUrl, show.backdropUrl, show.posterUrl)
+            capture("platform-${style.key}-home-412")
+            rule.onNodeWithTag("hero_play").performClick()
+            rule.onNodeWithTag("hero_my_list").performClick()
+            rule.onNodeWithTag("nav_tab_search").performClick()
+            rule.runOnIdle { assertEquals(index + 1, played); assertEquals(index + 1, listed); assertEquals(NavigationTab.SEARCH, navigated) }
+        }
+    }
+
+    @Test fun persistedPlatformsToggleChangesTheMountedAppWithoutLosingState() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        val prefs = context.getSharedPreferences("platform-theme-root-test", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val store = com.example.data.MobileSettingsStore(prefs)
+        var clicks = 0
+        rule.setContent { com.example.ui.theme.PlatformPreferenceTheme(prefs) {
+            var retained by remember { mutableStateOf(0) }
+            val design = com.example.ui.theme.LocalPlatformDesign.current
+            androidx.compose.material3.Button(onClick = { retained++; clicks = retained },
+                modifier = Modifier.testTag("retained_${design.appearance.key}")) { androidx.compose.material3.Text("State $retained") }
+        } }
+        rule.onNodeWithTag("retained_original").performClick()
+        rule.runOnIdle { store.setPlatformsEnabled(true, "Prime Video") }
+        rule.onNodeWithTag("retained_prime").performClick()
+        rule.runOnIdle { store.selectPlatformCategory("Disney+") }
+        rule.onNodeWithTag("retained_disney").performClick()
+        rule.runOnIdle { store.setPlatformsEnabled(false) }
+        rule.onNodeWithTag("retained_original").assertIsDisplayed()
+        rule.runOnIdle { assertEquals(3, clicks) }
+        rule.onNodeWithText("State 3").assertIsDisplayed()
+    }
+
+    @Test fun platformSecondaryScreensAndPlayerControlsKeepTheirExistingActions() {
+        var appearance by mutableStateOf(com.example.data.model.PlatformAppearance.PRIME)
+        var screen by mutableStateOf(0)
+        var played = 0
+        var downloaded = 0
+        var seeks = 0
+        var toggles = 0
+        rule.setContent { NetflixTheme(platform = appearance) {
+            when (screen) {
+                0 -> com.example.ui.screens.SearchScreen("Squid", null, listOf(show, movie), userSubscription = membership,
+                    onQueryChange = {}, onGenreFilterSelect = {}, onMediaClick = {}, onPlayClick = {})
+                1 -> com.example.ui.screens.DetailScreen(movie, false, userSubscription = membership, downloadProgressMap = emptyMap(),
+                    onClose = {}, onPlayClick = { _, _ -> played++ }, onPlayTrailerClick = { _, _ -> },
+                    onWatchlistToggle = {}, onDownloadClick = { _, _ -> downloaded++ }, onRatingSelect = {}, onSimilarMediaClick = {})
+                2 -> com.example.ui.screens.DownloadsScreen(downloads = emptyList(), smartDownloadsEnabled = false,
+                    connectedCastDevice = null, onClose = {}, onPlayMedia = { _, _ -> }, onDeleteDownload = {},
+                    onClearAllDownloads = {}, onToggleSmartDownloads = {}, onSetUpDownloadsForYou = {},
+                    onOpenSearch = {}, onOpenCast = {}, onOpenMediaDetail = {}, onShowToast = {}, userSubscription = membership,
+                    catalogMedia = listOf(show, movie), activeProfile = profile)
+                3 -> com.example.ui.screens.NetflixSettingsScreen(profile, true, true, true, true, true, true,
+                    "Automatic (Balanced)", false, null, 50, onClose = {}, onToggleSmartDownloads = {},
+                    onToggleWifiOnly = {}, onToggleHighQuality = {}, onToggleAutoPlayNext = {}, onToggleAutoPlayPreviews = {},
+                    onToggleSpatialAudio = {}, onSetCellularData = {}, onRunDiagnosticTest = {}, onClearAllDownloads = {},
+                    onSwitchProfile = {}, userSubscription = membership, platformsEnabled = true)
+                4 -> PersonalLibrary(watchlist = listOf(show, movie), liked = listOf(show))
+                5 -> Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    com.example.ui.components.PlatformPlaybackControls(false, { seeks-- }, { toggles++ }, { seeks++ })
+                }
+            }
+        } }
+        val styles = com.example.data.model.PlatformAppearance.entries.filter { !com.example.ui.theme.platformDesign(it).originalLayout }
+        styles.forEachIndexed { index, style ->
+            rule.runOnIdle { appearance = style }
+            for (destination in 0..5) {
+                rule.runOnIdle { screen = destination }
+                rule.waitForIdle()
+                when (destination) {
+                    0 -> rule.onNodeWithTag("search_results_grid").assertIsDisplayed()
+                    1 -> {
+                        rule.onNodeWithTag("detail_play_button").performScrollTo().performClick()
+                        rule.onNodeWithTag("detail_platform_download").performClick()
+                    }
+                    2 -> rule.onNodeWithTag("downloads_list").assertIsDisplayed()
+                    3 -> rule.onNodeWithTag("settings_toggle_Platforms").performScrollTo().assertIsOn()
+                    4 -> rule.onNodeWithTag("my_netflix_screen").assertIsDisplayed()
+                    5 -> {
+                        rule.onNodeWithTag("player_rewind_10").performClick()
+                        rule.onNodeWithTag("player_play_pause_button").performClick()
+                        rule.onNodeWithTag("player_forward_10").performClick()
+                    }
+                }
+                capture("platform-${style.key}-screen-$destination-412")
+            }
+            rule.runOnIdle { assertEquals(index + 1, played); assertEquals(index + 1, downloaded); assertEquals(0, seeks); assertEquals(index + 1, toggles) }
+        }
+    }
+
+    @Test @Config(qualifiers = "w840dp-h412dp-mdpi")
+    fun platformCarouselOnWideScreensSelectsAndPlaysTheActualVisibleTitle() {
+        var played: MediaItem? = null
+        rule.setContent { NetflixTheme(platform = com.example.data.model.PlatformAppearance.APPLE) {
+            HomeScreen(profile, CategoryFilter.CATEGORIES, "Apple TV", emptyList(), { false }, {}, { played = it }, {},
+                catalogMedia = listOf(show, movie), catalogIsScoped = true, userSubscription = membership)
+        } }
+        rule.onNodeWithTag("platform_hero_page_1").performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("platform_hero_page_1").assertIsSelected()
+        rule.onNodeWithTag("hero_play").performScrollTo().performClick()
+        rule.runOnIdle { assertEquals(movie.id, played?.id) }
+        capture("platform-apple-home-840")
+    }
+
+    @Test fun primeDetailsUsesActualSeasonAndKeepsDownloadAndTrailerActions() {
+        val episode = com.example.data.model.Episode("reference-show_S1_e1", 1, "The first game", 46, "A real episode synopsis.", show.backdropUrl)
+        val series = show.copy(episodes = listOf(episode), totalSeasons = 3, voteAverage = 8.2, voteCount = 100)
+        var downloaded: String? = null
+        var trailer = 0
+        var list = 0
+        rule.setContent { NetflixTheme(platform = com.example.data.model.PlatformAppearance.PRIME) {
+            com.example.ui.screens.DetailScreen(series, false, userSubscription = membership, downloadProgressMap = emptyMap(),
+                onClose = {}, onPlayClick = { _, _ -> }, onPlayTrailerClick = { _, _ -> trailer++ },
+                onWatchlistToggle = { list++ }, onDownloadClick = { _, ep -> downloaded = ep?.id }, onRatingSelect = {}, onSimilarMediaClick = {})
+        } }
+        artworkReady(show.backdropUrl, show.logoUrl)
+        capture("platform-prime-details-top-412")
+        rule.onNodeWithTag("detail_my_list_button").performScrollTo().performClick()
+        rule.onNodeWithTag("detail_trailer_button").performClick()
+        rule.onNodeWithTag("prime_detail_facts").performScrollTo()
+        rule.onNodeWithText("4.1/5").assertExists()
+        rule.onNodeWithTag("prime_episode_download_${episode.id}").performScrollTo().performClick()
+        rule.runOnIdle { assertEquals(episode.id, downloaded); assertEquals(1, trailer); assertEquals(1, list) }
+        capture("platform-prime-details-episodes-412")
+        rule.onNodeWithText("Details", useUnmergedTree = true).performScrollTo().performClick()
+        rule.onNodeWithText("Maturity rating").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Explore", useUnmergedTree = true).performScrollTo().performClick()
+        rule.onNodeWithTag("prime_explore_trailer").performScrollTo().performClick()
+        rule.runOnIdle { assertEquals(2, trailer) }
+    }
+
+    @Test fun primeDownloadsGroupsSeasonsAndPlaysOnlyTheSelectedEpisode() {
+        val episodes = listOf(1, 2).map { season -> com.example.data.model.Episode("reference-show_S${season}_e1", 1, "Episode in season $season", 46, "") }
+        val series = show.copy(episodes = episodes, totalSeasons = 2)
+        val downloads = episodes.map { episode -> com.example.data.local.DownloadEntity(downloadKey = "${series.id}_${episode.id}", mediaId = series.id, mediaTitle = series.title,
+            episodeTitle = "S${if (episode == episodes[0]) 1 else 2}:E1 ${episode.title}", fileSizeMb = 512) }
+        var played: String? = null
+        var searched = false
+        rule.setContent { NetflixTheme(platform = com.example.data.model.PlatformAppearance.PRIME) {
+            com.example.ui.screens.DownloadsScreen(downloads, smartDownloadsEnabled = true,
+                connectedCastDevice = null, onClose = {}, onPlayMedia = { _, ep -> played = ep?.id }, onDeleteDownload = {},
+                onClearAllDownloads = {}, onToggleSmartDownloads = {}, onSetUpDownloadsForYou = {},
+                onOpenSearch = { searched = true }, onOpenCast = {}, onOpenMediaDetail = {}, onShowToast = {}, userSubscription = membership,
+                catalogMedia = listOf(series), activeProfile = profile)
+        } }
+        artworkReady(show.backdropUrl)
+        rule.onNodeWithText("2 videos  1h 32min  1.0 GB").assertExists()
+        rule.onNodeWithText("Squid Game - Season 1").assertIsDisplayed()
+        rule.onNodeWithText("Squid Game - Season 2").assertIsDisplayed()
+        capture("platform-prime-downloads-populated-412")
+        rule.onNodeWithTag("prime_download_more").performClick()
+        rule.runOnIdle { assertTrue(searched) }
+        rule.onNodeWithTag("download_row_${downloads[1].downloadKey}").performClick()
+        rule.onNodeWithText("Squid Game - Season 1").assertDoesNotExist()
+        rule.onNodeWithText("1 video  46min  512 MB").assertExists()
+        rule.onNodeWithTag("download_row_${downloads[1].downloadKey}").performClick()
+        rule.runOnIdle { assertEquals(episodes[1].id, played) }
+        rule.onNodeWithTag("downloads_edit_toggle_btn").performClick()
+        rule.onNodeWithTag("download_row_${downloads[1].downloadKey}").performClick()
+        rule.onNodeWithTag("downloads_delete_selected_btn").performScrollTo().performClick()
+        rule.onNodeWithText("Delete downloads?").assertIsDisplayed()
     }
 
     @Test fun emptyGenreNeverShowsAnUnrelatedHeroOrContinueWatching() {

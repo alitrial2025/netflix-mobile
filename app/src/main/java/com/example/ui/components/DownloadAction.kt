@@ -38,6 +38,7 @@ fun DownloadAction(
     onCompleted: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val fraction = (task?.progress ?: progress ?: 0f).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
     val failed = task?.status == DownloadTaskStatus.ERROR
     val isPaused = paused || task?.status == DownloadTaskStatus.PAUSED
@@ -45,8 +46,8 @@ fun DownloadAction(
     val active = progress != null || task?.status in listOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING, DownloadTaskStatus.PAUSED, DownloadTaskStatus.ERROR)
     if (!active || completed) {
         Button(onClick = if (completed) onCompleted else onStart,
-            shape = RoundedCornerShape(5.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262626), contentColor = Color.White),
+            shape = RoundedCornerShape(platformDesign.corner(5.dp)),
+            colors = ButtonDefaults.buttonColors(containerColor = platformDesign.surfaceColor(Color(0xFF262626)), contentColor = Color.White),
             modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("download_action_$downloadKey")) {
             if (completed) Icon(Icons.Default.Check, null, Modifier.size(20.dp))
             else Icon(painterResource(R.drawable.ic_outline_download), null, Modifier.size(20.dp))
@@ -58,7 +59,7 @@ fun DownloadAction(
             }
         }
     } else {
-        Column(modifier.fillMaxWidth().background(Color(0xFF202020), RoundedCornerShape(8.dp)).padding(12.dp)) {
+        Column(modifier.fillMaxWidth().background(platformDesign.surfaceColor(Color(0xFF202020)), RoundedCornerShape(platformDesign.corner(8.dp))).padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(when {
@@ -83,9 +84,9 @@ fun DownloadAction(
                 }
             }
             if (task?.totalBytes == 0L && task.downloadedBytes > 0L && fraction == 0f && !isPaused && !failed)
-                LinearProgressIndicator(color = NetflixRed, trackColor = Color.White.copy(alpha = .12f),
+                LinearProgressIndicator(color = platformDesign.accent, trackColor = Color.White.copy(alpha = .12f),
                     modifier = Modifier.fillMaxWidth().height(3.dp))
-            else LinearProgressIndicator(progress = { fraction }, color = if (isPaused) Color.LightGray else NetflixRed,
+            else LinearProgressIndicator(progress = { fraction }, color = if (isPaused) Color.LightGray else platformDesign.accent,
                 trackColor = Color.White.copy(alpha = .12f), modifier = Modifier.fillMaxWidth().height(3.dp))
         }
     }

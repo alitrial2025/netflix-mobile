@@ -56,6 +56,7 @@ fun SplashScreen(
     onSignOut: () -> Unit = {},
     onSplashComplete: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val currentIsWarmupFinished by androidx.compose.runtime.rememberUpdatedState(isWarmupFinished)
     val reusableWipePath = remember { Path() }
     var logoSize by remember { mutableStateOf(IntSize.Zero) }
@@ -144,7 +145,7 @@ fun SplashScreen(
             .graphicsLayer {
                 alpha = zoomAlpha.value
             }
-            .background(NetflixBlack),
+            .background(platformDesign.background),
         contentAlignment = Alignment.Center
     ) {
         // Container for sliding

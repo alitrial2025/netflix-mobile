@@ -74,6 +74,7 @@ fun MediaSectionRow(
     isMediaLocked: ((MediaItem) -> Boolean)? = null,
     onMediaClick: (MediaItem) -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     if (items.isEmpty()) return
 
     val isOnlyFromNetflix = title.contains("Only", ignoreCase = true)
@@ -82,8 +83,8 @@ fun MediaSectionRow(
     val defaultWidth = if (isOnlyFromNetflix) 210.dp else 115.dp
     val defaultHeight = if (isOnlyFromNetflix) 330.dp else 165.dp
 
-    val effectiveWidth = cardWidth ?: defaultWidth
-    val effectiveHeight = cardHeight ?: defaultHeight
+    val effectiveWidth = if (platformDesign.wideCards) (cardWidth ?: defaultWidth).coerceAtLeast(190.dp) else cardWidth ?: defaultWidth
+    val effectiveHeight = if (platformDesign.wideCards) effectiveWidth / platformDesign.cardAspectRatio else cardHeight ?: defaultHeight
     val rowHeight = if (isTop10) effectiveHeight.coerceAtLeast(172.dp) else effectiveHeight
 
     Column(
@@ -99,7 +100,7 @@ fun MediaSectionRow(
                 text = title,
                 color = Color.White,
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = platformDesign.titleWeight,
                 fontFamily = FontFamily.SansSerif,
                 letterSpacing = (-0.3).sp
             )

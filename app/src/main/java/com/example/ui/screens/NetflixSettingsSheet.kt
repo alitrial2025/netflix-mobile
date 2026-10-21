@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -46,13 +48,14 @@ fun NetflixSettingsSheet(
     onOpenAuth: () -> Unit = {}, onOpenSubscription: () -> Unit = {}, onEditProfile: () -> Unit = {},
     onOpenSmartDownloads: () -> Unit = {}, onSignOut: () -> Unit = {}, onResetPassword: () -> Unit = {},
     hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier,
-    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {}
+    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {},
+    platformsEnabled: Boolean = false, onTogglePlatforms: (Boolean) -> Unit = {}
 ) = NetflixSettingsScreen(activeProfile, smartDownloadsEnabled, wifiOnlyEnabled, highQualityEnabled,
     autoPlayNextEnabled, autoPlayPreviewsEnabled, spatialAudioEnabled, cellularDataOption, diagnosticRunning,
     diagnosticResult, totalStorageUsedMb, onClose, onToggleSmartDownloads, onToggleWifiOnly, onToggleHighQuality,
     onToggleAutoPlayNext, onToggleAutoPlayPreviews, onToggleSpatialAudio, onSetCellularData, onRunDiagnosticTest,
     onClearAllDownloads, onSwitchProfile, onOpenTvPair, currentEmail, userSubscription, onOpenAuth,
-    onOpenSubscription, onEditProfile, onOpenSmartDownloads, onSignOut, onResetPassword, hasActiveDownloads, modifier, glassyThemeEnabled, onToggleGlassyTheme)
+    onOpenSubscription, onEditProfile, onOpenSmartDownloads, onSignOut, onResetPassword, hasActiveDownloads, modifier, glassyThemeEnabled, onToggleGlassyTheme, platformsEnabled, onTogglePlatforms)
 
 @Composable
 fun NetflixSettingsScreen(
@@ -69,8 +72,10 @@ fun NetflixSettingsScreen(
     onOpenAuth: () -> Unit = {}, onOpenSubscription: () -> Unit = {}, onEditProfile: () -> Unit = {},
     onOpenSmartDownloads: () -> Unit = {}, onSignOut: () -> Unit = {}, onResetPassword: () -> Unit = {},
     hasActiveDownloads: Boolean = false, modifier: Modifier = Modifier,
-    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {}
+    glassyThemeEnabled: Boolean = true, onToggleGlassyTheme: (Boolean) -> Unit = {},
+    platformsEnabled: Boolean = false, onTogglePlatforms: (Boolean) -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var dialog by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val storage = remember(totalStorageUsedMb) { android.os.StatFs(context.filesDir.absolutePath) }
@@ -78,7 +83,7 @@ fun NetflixSettingsScreen(
     fun navigate(action: () -> Unit) { dialog = null; onClose(); action() }
 
     if (dialog != null) AlertDialog(
-        onDismissRequest = { dialog = null }, containerColor = Color(0xFF242424),
+        onDismissRequest = { dialog = null }, containerColor = platformDesign.surfaceColor(Color(0xFF242424)),
         titleContentColor = Color.White, textContentColor = Color.White,
         title = { Text(when (dialog) {
             "cellular" -> "Cellular Data Usage"; "quality" -> "Video Quality"
@@ -120,7 +125,7 @@ fun NetflixSettingsScreen(
         dismissButton = { TextButton(onClick = { dialog = null }) { Text(if (dialog == "account") "Done" else "Cancel", color = Color.White) } }
     )
 
-    Column(modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()
+    Column(modifier.fillMaxSize().background(platformDesign.background).statusBarsPadding().navigationBarsPadding()
         .testTag("netflix_settings_screen")) {
         GlassHeader("App Settings", onClose, backTag = "close_settings_btn") {
             ProfileAvatar(activeProfile, size = 26.dp)
@@ -139,6 +144,8 @@ fun NetflixSettingsScreen(
                 "pair_tv_settings_btn") { navigate(onOpenTvPair) }
 
             SettingsSection("Appearance")
+            SettingsToggle("Platforms", "Use a service's design across the app when selected in Home Categories",
+                platformsEnabled, onTogglePlatforms)
             SettingsToggle("Use Glassy Theme", if (glassyThemeEnabled) "Frosted header and navigation" else "Normal glass header and navigation",
                 glassyThemeEnabled, onToggleGlassyTheme)
 
@@ -173,7 +180,8 @@ fun NetflixSettingsScreen(
 
 @Composable
 private fun SettingsSection(title: String) {
-    HorizontalDivider(color = Color(0xFF292929), modifier = Modifier.padding(top = 20.dp))
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    HorizontalDivider(color = platformDesign.surfaceColor(Color(0xFF292929)), modifier = Modifier.padding(top = 20.dp))
     Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 10.dp))
 }
@@ -181,7 +189,11 @@ private fun SettingsSection(title: String) {
 @Composable
 private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag: String,
     enabled: Boolean = true, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).testTag(tag)
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Row(Modifier.fillMaxWidth()
+        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surface))
+        .clickable(enabled = enabled, onClick = onClick).testTag(tag)
         .heightIn(min = 60.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = if (enabled) Color.White else Color.Gray, modifier = Modifier.size(24.dp))
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
@@ -195,7 +207,11 @@ private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag
 
 @Composable
 private fun SettingsToggle(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
-    Row(Modifier.fillMaxWidth().toggleable(checked, enabled, Role.Switch, onChange)
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    Row(Modifier.fillMaxWidth()
+        .then(if (platformDesign.originalLayout) Modifier else Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(platformDesign.cardRadius)).background(platformDesign.surface))
+        .toggleable(checked, enabled, Role.Switch, onChange)
         .testTag("settings_toggle_$title").heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
@@ -208,22 +224,24 @@ private fun SettingsToggle(title: String, subtitle: String, checked: Boolean, on
 
 @Composable
 private fun SettingChoice(title: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).testTag(tag).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = NetflixBlue, unselectedColor = Color.LightGray))
+        RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = platformDesign.controlColor(NetflixBlue), unselectedColor = Color.LightGray))
         Text(title, color = Color.White, modifier = Modifier.padding(start = 12.dp))
     }
 }
 
 @Composable
 private fun SettingsStorage(downloadsMb: Int, totalBytes: Long, availableBytes: Long) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val total = totalBytes.coerceAtLeast(1L)
     val free = availableBytes.coerceIn(0L, total)
     val downloads = (downloadsMb.coerceAtLeast(0).toLong() * 1024 * 1024).coerceAtMost(total - free)
     val other = total - free - downloads
     Column(Modifier.padding(horizontal = 16.dp, vertical = 20.dp)) {
         Text("Internal Storage", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        Row(Modifier.fillMaxWidth().height(5.dp).padding(top = 0.dp).background(Color(0xFF333333))) {
+        Row(Modifier.fillMaxWidth().height(5.dp).padding(top = 0.dp).background(platformDesign.surfaceColor(Color(0xFF333333)))) {
             listOf(downloads to NetflixBlue, other to Color(0xFF737373), free to Color(0xFFD9D9D9)).forEach { (bytes, color) ->
                 if (bytes > 0) Spacer(Modifier.weight((bytes.toDouble() / total).toFloat().coerceAtLeast(.000001f)).fillMaxHeight().background(color))
             }

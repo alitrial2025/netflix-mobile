@@ -45,6 +45,7 @@ internal fun HomeGamesRow(
     onOpenGames: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     if (games.isEmpty()) return
     val iconSize = ((LocalConfiguration.current.screenWidthDp - 48) / 3.35f)
         .dp.coerceIn(92.dp, 132.dp)
@@ -53,7 +54,7 @@ internal fun HomeGamesRow(
             verticalAlignment = Alignment.CenterVertically) {
             Text("Mobile Games", color = Color.White, fontSize = 18.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Row(Modifier.height(48.dp).clip(RoundedCornerShape(8.dp))
+            Row(Modifier.height(48.dp).clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                 .clickable(onClick = onOpenGames).padding(horizontal = 8.dp)
                 .testTag("home_open_games"), verticalAlignment = Alignment.CenterVertically) {
                 Text("Explore", color = Color.White, fontSize = 13.sp)
@@ -64,10 +65,10 @@ internal fun HomeGamesRow(
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(games.distinctBy { it.id }, key = { it.id }, contentType = { "home_game" }) { game ->
-                Column(Modifier.width(iconSize).clip(RoundedCornerShape(4.dp))
+                Column(Modifier.width(iconSize).clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                     .clickable { onGameClick(game) }.testTag("home_game_${game.id}")) {
-                    Box(Modifier.size(iconSize).clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF252525)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(iconSize).clip(RoundedCornerShape(platformDesign.corner(16.dp)))
+                        .background(platformDesign.surfaceColor(Color(0xFF252525))), contentAlignment = Alignment.Center) {
                         val model = game.iconUrl?.takeIf { it.isNotBlank() }
                             ?: game.bannerUrl?.takeIf { it.isNotBlank() } ?: game.bannerRes
                         if (model != null) {

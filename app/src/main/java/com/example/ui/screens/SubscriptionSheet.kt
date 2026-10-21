@@ -103,6 +103,7 @@ fun SubscriptionSheet(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val context = LocalContext.current
     val initialPlanId = remember(currentSubscription) {
         if (currentSubscription.isGuest || SubscriptionPlans.PLANS.none { it.id == currentSubscription.planId }) {
@@ -155,10 +156,10 @@ fun SubscriptionSheet(
     Surface(
         modifier = modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .statusBarsPadding()
             .navigationBarsPadding(),
-        color = NetflixBlack
+        color = platformDesign.background
     ) {
         Column(
             modifier = Modifier
@@ -194,13 +195,13 @@ fun SubscriptionSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(platformDesign.corner(12.dp)))
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Color(0xFF221F1F), Color(0xFF141414))
+                            listOf(Color(0xFF221F1F), platformDesign.surfaceColor(Color(0xFF141414)))
                         )
                     )
-                    .border(1.dp, NetflixBorderGray, RoundedCornerShape(12.dp))
+                    .border(1.dp, platformDesign.outline, RoundedCornerShape(platformDesign.corner(12.dp)))
                     .padding(16.dp)
             ) {
                 Row(
@@ -220,13 +221,13 @@ fun SubscriptionSheet(
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (currentSubscription.isActive) Color(0xFF46D369).copy(alpha = 0.2f) else NetflixRed.copy(alpha = 0.2f))
+                                    .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
+                                    .background(if (currentSubscription.isActive) Color(0xFF46D369).copy(alpha = 0.2f) else platformDesign.accent.copy(alpha = 0.2f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = currentStatusLabel,
-                                    color = if (currentSubscription.isActive) Color(0xFF46D369) else NetflixRed,
+                                    color = if (currentSubscription.isActive) Color(0xFF46D369) else platformDesign.accent,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -292,9 +293,9 @@ fun SubscriptionSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF1B1B1B))
-                    .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(platformDesign.corner(14.dp)))
+                    .background(platformDesign.surfaceColor(Color(0xFF1B1B1B)))
+                    .border(1.dp, platformDesign.surfaceColor(Color(0xFF333333)), RoundedCornerShape(platformDesign.corner(14.dp)))
                     .padding(18.dp)
             ) {
                 Column {
@@ -343,7 +344,7 @@ fun SubscriptionSheet(
                             showPaySubWebView = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00AA85)),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(platformDesign.corner(8.dp)),
                         enabled = canPay && !isVerifying && pendingActivation == null && !currentSubscription.status.equals("SUSPENDED", true),
                         modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
@@ -399,7 +400,7 @@ fun SubscriptionSheet(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = verificationError!!,
-                            color = NetflixRed,
+                            color = platformDesign.accent,
                             fontSize = 12.sp
                         )
                     }
@@ -455,21 +456,21 @@ fun SubscriptionSheet(
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NetflixRed),
-                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = platformDesign.accent, contentColor = platformDesign.onAccent),
+                        shape = RoundedCornerShape(platformDesign.corner(8.dp)),
                         enabled = canPay && !isVerifying,
                         modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         if (isVerifying) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(color = platformDesign.onAccent, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
+                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = platformDesign.onAccent)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (pendingActivation != null) "Retry membership refresh" else "Activate ${selectedPlan.name} Membership",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
-                                color = Color.White
+                                color = platformDesign.onAccent
                             )
                         }
                     }
@@ -479,9 +480,9 @@ fun SubscriptionSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 12.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                                 .background(Color(0xFF46D369).copy(alpha = 0.2f))
-                                .border(1.dp, Color(0xFF46D369), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF46D369), RoundedCornerShape(platformDesign.corner(8.dp)))
                                 .padding(12.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -524,6 +525,7 @@ fun PaySubWebBottomSheet(
     onDismiss: () -> Unit,
     onPaymentDone: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var webProgress by remember { mutableFloatStateOf(0f) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
@@ -538,7 +540,7 @@ fun PaySubWebBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF141414),
+        containerColor = platformDesign.surfaceColor(Color(0xFF141414)),
         dragHandle = null,
         modifier = Modifier.fillMaxHeight(0.94f)
     ) {
@@ -551,7 +553,7 @@ fun PaySubWebBottomSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF1F1F1F))
+                    .background(platformDesign.surfaceColor(Color(0xFF1F1F1F)))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -668,7 +670,7 @@ fun PaySubWebBottomSheet(
 
             // Bottom Action Bar
             Surface(
-                color = Color(0xFF1A1A1A),
+                color = platformDesign.surfaceColor(Color(0xFF1A1A1A)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -685,7 +687,7 @@ fun PaySubWebBottomSheet(
                     Button(
                         onClick = onPaymentDone,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00AA85)),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(platformDesign.corner(8.dp)),
                         modifier = Modifier.fillMaxWidth().height(46.dp)
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
@@ -710,15 +712,16 @@ private fun PlanCard(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val borderColor = if (isSelected) NetflixRed else Color(0xFF2E2E2E)
-    val bgColor = if (isSelected) Color(0xFF221F1F) else Color(0xFF161616)
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    val borderColor = if (isSelected) platformDesign.accent else Color(0xFF2E2E2E)
+    val bgColor = if (isSelected) Color(0xFF221F1F) else platformDesign.surfaceColor(Color(0xFF161616))
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(platformDesign.corner(12.dp)))
             .background(bgColor)
-            .border(if (isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(if (isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(platformDesign.corner(12.dp)))
             .clickable { onClick() }
             .padding(16.dp)
     ) {
@@ -739,8 +742,8 @@ private fun PlanCard(
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(NetflixRed)
+                                .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
+                                .background(platformDesign.accent)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
@@ -755,7 +758,7 @@ private fun PlanCard(
 
                 Text(
                     text = "KES ${plan.priceKes} / 30 days",
-                    color = if (isSelected) NetflixRed else Color.White,
+                    color = if (isSelected) platformDesign.accent else Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )

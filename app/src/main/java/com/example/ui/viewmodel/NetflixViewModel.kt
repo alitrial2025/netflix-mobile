@@ -1072,6 +1072,13 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _isAutoPlayPreviewsEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.AUTOPLAY_PREVIEWS))
     val isAutoPlayPreviewsEnabled: StateFlow<Boolean> = _isAutoPlayPreviewsEnabled.asStateFlow()
 
+    private val _platformsEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.PLATFORMS))
+    val platformsEnabled: StateFlow<Boolean> = _platformsEnabled.asStateFlow()
+    fun setPlatformsEnabled(enabled: Boolean) {
+        mobileSettings.setPlatformsEnabled(enabled, _selectedCategoryGenre.value)
+        _platformsEnabled.value = enabled
+    }
+
     private val _useGlassyTheme = MutableStateFlow(mobileSettings.get(MobileSetting.GLASSY_THEME))
     val useGlassyTheme: StateFlow<Boolean> = _useGlassyTheme.asStateFlow()
     fun setGlassyTheme(enabled: Boolean) {
@@ -1546,6 +1553,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
         _categoryFilter.value = if (filter == CategoryFilter.ALL && genre != null) CategoryFilter.CATEGORIES else filter
         _selectedCategoryGenre.value = genre
+        mobileSettings.selectPlatformCategory(genre)
     }
 
     fun openProfilePicker(show: Boolean) {

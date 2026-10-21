@@ -61,12 +61,13 @@ fun TrailerCard(
     onShareClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Column(
         modifier = modifier
             .width(250.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(NetflixDarkGray)
-            .border(1.dp, NetflixBorderGray, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+            .background(platformDesign.surface)
+            .border(1.dp, platformDesign.outline, RoundedCornerShape(platformDesign.corner(8.dp)))
             .testTag("trailer_card_${trailer.id}")
     ) {
         // 16:9 Thumbnail Box
@@ -127,7 +128,7 @@ fun TrailerCard(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                     .background(Color.Black.copy(alpha = 0.75f))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
@@ -194,7 +195,7 @@ fun TrailerCard(
                 // My List Button
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
                         .clickable { onWatchlistToggle() }
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -202,7 +203,7 @@ fun TrailerCard(
                     Icon(
                         imageVector = if (isInWatchlist) Icons.Default.Check else Icons.Outlined.Add,
                         contentDescription = "My List",
-                        tint = if (isInWatchlist) NetflixRed else Color.White,
+                        tint = if (isInWatchlist) platformDesign.accent else Color.White,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -221,7 +222,7 @@ fun TrailerCard(
                     Icon(
                         imageVector = if (isReminded) Icons.Default.NotificationsActive else Icons.Default.Notifications,
                         contentDescription = "Remind Me",
-                        tint = if (isReminded) NetflixRed else Color.White.copy(alpha = 0.8f),
+                        tint = if (isReminded) platformDesign.accent else Color.White.copy(alpha = 0.8f),
                         modifier = Modifier.size(16.dp)
                     )
                 }

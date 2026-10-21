@@ -32,8 +32,9 @@ fun SmartDownloadsScreen(
     onAllocation: (String, Float) -> Unit, onSearch: () -> Unit = {}, onProfile: () -> Unit = {},
     nextEpisodeAllowed: Boolean = true, forYouAllowed: Boolean = true, onUpgrade: () -> Unit = {}
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().testTag("smart_downloads_screen")) {
+    Column(Modifier.fillMaxSize().background(platformDesign.background).statusBarsPadding().navigationBarsPadding().testTag("smart_downloads_screen")) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
             Text("Smart Downloads", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -74,12 +75,12 @@ fun SmartDownloadsScreen(
                     IconButton(onClick = { onAllocation(profile.id, (amount + .5f).coerceAtMost(10f)) }, enabled = forYouEnabled && amount < 10,
                         modifier = Modifier.testTag("smart_allocation_plus_${profile.id}")) { Icon(Icons.Default.AddCircleOutline, "Increase storage for ${profile.name}", tint = Color.Gray) }
                 }
-                HorizontalDivider(Modifier.padding(top = 12.dp), color = Color(0xFF202020))
+                HorizontalDivider(Modifier.padding(top = 12.dp), color = platformDesign.surfaceColor(Color(0xFF202020)))
             }
             item {
                 val allocated = allocations.values.filter { it.isFinite() && it > 0 }.sum()
                 val fraction = if (allocated > 0) (usedMb / (allocated * 1024f)).coerceIn(0f, 1f) else 0f
-                LinearProgressIndicator(progress = { fraction }, color = Color(0xFF0071EB), trackColor = Color(0xFF333333), modifier = Modifier.fillMaxWidth().height(4.dp))
+                LinearProgressIndicator(progress = { fraction }, color = platformDesign.controlColor(Color(0xFF0071EB)), trackColor = platformDesign.surfaceColor(Color(0xFF333333)), modifier = Modifier.fillMaxWidth().height(4.dp))
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("${String.format(java.util.Locale.US, "%.1f", usedMb / 1024f)} GB · Downloads for You", color = Color.Gray, fontSize = 10.sp)
                     if (freeBytes != null) Text("${String.format(java.util.Locale.US, "%.1f", freeBytes / (1024f * 1024 * 1024))} GB · Free", color = Color.Gray, fontSize = 10.sp)

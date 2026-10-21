@@ -51,10 +51,11 @@ fun CastDialog(
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = NetflixDarkGray,
-        shape = RoundedCornerShape(16.dp),
+        containerColor = platformDesign.surface,
+        shape = RoundedCornerShape(platformDesign.corner(16.dp)),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -65,7 +66,7 @@ fun CastDialog(
                     Icon(
                         imageVector = if (connectedDevice != null) Icons.Default.CastConnected else Icons.Default.Cast,
                         contentDescription = "Cast",
-                        tint = if (connectedDevice != null) NetflixRed else Color.White,
+                        tint = if (connectedDevice != null) platformDesign.accent else Color.White,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -103,12 +104,12 @@ fun CastDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isCurrent) NetflixRed.copy(alpha = 0.15f) else Color(0xFF222222))
+                            .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+                            .background(if (isCurrent) platformDesign.accent.copy(alpha = 0.15f) else platformDesign.surfaceColor(Color(0xFF222222)))
                             .border(
                                 1.dp,
-                                if (isCurrent) NetflixRed else NetflixBorderGray,
-                                RoundedCornerShape(8.dp)
+                                if (isCurrent) platformDesign.accent else platformDesign.outline,
+                                RoundedCornerShape(platformDesign.corner(8.dp))
                             )
                             .clickable { onConnect(device) }
                             .padding(12.dp)
@@ -120,7 +121,7 @@ fun CastDialog(
                             Icon(
                                 imageVector = Icons.Default.Tv,
                                 contentDescription = null,
-                                tint = if (isCurrent) NetflixRed else Color.White.copy(alpha = 0.8f),
+                                tint = if (isCurrent) platformDesign.accent else Color.White.copy(alpha = 0.8f),
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))

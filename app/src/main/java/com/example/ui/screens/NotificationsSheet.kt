@@ -94,6 +94,7 @@ fun NotificationsScreen(
     onPlayMedia: (MediaItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     // Intercept system back button to close full screen
     BackHandler { onClose() }
 
@@ -113,7 +114,7 @@ fun NotificationsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .statusBarsPadding()
             .navigationBarsPadding()
             .testTag("notifications_screen")
@@ -151,8 +152,8 @@ fun NotificationsScreen(
 
                 if (unreadCount > 0) {
                     Surface(
-                        color = NetflixRed,
-                        shape = RoundedCornerShape(12.dp)
+                        color = platformDesign.accent,
+                        shape = RoundedCornerShape(platformDesign.corner(12.dp))
                     ) {
                         Text(
                             text = "$unreadCount new",
@@ -174,7 +175,7 @@ fun NotificationsScreen(
                 ) {
                     Text(
                         text = "Mark all read",
-                        color = NetflixRed,
+                        color = platformDesign.accent,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
@@ -194,7 +195,7 @@ fun NotificationsScreen(
             NotificationFilter.values().forEach { filter ->
                 val isSelected = selectedFilter == filter
                 val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else Color(0xFF262626),
+                    targetValue = if (isSelected) Color.White else platformDesign.surfaceColor(Color(0xFF262626)),
                     label = "notif_pill_bg"
                 )
                 val textColor by animateColorAsState(
@@ -245,7 +246,7 @@ fun NotificationsScreen(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF222222)),
+                            .background(platformDesign.surfaceColor(Color(0xFF222222))),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -340,17 +341,18 @@ private fun NotificationCard(
     onDeleteClick: () -> Unit,
     onPlayClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val isUnread = !notification.isRead
 
-    val containerBg = if (isUnread) Color(0xFF1E1E1E) else Color(0xFF141414)
-    val borderColor = if (isUnread) NetflixRed.copy(alpha = 0.5f) else NetflixBorderGray
+    val containerBg = if (isUnread) Color(0xFF1E1E1E) else platformDesign.surfaceColor(Color(0xFF141414))
+    val borderColor = if (isUnread) platformDesign.accent.copy(alpha = 0.5f) else platformDesign.outline
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(platformDesign.corner(12.dp)))
             .background(containerBg)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(platformDesign.corner(12.dp)))
             .clickable { onItemClick() }
             .padding(14.dp)
             .testTag("notif_card_${notification.id}"),
@@ -364,7 +366,7 @@ private fun NotificationCard(
                 .clip(CircleShape)
                 .background(
                     when (notification.iconType) {
-                        NotificationIconType.NEW_SEASON -> NetflixRed
+                        NotificationIconType.NEW_SEASON -> platformDesign.accent
                         NotificationIconType.REMINDER -> Color(0xFF00ACC1)
                         NotificationIconType.DOWNLOAD -> NetflixGreen
                         NotificationIconType.LEAVING_SOON -> Color(0xFFFF9800)
@@ -408,7 +410,7 @@ private fun NotificationCard(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(NetflixRed)
+                            .background(platformDesign.accent)
                     )
                 }
             }
@@ -442,10 +444,10 @@ private fun NotificationCard(
                     Button(
                         onClick = onPlayClick,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = NetflixRed,
-                            contentColor = Color.White
+                            containerColor = platformDesign.accent,
+                            contentColor = platformDesign.onAccent
                         ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(platformDesign.corner(16.dp)),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
@@ -459,8 +461,8 @@ private fun NotificationCard(
                     }
 
                     Surface(
-                        color = Color(0xFF2A2A2A),
-                        shape = RoundedCornerShape(16.dp),
+                        color = platformDesign.surfaceColor(Color(0xFF2A2A2A)),
+                        shape = RoundedCornerShape(platformDesign.corner(16.dp)),
                         modifier = Modifier
                             .height(28.dp)
                             .clickable { onItemClick() }
@@ -488,8 +490,8 @@ private fun NotificationCard(
             Box(
                 modifier = Modifier
                     .size(width = 90.dp, height = 55.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(NetflixCardBg)
+                    .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+                    .background(platformDesign.raised)
                     .clickable { onPlayClick() }
             ) {
                 if (matchedMedia.backdropUrl != null || matchedMedia.posterUrl != null || matchedMedia.bannerDrawableRes != null) {

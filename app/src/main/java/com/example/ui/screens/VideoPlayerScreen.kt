@@ -194,6 +194,7 @@ fun VideoPlayerScreen(
     streamingAllowed: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val media = playerState.media ?: return
     var showSpeedDialog by remember { mutableStateOf(false) }
     var brightnessLevel by remember { mutableFloatStateOf(0.75f) }
@@ -703,7 +704,7 @@ fun VideoPlayerScreen(
                                     onSetSpeed(speed)
                                     showSpeedDialog = false
                                 },
-                                colors = RadioButtonDefaults.colors(selectedColor = NetflixRed)
+                                colors = RadioButtonDefaults.colors(selectedColor = platformDesign.accent)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
@@ -715,10 +716,10 @@ fun VideoPlayerScreen(
                     }
                 }
             },
-            containerColor = NetflixDarkGray,
+            containerColor = platformDesign.surface,
             confirmButton = {
                 TextButton(onClick = { showSpeedDialog = false }) {
-                    Text("Done", color = NetflixRed)
+                    Text("Done", color = platformDesign.accent)
                 }
             }
         )
@@ -800,7 +801,7 @@ fun VideoPlayerScreen(
                                         selected = isSelected,
                                         onClick = null,
                                         colors = RadioButtonDefaults.colors(
-                                            selectedColor = NetflixRed,
+                                            selectedColor = platformDesign.accent,
                                             unselectedColor = Color.Gray
                                         )
                                     )
@@ -891,7 +892,7 @@ fun VideoPlayerScreen(
                                         selected = isSelected,
                                         onClick = null,
                                         colors = RadioButtonDefaults.colors(
-                                            selectedColor = NetflixRed,
+                                            selectedColor = platformDesign.accent,
                                             unselectedColor = Color.Gray
                                         )
                                     )
@@ -910,11 +911,11 @@ fun VideoPlayerScreen(
                     }
                 }
             },
-            containerColor = NetflixDarkGray,
-            shape = RoundedCornerShape(12.dp),
+            containerColor = platformDesign.surface,
+            shape = RoundedCornerShape(platformDesign.corner(12.dp)),
             confirmButton = {
                 TextButton(onClick = { onShowAudioSubtitles(false) }) {
-                    Text("Apply", color = NetflixRed, fontWeight = FontWeight.Bold)
+                    Text("Apply", color = platformDesign.accent, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -924,7 +925,7 @@ fun VideoPlayerScreen(
     if (!inPip && playerState.showEpisodeDrawer && media.type == MediaType.TV_SHOW) {
         ModalBottomSheet(
             onDismissRequest = { onShowEpisodesDrawer(false) },
-            containerColor = NetflixDarkGray
+            containerColor = platformDesign.surface
         ) {
             Column(
                 modifier = Modifier
@@ -947,8 +948,8 @@ fun VideoPlayerScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isCurrent) NetflixCardBg else Color.Transparent)
+                                .clip(RoundedCornerShape(platformDesign.corner(6.dp)))
+                                .background(if (isCurrent) platformDesign.raised else Color.Transparent)
                                 .clickable {
                                     onSelectEpisode(ep)
                                     onShowEpisodesDrawer(false)
@@ -961,8 +962,8 @@ fun VideoPlayerScreen(
                                 modifier = Modifier
                                     .width(80.dp)
                                     .height(48.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(NetflixCardBg),
+                                    .clip(RoundedCornerShape(platformDesign.corner(4.dp)))
+                                    .background(platformDesign.raised),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (!epImageUrl.isNullOrBlank()) {
@@ -980,7 +981,7 @@ fun VideoPlayerScreen(
                                             .background(Color.Black.copy(alpha = 0.5f)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Playing", tint = NetflixRed, modifier = Modifier.size(24.dp))
+                                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Playing", tint = platformDesign.accent, modifier = Modifier.size(24.dp))
                                     }
                                 }
                             }
@@ -990,7 +991,7 @@ fun VideoPlayerScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "E${ep.episodeNumber}. ${ep.title}",
-                                    color = if (isCurrent) NetflixRed else Color.White,
+                                    color = if (isCurrent) platformDesign.accent else Color.White,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1190,7 +1191,9 @@ fun VideoPlayerScreen(
                                 .align(Alignment.CenterStart)
                                 .fillMaxWidth(0.35f)
                         ) {
-                            NetflixNLogo(size = 32.dp)
+                            if (platformDesign.originalLayout) NetflixNLogo(size = 32.dp)
+                            else Text(platformDesign.brandTitle, color = Color.White, fontSize = 12.sp,
+                                fontWeight = platformDesign.titleWeight, maxLines = 1)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
@@ -1229,7 +1232,7 @@ fun VideoPlayerScreen(
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_netflix_thumbs_down),
                                     contentDescription = "Dislike",
-                                    tint = if (currentRating == "DISLIKE") NetflixRed else Color.White.copy(alpha = 0.85f),
+                                    tint = if (currentRating == "DISLIKE") platformDesign.accent else Color.White.copy(alpha = 0.85f),
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -1243,7 +1246,7 @@ fun VideoPlayerScreen(
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_netflix_thumbs_up),
                                     contentDescription = "Like",
-                                    tint = if (currentRating == "LIKE") NetflixRed else Color.White.copy(alpha = 0.85f),
+                                    tint = if (currentRating == "LIKE") platformDesign.accent else Color.White.copy(alpha = 0.85f),
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -1257,7 +1260,7 @@ fun VideoPlayerScreen(
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_netflix_love_this),
                                     contentDescription = "Love It",
-                                    tint = if (currentRating == "DOUBLE_LIKE") NetflixRed else Color.White.copy(alpha = 0.85f),
+                                    tint = if (currentRating == "DOUBLE_LIKE") platformDesign.accent else Color.White.copy(alpha = 0.85f),
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -1330,7 +1333,7 @@ fun VideoPlayerScreen(
                                     .onGloballyPositioned { coords ->
                                         barHeightPx = coords.size.height.toFloat().coerceAtLeast(1f)
                                     }
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .clip(RoundedCornerShape(platformDesign.corner(3.dp)))
                                     .background(Color.White.copy(alpha = 0.25f))
                                     .pointerInput(Unit) {
                                         detectVerticalDragGestures { change, dragAmount ->
@@ -1351,8 +1354,11 @@ fun VideoPlayerScreen(
                         }
                     }
 
-                    // CENTER PLAYBACK CONTROLS
-                    Row(
+                    // All layouts invoke the same player handlers and retain the same player instance.
+                    if (!platformDesign.originalLayout) com.example.ui.components.PlatformPlaybackControls(
+                        playerState.isPlaying, handleSkipBackward10, handlePlayPauseToggle, handleSkipForward10,
+                        Modifier.align(Alignment.Center))
+                    else Row(
                         modifier = Modifier.align(Alignment.Center),
                         horizontalArrangement = Arrangement.spacedBy(56.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1430,7 +1436,7 @@ fun VideoPlayerScreen(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                                     .clickable { showSpeedDialog = true }
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                                     .testTag("player_speed_button")
@@ -1455,7 +1461,7 @@ fun VideoPlayerScreen(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                                     .clickable { onToggleLock() }
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                                     .testTag("player_lock_button")
@@ -1480,7 +1486,7 @@ fun VideoPlayerScreen(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                                     .clickable { onShowAudioSubtitles(true) }
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                                     .testTag("player_audio_subtitles_button")
@@ -1506,7 +1512,7 @@ fun VideoPlayerScreen(
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                                         .clickable { onShowEpisodesDrawer(true) }
                                         .padding(horizontal = 16.dp, vertical = 8.dp)
                                         .testTag("player_episodes_drawer_button")
@@ -1535,7 +1541,7 @@ fun VideoPlayerScreen(
         val scrub = scrubPosition
         if (!inPip && scrub != null && !playerState.isLocked) {
             val cue = remember(scrub, thumbnailCues) { seekThumbnailAt(thumbnailCues, scrub * 1000L) }
-            Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp).background(Color(0xFF202020), RoundedCornerShape(6.dp)).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp).background(platformDesign.surfaceColor(Color(0xFF202020)), RoundedCornerShape(platformDesign.corner(6.dp))).padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (cue != null) {
                     SeekThumbnailFrame(cue, playerState.resolveHeaders, "Preview at ${formatTimeString(scrub)}")
                 }
@@ -1576,9 +1582,9 @@ fun VideoPlayerScreen(
                     containerColor = Color.Black.copy(alpha = 0.8f),
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(4.dp),
+                shape = RoundedCornerShape(platformDesign.corner(4.dp)),
                 modifier = Modifier
-                    .border(1.dp, Color.White, RoundedCornerShape(4.dp))
+                    .border(1.dp, Color.White, RoundedCornerShape(platformDesign.corner(4.dp)))
                     .testTag("skip_intro_button")
             ) {
                 Text(
@@ -1601,6 +1607,7 @@ private fun PlayerProgressBar(
     onScrub: (Int?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val latestSeek by rememberUpdatedState(onSeek)
     val latestScrub by rememberUpdatedState(onScrub)
     val progress = if (durationSec > 0) (currentSec.toFloat() / durationSec.toFloat()).coerceIn(0f, 1f) else 0f
@@ -1663,13 +1670,13 @@ private fun PlayerProgressBar(
                     .background(Color(0xFF737373))
             )
 
-            // Active Track: #D22F26 (NetflixRed), height 4.dp, rx 2.dp
+            // Active Track: #D22F26 (platformDesign.accent), height 4.dp, rx 2.dp
             Box(
                 modifier = Modifier
                     .width(activeWidth)
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(NetflixRed)
+                    .background(platformDesign.accent)
             )
 
             // Red Circle Thumb Knob: r = 12.dp (size 24.dp), fill #D22F26
@@ -1678,7 +1685,7 @@ private fun PlayerProgressBar(
                 modifier = Modifier
                     .offset(x = thumbOffset)
                     .size(thumbRadius * 2)
-                    .background(NetflixRed, CircleShape)
+                    .background(platformDesign.accent, CircleShape)
             )
         }
 

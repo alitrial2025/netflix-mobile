@@ -81,19 +81,20 @@ fun NetflixRatingAction(
     modifier: Modifier = Modifier,
     iconSize: androidx.compose.ui.unit.Dp = 24.dp, labelSize: androidx.compose.ui.unit.TextUnit = 11.sp
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var isExpanded by remember { mutableStateOf(false) }
     var selectedOptionKey by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     // Active icon & label when collapsed
-    val activeIconRes = remember(currentRating) {
+    val activeIconRes = remember(currentRating, platformDesign) {
         when (currentRating) {
             "DOUBLE_LIKE" -> R.drawable.ic_netflix_love_this
             "DISLIKE" -> R.drawable.ic_netflix_thumbs_down
             else -> R.drawable.ic_netflix_thumbs_up
         }
     }
-    val activeLabel = remember(currentRating) {
+    val activeLabel = remember(currentRating, platformDesign) {
         when (currentRating) {
             "DOUBLE_LIKE" -> "Loved"
             "LIKE" -> "Liked"
@@ -101,8 +102,8 @@ fun NetflixRatingAction(
             else -> "Rate"
         }
     }
-    val activeTint = remember(currentRating) {
-        if (currentRating != null) NetflixRed else Color.White
+    val activeTint = remember(currentRating, platformDesign) {
+        if (currentRating != null) platformDesign.accent else Color.White
     }
 
     Box(
@@ -142,7 +143,7 @@ fun NetflixRatingAction(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF262626))
+                    .background(platformDesign.surfaceColor(Color(0xFF262626)))
                     .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -259,6 +260,7 @@ private fun RatingItemView(
     sparkleScale: Float,
     onClick: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var isTapped by remember { mutableStateOf(false) }
 
     // Entry Bounce animation
@@ -309,7 +311,7 @@ private fun RatingItemView(
             Icon(
                 painter = painterResource(id = option.iconRes),
                 contentDescription = option.label,
-                tint = if (isTapped) NetflixRed else Color.White,
+                tint = if (isTapped) platformDesign.accent else Color.White,
                 modifier = Modifier.size(if (option == RatingOption.DOUBLE_LIKE) 32.dp else 26.dp)
             )
         }

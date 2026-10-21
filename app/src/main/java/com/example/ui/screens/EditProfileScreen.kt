@@ -82,6 +82,7 @@ fun EditProfileScreen(
     onDismiss: () -> Unit,
     canDelete: Boolean = true, isSaving: Boolean = false, saveError: String? = null
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var profileName by rememberSaveable(profile.id) { mutableStateOf(profile.name) }
     var isKids by rememberSaveable(profile.id) { mutableStateOf(profile.isKids) }
     var maxAge by rememberSaveable(profile.id) { mutableStateOf(profile.maxAge) }
@@ -127,7 +128,7 @@ fun EditProfileScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NetflixBlack)
+            .background(platformDesign.background)
             .statusBarsPadding()
     ) {
         Column(
@@ -182,7 +183,7 @@ fun EditProfileScreen(
                 ) {
                     Text(
                         text = if (isSaving) "Saving…" else "Save",
-                        color = if (profileName.isNotBlank()) NetflixRed else Color.Gray,
+                        color = if (profileName.isNotBlank()) platformDesign.accent else Color.Gray,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )
@@ -198,7 +199,7 @@ fun EditProfileScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                if (saveError != null) Text(saveError, color = NetflixRed, modifier = Modifier.padding(bottom = 12.dp))
+                if (saveError != null) Text(saveError, color = platformDesign.accent, modifier = Modifier.padding(bottom = 12.dp))
                 // Avatar Header with Edit Badge
                 Box(
                     modifier = Modifier
@@ -219,7 +220,7 @@ fun EditProfileScreen(
                             .size(36.dp)
                             .align(Alignment.BottomEnd)
                             .background(Color.White, CircleShape)
-                            .border(2.dp, NetflixBlack, CircleShape),
+                            .border(2.dp, platformDesign.background, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -275,13 +276,13 @@ fun EditProfileScreen(
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = NetflixDarkGray,
-                        unfocusedContainerColor = NetflixDarkGray,
-                        focusedBorderColor = NetflixRed,
+                        focusedContainerColor = platformDesign.surface,
+                        unfocusedContainerColor = platformDesign.surface,
+                        focusedBorderColor = platformDesign.accent,
                         unfocusedBorderColor = Color.Transparent,
-                        cursorColor = NetflixRed
+                        cursorColor = platformDesign.accent
                     ),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(platformDesign.corner(8.dp))
                 )
 
                 Spacer(modifier = Modifier.height(28.dp))
@@ -404,7 +405,7 @@ fun EditProfileScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
                             .background(Color(0xFF1E1E1E))
                             .clickable {
                                 pinInput = ""
@@ -419,7 +420,7 @@ fun EditProfileScreen(
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = null,
-                                tint = NetflixRed,
+                                tint = platformDesign.accent,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -451,10 +452,10 @@ fun EditProfileScreen(
                         .testTag("delete_profile_button"),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Transparent,
-                        contentColor = NetflixRed
+                        contentColor = platformDesign.accent
                     ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, NetflixRed.copy(alpha = 0.6f)),
-                    shape = RoundedCornerShape(8.dp)
+                    border = androidx.compose.foundation.BorderStroke(1.dp, platformDesign.accent.copy(alpha = 0.6f)),
+                    shape = RoundedCornerShape(platformDesign.corner(8.dp))
                 ) {
                     Text(
                         text = "Delete Profile",
@@ -495,7 +496,7 @@ fun EditProfileScreen(
                             onDeleteProfile(profile.id)
                         }
                     ) {
-                        Text(text = "DELETE", color = NetflixRed, fontWeight = FontWeight.Bold)
+                        Text(text = "DELETE", color = platformDesign.accent, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -503,7 +504,7 @@ fun EditProfileScreen(
                         Text(text = "CANCEL", color = Color.White)
                     }
                 },
-                containerColor = NetflixCardBg
+                containerColor = platformDesign.raised
             )
         }
 
@@ -521,7 +522,7 @@ fun EditProfileScreen(
                         Icon(
                             imageVector = Icons.Default.Lock,
                             contentDescription = null,
-                            tint = NetflixRed,
+                            tint = platformDesign.accent,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -555,7 +556,7 @@ fun EditProfileScreen(
                             ),
                             visualTransformation = PasswordVisualTransformation(),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NetflixRed,
+                                focusedBorderColor = platformDesign.accent,
                                 unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
@@ -566,7 +567,7 @@ fun EditProfileScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = pinError!!,
-                                color = NetflixRed,
+                                color = platformDesign.accent,
                                 fontSize = 12.sp
                             )
                         }
@@ -584,7 +585,7 @@ fun EditProfileScreen(
                             }
                         }
                     ) {
-                        Text(text = "SAVE PIN", color = NetflixRed, fontWeight = FontWeight.Bold)
+                        Text(text = "SAVE PIN", color = platformDesign.accent, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -599,7 +600,7 @@ fun EditProfileScreen(
                         Text(text = "CANCEL", color = Color.White)
                     }
                 },
-                containerColor = NetflixCardBg
+                containerColor = platformDesign.raised
             )
         }
 
@@ -648,7 +649,7 @@ fun EditProfileScreen(
                                         showMaturityDialog = false
                                     },
                                     colors = RadioButtonDefaults.colors(
-                                        selectedColor = NetflixRed,
+                                        selectedColor = platformDesign.accent,
                                         unselectedColor = Color.Gray
                                     )
                                 )
@@ -659,7 +660,7 @@ fun EditProfileScreen(
                     }
                 },
                 confirmButton = {},
-                containerColor = NetflixCardBg
+                containerColor = platformDesign.raised
             )
         }
     }
@@ -683,11 +684,12 @@ private fun SettingItemRow(
     onClick: () -> Unit,
     testTag: String
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(NetflixDarkGray)
+            .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+            .background(platformDesign.surface)
             .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 14.dp)
             .testTag(testTag),
@@ -725,11 +727,12 @@ private fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
     testTag: String
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(NetflixDarkGray)
+            .clip(RoundedCornerShape(platformDesign.corner(8.dp)))
+            .background(platformDesign.surface)
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .testTag(testTag),
         verticalAlignment = Alignment.CenterVertically
@@ -763,9 +766,10 @@ private fun ProfilePreferencesScreen(
     onBack: () -> Unit, onAudio: (String) -> Unit, onSubtitle: (String) -> Unit,
     onDisplay: (String) -> Unit, onHandle: (String) -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     var handleDraft by rememberSaveable { mutableStateOf(handle) }
     val validHandle = handleDraft.isBlank() || handleDraft.matches(Regex("[a-zA-Z0-9_]{3,16}"))
-    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxSize().background(platformDesign.background).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onBack, Modifier.testTag("profile_preferences_back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
             Text(when(page) { "display" -> "Display language"; "playback" -> "Audio & subtitles"; else -> "Game handle" },
@@ -791,7 +795,7 @@ private fun ProfilePreferencesScreen(
                     items(listOf("Original") + profilePlaybackLanguages.keys, key = { "audio:$it" }) { language ->
                         ProfileLanguageRow(language, audio == language, "profile_audio_$language") { onAudio(language) }
                     }
-                    item { HorizontalDivider(Modifier.padding(vertical = 24.dp), color = Color(0xFF333333)); Text("Subtitles", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
+                    item { HorizontalDivider(Modifier.padding(vertical = 24.dp), color = platformDesign.surfaceColor(Color(0xFF333333))); Text("Subtitles", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
                     items(listOf("Off") + profilePlaybackLanguages.keys, key = { "subtitle:$it" }) { language ->
                         ProfileLanguageRow(language, subtitles == language, "profile_subtitle_$language") { onSubtitle(language) }
                     }

@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 /** Wraps existing screens without changing their layout. Home starts after the launch check. */
 @Composable
 fun UpdateGateHost(content: @Composable () -> Unit) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val gate: UpdateGateViewModel = viewModel()
     val state by gate.state.collectAsState()
     val context = LocalContext.current
@@ -75,7 +76,7 @@ fun UpdateGateHost(content: @Composable () -> Unit) {
     if (state.phase == UpdatePhase.CONTINUE) {
         content()
     } else if (state.phase == UpdatePhase.CHECKING) {
-        Box(Modifier.fillMaxSize().background(Color.Black))
+        Box(Modifier.fillMaxSize().background(platformDesign.background))
     } else {
         UpdateGateScreen(
             state = state,
@@ -101,6 +102,7 @@ private fun UpdateGateScreen(
     onAllow: () -> Unit,
     onApprove: () -> Unit
 ) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val primaryFocus = remember { FocusRequester() }
     val isBusy = state.phase in listOf(UpdatePhase.CHECKING, UpdatePhase.VERIFYING, UpdatePhase.INSTALLING)
     val action = when (state.phase) {
@@ -115,7 +117,7 @@ private fun UpdateGateScreen(
             runCatching { primaryFocus.requestFocus() }
         }
     }
-    Box(Modifier.fillMaxSize().background(Color.Black).padding(24.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(platformDesign.background).padding(24.dp), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,

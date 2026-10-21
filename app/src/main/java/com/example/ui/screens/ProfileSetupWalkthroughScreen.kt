@@ -40,6 +40,7 @@ import com.example.ui.theme.netflixProSwitchColors
 @Composable
 fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile) -> Unit,
     onChooseIcon: () -> Unit, onCancel: () -> Unit, isSaving: Boolean = false, saveError: String? = null) {
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     var step by rememberSaveable(profile.id) { mutableIntStateOf(0) }
@@ -55,7 +56,7 @@ fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile
     val titles = listOf("Make it yours", "Your viewing preferences", "What do you love?")
     fun back() { if (!isSaving) { if (step > 0) { step--; error = null } else onCancel() } }
     BackHandler { back() }
-    Column(Modifier.fillMaxSize().background(Color.Black).systemBarsPadding().imePadding().testTag("profile_setup_walkthrough")) {
+    Column(Modifier.fillMaxSize().background(platformDesign.background).systemBarsPadding().imePadding().testTag("profile_setup_walkthrough")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { back() }, enabled = !isSaving) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
@@ -65,7 +66,7 @@ fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile
             Text("${step + 1} of 3", color = Color(0xFFAAAAAA), modifier = Modifier.padding(end = 16.dp))
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            repeat(3) { index -> Box(Modifier.weight(1f).height(3.dp).background(if(index <= step) Color.White else Color(0xFF333333))) }
+            repeat(3) { index -> Box(Modifier.weight(1f).height(3.dp).background(if(index <= step) Color.White else platformDesign.surfaceColor(Color(0xFF333333)))) }
         }
         AnimatedContent(step, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
             label = "profile_setup_step", modifier = Modifier.weight(1f)) { page ->
@@ -79,12 +80,12 @@ fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile
                 Spacer(Modifier.height(28.dp))
                 when(page) {
                     0 -> {
-                        Box(Modifier.size(104.dp).clip(RoundedCornerShape(16.dp)).background(Color(profile.avatarColorHex),RoundedCornerShape(16.dp))
+                        Box(Modifier.size(104.dp).clip(RoundedCornerShape(platformDesign.corner(16.dp))).background(Color(profile.avatarColorHex),RoundedCornerShape(platformDesign.corner(16.dp)))
                             .clickable(enabled = !isSaving, onClick = { focusManager.clearFocus(); keyboard?.hide(); onChooseIcon() }).testTag("setup_avatar")) {
                             if (!profile.avatarUrl.isNullOrBlank()) AsyncImage(profile.avatarUrl, "Profile icon", modifier = Modifier.fillMaxSize())
                             else Text(name.firstOrNull()?.uppercaseChar()?.toString() ?: "?", color=Color.White,fontSize=36.sp,fontWeight=FontWeight.Bold,modifier=Modifier.align(Alignment.Center))
                             Icon(Icons.Default.Edit, "Choose icon", tint = Color.White, modifier = Modifier.align(Alignment.BottomEnd)
-                                .background(Color.Black.copy(alpha=.7f),RoundedCornerShape(8.dp)).padding(8.dp))
+                                .background(Color.Black.copy(alpha=.7f),RoundedCornerShape(platformDesign.corner(8.dp))).padding(8.dp))
                         }
                         Spacer(Modifier.height(24.dp))
                         OutlinedTextField(name, { name=it.take(25); error=null }, label = { Text("Profile name") }, singleLine=true,
@@ -144,7 +145,7 @@ fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile
             else onComplete(profile.copy(name=name.trim(),isKids=kids,maxAge=age.coerceAtMost(if (kids) 12 else 18),language=language,
                 autoplayNext=next,autoplayPreviews=previews,pin=pin.takeIf { it.isNotBlank() } ?: profile.pin,
                 favoriteGenres=genres.filter { !kids || it in listOf("Animation","Family","Adventure","Comedy","Fantasy") }))
-        },enabled=!isSaving,shape=RoundedCornerShape(6.dp),colors=ButtonDefaults.buttonColors(containerColor=Color.White,contentColor=Color.Black),
+        },enabled=!isSaving,shape=RoundedCornerShape(platformDesign.corner(6.dp)),colors=ButtonDefaults.buttonColors(containerColor=Color.White,contentColor=Color.Black),
             modifier=Modifier.fillMaxWidth().padding(horizontal=24.dp,vertical=16.dp).height(52.dp).testTag("setup_continue")) {
             if(isSaving) CircularProgressIndicator(color=Color.Black,strokeWidth=2.dp,modifier=Modifier.size(22.dp))
             else Text(if(step<2) "Continue" else "Start watching",fontSize=16.sp,fontWeight=FontWeight.Bold)
@@ -152,8 +153,9 @@ fun ProfileSetupWalkthroughScreen(profile: UserProfile, onComplete: (UserProfile
     }
 }
 @Composable private fun SetupPill(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    FilterChip(selected=selected,onClick=onClick,enabled=enabled,label={Text(label)},shape=RoundedCornerShape(8.dp),
-        colors=FilterChipDefaults.filterChipColors(containerColor=Color(0xFF242424),labelColor=Color.White,
+    val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    FilterChip(selected=selected,onClick=onClick,enabled=enabled,label={Text(label)},shape=RoundedCornerShape(platformDesign.corner(8.dp)),
+        colors=FilterChipDefaults.filterChipColors(containerColor=platformDesign.surfaceColor(Color(0xFF242424)),labelColor=Color.White,
             selectedContainerColor=Color.White,selectedLabelColor=Color.Black),modifier=Modifier.testTag("setup_option_$label"))
 }
 @Composable private fun SetupSwitch(title: String, subtitle: String, value: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
