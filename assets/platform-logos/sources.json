@@ -1,0 +1,38 @@
+[
+  {
+    "key": "apple",
+    "source": "apple-tv-light.svg",
+    "sourceRepository": "selfhst/icons",
+    "sourcePath": "svg/apple-tv-light.svg"
+  },
+  {
+    "key": "prime",
+    "source": "prime-video.svg",
+    "sourceRepository": "pheralb/svgl",
+    "sourcePath": "static/library/prime-video.svg"
+  },
+  {
+    "key": "disney",
+    "source": "disney-plus-light.svg",
+    "sourceRepository": "selfhst/icons",
+    "sourcePath": "svg/disney-plus-light.svg"
+  },
+  {
+    "key": "peacock",
+    "source": "peacock-jonzan0ff.svg",
+    "sourceRepository": "jonzan0ff/HomeTeam",
+    "sourcePath": "logos/streaming/peacock.svg"
+  },
+  {
+    "key": "netflix",
+    "source": "netflix-source.svg",
+    "sourceRepository": "pheralb/svgl",
+    "sourcePath": "static/library/netflix-wordmark.svg"
+  },
+  {
+    "key": "hotstar",
+    "source": "jiohotstar.svg",
+    "sourceRepository": "sethihq/baron-tv",
+    "sourcePath": "prototype/assets/apps/covers/jiohotstar.svg"
+  }
+]

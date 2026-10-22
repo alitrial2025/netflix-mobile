@@ -1192,8 +1192,7 @@ fun VideoPlayerScreen(
                                 .fillMaxWidth(0.35f)
                         ) {
                             if (platformDesign.originalLayout) NetflixNLogo(size = 32.dp)
-                            else Text(platformDesign.brandTitle, color = Color.White, fontSize = 12.sp,
-                                fontWeight = platformDesign.titleWeight, maxLines = 1)
+                            else com.example.ui.components.PlatformBrandLogo(height = 20.dp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(

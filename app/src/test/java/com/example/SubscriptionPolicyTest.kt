@@ -37,6 +37,8 @@ class SubscriptionPolicyTest {
                 assertEquals(plan.smartNextEpisode, active.isSmartNextEpisodeAllowed)
                 assertEquals(plan.downloadsForYou, active.isDownloadsForYouAllowed)
                 assertEquals(plan.spatialAudio, active.isSpatialAudioAllowed)
+                assertEquals(plan.id == "plan_premium", plan.platforms)
+                assertEquals(plan.platforms, active.isPlatformsAllowed)
                 val expired = active.copy(expiresAt = now - com.example.data.RenewalPolicy.GRACE_MS)
                 assertFalse(expired.isActive)
                 assertEquals(0, expired.maxVideoHeight)
@@ -44,6 +46,7 @@ class SubscriptionPolicyTest {
                 assertFalse(expired.isSmartNextEpisodeAllowed)
                 assertFalse(expired.isDownloadsForYouAllowed)
                 assertFalse(expired.isSpatialAudioAllowed)
+                assertFalse(expired.isPlatformsAllowed)
             }
             assertFalse(UserSubscription(status = "ACTIVE", planId = "plan_admin", expiresAt = Long.MAX_VALUE).isActive)
             assertFalse(UserSubscription(status = "APPROVED", planId = "plan_premium", expiresAt = Long.MAX_VALUE).isActive)
@@ -71,6 +74,24 @@ class SubscriptionPolicyTest {
             assertFalse(sub.renewalReminderDue)
             assertFalse(sub.copy(status = "GRACE_PERIOD").isActive)
             assertFalse(sub.copy(expiresAt = 0L).isActive)
+        } finally { UserSubscription.clock = previous }
+    }
+
+    @Test fun platformsUsesTheExistingPremiumRenewalCutoffAndRejectsOtherStatuses() {
+        val previous = UserSubscription.clock
+        val expiry = 1_800_000_000_000L
+        var now = expiry
+        UserSubscription.clock = { now }
+        try {
+            val premium = UserSubscription(planId = "plan_premium", status = "ACTIVE", expiresAt = expiry)
+            assertTrue(premium.isPlatformsAllowed)
+            now = expiry + com.example.data.RenewalPolicy.GRACE_MS - 1
+            assertTrue(premium.isPlatformsAllowed)
+            for (status in listOf("SUSPENDED", "EXPIRED", "PENDING", "NONE", "APPROVED")) assertFalse(premium.copy(status = status).isPlatformsAllowed)
+            now++
+            assertFalse(premium.isPlatformsAllowed)
+            assertFalse(premium.copy(status = "GRACE_PERIOD").isPlatformsAllowed)
+            assertFalse(UserSubscription().isPlatformsAllowed)
         } finally { UserSubscription.clock = previous }
     }
 

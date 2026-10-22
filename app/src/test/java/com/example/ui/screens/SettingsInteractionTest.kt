@@ -90,11 +90,20 @@ class SettingsInteractionTest {
         assertEquals(listOf("close", "signout"), events.takeLast(2))
     }
 
-    @Test fun platformsToggleIsOffInitiallyAndWorksWithoutChangingMembership() {
+    @Test fun premiumCanEnablePlatformsWithoutChangingMembership() {
         val events = mutableListOf<String>()
-        settings(events, paid = false)
+        settings(events)
         rule.onNodeWithTag("settings_toggle_Platforms").performScrollTo().assertIsOff().performClick()
         assertEquals(listOf("platforms:true"), events)
+    }
+
+    @Test fun basicCannotEnablePlatformsAndUpgradeOpensThePlanScreen() {
+        val events = mutableListOf<String>()
+        settings(events, paid = false)
+        rule.onNodeWithTag("settings_toggle_Platforms").performScrollTo().assertIsOff().assertIsNotEnabled()
+        rule.onNodeWithTag("settings_platforms_upgrade").performScrollTo().performClick()
+        assertEquals(listOf("close", "membership"), events)
+        rule.onNodeWithTag("settings_toggle_Use Glassy Theme").performScrollTo().assertIsEnabled()
     }
 
     @Test fun basicMembershipCannotEnablePremiumSpatialAudio() {

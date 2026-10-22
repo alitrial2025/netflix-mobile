@@ -73,8 +73,7 @@ internal fun PlatformHomeHeader(onHome: () -> Unit, onCast: () -> Unit, onDownlo
         Box(Modifier.weight(1f)) {
             GlassPanel(Modifier.widthIn(max = 320.dp).heightIn(min = 48.dp).testTag("platform_header_title"), RoundedCornerShape(24.dp)) {
             Column(Modifier.clickable(role = Role.Button, onClick = onHome).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(design.brandTitle, color = if (design.appearance == PlatformAppearance.PRIME) design.accent else Color.White,
-                    fontSize = 21.sp, fontWeight = design.titleWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                PlatformBrandLogo(height = 26.dp)
                 Text("NETFLIXPRO", color = Color.White.copy(alpha = .65f), fontSize = 8.sp, letterSpacing = 1.sp)
             }
         }

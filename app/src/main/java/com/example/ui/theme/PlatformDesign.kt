@@ -64,14 +64,14 @@ val LocalPlatformDesign = staticCompositionLocalOf { platformDesign(PlatformAppe
 
 /** One preference listener at the root; updates in place without restarting navigation or players. */
 @Composable
-fun MobileAppTheme(content: @Composable () -> Unit) {
+fun MobileAppTheme(platformsAllowed: Boolean = false, content: @Composable () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("netflix_prefs", Context.MODE_PRIVATE) }
-    PlatformPreferenceTheme(prefs, content)
+    PlatformPreferenceTheme(prefs, platformsAllowed, content)
 }
 
 @Composable
-internal fun PlatformPreferenceTheme(prefs: SharedPreferences, content: @Composable () -> Unit) {
+internal fun PlatformPreferenceTheme(prefs: SharedPreferences, platformsAllowed: Boolean = false, content: @Composable () -> Unit) {
     val store = remember(prefs) { MobileSettingsStore(prefs) }
     var appearance by remember(prefs) { mutableStateOf(store.effectivePlatform) }
     DisposableEffect(prefs) {
@@ -83,5 +83,5 @@ internal fun PlatformPreferenceTheme(prefs: SharedPreferences, content: @Composa
         appearance = store.effectivePlatform
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
-    NetflixTheme(platform = appearance, content = content)
+    NetflixTheme(platform = if (platformsAllowed) appearance else PlatformAppearance.ORIGINAL, content = content)
 }

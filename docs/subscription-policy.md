@@ -10,7 +10,7 @@ All new purchases cost KSh 150 (Mobile), 550 (Basic), 950 (Standard), or 1,350 (
 | Offline titles per profile on this phone | 3 | 5 | 25 | 999 |
 | Download Next Episode | No | No | Yes | Yes |
 | Games on phone | No | No | Yes | Yes |
-| Clips / Downloads for You / spatial audio | No | No | No | Yes |
+| Clips / Downloads for You / spatial audio / Platforms appearance | No | No | No | Yes |
 
 Catalog selection on Mobile and Basic retains the existing title-lock policy. Standard and Premium retain full catalog access. Downloads for You queues only provider-supported titles. Premium retains its previous large offline library limit; no existing downloaded files are deleted on a downgrade. Existing excess titles must be removed before additional downloads can be started.
 
@@ -52,3 +52,5 @@ A local WorkManager reminder verifies the signed-in account and current cloud ex
 Deployment order: publish the new server endpoints and mandatory app updates before applying the matching Firestore rules. Vercel authentication and Firebase rule-deployment authentication are separate.
 
 Refund operations: incoming refunds/reversals are rejected during redemption. No signed refund webhook is configured. Refunding an already activated payment requires support to set the canonical subscription to SUSPENDED (and update the reporting mirror); an old receipt cannot undo that suspension. Offline playback cannot learn of a new server revocation until reconnecting. These are operational limits, not guarantees against modified clients or device-root access.
+
+Platforms is a Premium mobile appearance benefit from mobile 1.38. It follows the same active-status and 48-hour renewal-allowance policy as other Premium extras. Settings and the enable action reject other tiers; the root theme ignores the saved appearance preference whenever current membership no longer permits it. Platform catalog filters remain available to all plans, and neither provider logos nor appearance selection imply a separate OTT subscription.

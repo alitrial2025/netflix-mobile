@@ -773,6 +773,7 @@ private fun PlanCard(
                 if (plan.games) add("Games")
                 if (plan.clips) add("Clips")
                 if (plan.spatialAudio) add("Spatial Audio")
+                if (plan.platforms) add("Platforms")
             }
             if (extras.isNotEmpty()) Text(extras.joinToString(" • "), color = Color.White,
                 fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))

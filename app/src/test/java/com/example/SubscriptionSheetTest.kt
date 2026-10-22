@@ -16,6 +16,10 @@ import org.robolectric.annotation.Config
 @Config(qualifiers = "w412dp-h895dp-mdpi", sdk = [34], application = Application::class)
 class SubscriptionSheetTest {
     @get:Rule val rule = createComposeRule()
+    @Test fun premiumAdvertisesPlatformsAsABenefit() {
+        rule.setContent { NetflixTheme { SubscriptionSheet(UserSubscription(), "", {}, {}) } }
+        rule.onNodeWithText("Platforms", substring = true).performScrollTo().assertIsDisplayed()
+    }
     @Test fun suspendedAccountSeesSupportAndCannotOpenCheckoutWhileSignedOut() {
         val sub = UserSubscription(status = "SUSPENDED", planId = "plan_premium", planName = "Premium", expiresAt = 1_800_000_000_000L)
         rule.setContent { NetflixTheme { SubscriptionSheet(sub, "", {}, {}) } }

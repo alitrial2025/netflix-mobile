@@ -123,8 +123,8 @@ fun DetailScreen(
                     Spacer(Modifier.width(6.dp)); Text(if (locked) "NetflixPro preview" else "Available with your NetflixPro membership", color = Color.White, fontSize = 12.sp)
                 }
                 else if (platformDesign.originalLayout) NetflixWordmark(height = 16.dp, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
-                else Text(platformDesign.brandTitle, color = platformDesign.accent, fontSize = 12.sp,
-                    fontWeight = platformDesign.titleWeight, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
+                else com.example.ui.components.PlatformBrandLogo(height = 18.dp,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
                 if (!prime) DetailTitle(media)
                 if (!prime) Row(Modifier.padding(top = 10.dp, bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (media.releaseYear > 0) Text("${media.releaseYear}", color = Color.LightGray, fontSize = 12.sp)

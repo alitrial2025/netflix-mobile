@@ -1075,6 +1075,11 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     private val _platformsEnabled = MutableStateFlow(mobileSettings.get(MobileSetting.PLATFORMS))
     val platformsEnabled: StateFlow<Boolean> = _platformsEnabled.asStateFlow()
     fun setPlatformsEnabled(enabled: Boolean) {
+        if (enabled && !_userSubscription.value.isPlatformsAllowed) {
+            showToast("Platforms is included with Premium. Upgrade to customize the app's appearance.")
+            openSubscriptionSheet(true)
+            return
+        }
         mobileSettings.setPlatformsEnabled(enabled, _selectedCategoryGenre.value)
         _platformsEnabled.value = enabled
     }
@@ -1553,7 +1558,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         }
         _categoryFilter.value = if (filter == CategoryFilter.ALL && genre != null) CategoryFilter.CATEGORIES else filter
         _selectedCategoryGenre.value = genre
-        mobileSettings.selectPlatformCategory(genre)
+        if (_userSubscription.value.isPlatformsAllowed) mobileSettings.selectPlatformCategory(genre)
     }
 
     fun openProfilePicker(show: Boolean) {

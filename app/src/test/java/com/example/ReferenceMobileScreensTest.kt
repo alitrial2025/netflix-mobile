@@ -169,6 +169,7 @@ class ReferenceMobileScreensTest {
         val styles = com.example.data.model.PlatformAppearance.entries.filter { !com.example.ui.theme.platformDesign(it).originalLayout }
         styles.forEachIndexed { index, style ->
             rule.runOnIdle { appearance = style }
+            rule.onNode(hasTestTag("platform_brand_logo_${style.key}") and hasAnyAncestor(hasTestTag("platform_header_title")), useUnmergedTree = true).assertIsDisplayed()
             rule.onNodeWithTag("platform_hero_${style.key}").assertIsDisplayed()
             rule.onNodeWithTag("platform_navigation_${style.key}").assertIsDisplayed()
             artworkReady(show.logoUrl, show.backdropUrl, show.posterUrl)
@@ -242,7 +243,7 @@ class ReferenceMobileScreensTest {
         prefs.edit().clear().commit()
         val store = com.example.data.MobileSettingsStore(prefs)
         var clicks = 0
-        rule.setContent { com.example.ui.theme.PlatformPreferenceTheme(prefs) {
+        rule.setContent { com.example.ui.theme.PlatformPreferenceTheme(prefs, platformsAllowed = true) {
             var retained by remember { mutableStateOf(0) }
             val design = com.example.ui.theme.LocalPlatformDesign.current
             androidx.compose.material3.Button(onClick = { retained++; clicks = retained },
@@ -257,6 +258,31 @@ class ReferenceMobileScreensTest {
         rule.onNodeWithTag("retained_original").assertIsDisplayed()
         rule.runOnIdle { assertEquals(3, clicks) }
         rule.onNodeWithText("State 3").assertIsDisplayed()
+    }
+
+    @Test fun premiumGateOverridesSavedPreferencesAndRestoresTheMountedAppOnDowngrade() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+        val prefs = context.getSharedPreferences("platform-membership-test", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        com.example.data.MobileSettingsStore(prefs).setPlatformsEnabled(true, "Apple TV")
+        var subscription by mutableStateOf(membership)
+        rule.setContent { com.example.ui.theme.PlatformPreferenceTheme(prefs, platformsAllowed = subscription.isPlatformsAllowed) {
+            var retained by remember { mutableStateOf(0) }
+            val design = com.example.ui.theme.LocalPlatformDesign.current
+            androidx.compose.material3.Button(onClick = { retained++ }, modifier = Modifier.testTag("membership_theme_${design.appearance.key}")) {
+                androidx.compose.material3.Text("Retained $retained")
+            }
+        } }
+        rule.onNodeWithTag("membership_theme_apple").performClick()
+        listOf(membership.copy(planId = "plan_standard"), membership.copy(status = "SUSPENDED"),
+            membership.copy(status = "EXPIRED"), UserSubscription()).forEach { denied ->
+            rule.runOnIdle { subscription = denied }
+            rule.onNodeWithTag("membership_theme_original").assertIsDisplayed()
+            rule.onNodeWithText("Retained 1").assertIsDisplayed()
+            rule.runOnIdle { subscription = membership }
+            rule.onNodeWithTag("membership_theme_apple").assertIsDisplayed()
+        }
+        assertTrue(com.example.data.MobileSettingsStore(prefs).get(com.example.data.MobileSetting.PLATFORMS))
     }
 
     @Test fun platformSecondaryScreensAndPlayerControlsKeepTheirExistingActions() {

@@ -30,6 +30,7 @@ data class SubscriptionPlan(
     val smartNextEpisode: Boolean get() = id == "plan_standard" || id == "plan_premium"
     val downloadsForYou: Boolean get() = id == "plan_premium"
     val clips: Boolean get() = id == "plan_premium"
+    val platforms: Boolean get() = id == "plan_premium"
     val games: Boolean get() = id == "plan_standard" || id == "plan_premium"
 }
 
@@ -156,6 +157,9 @@ data class UserSubscription(
 
     val isGamesAllowed: Boolean
         get() = isActive && (planId == "plan_standard" || planId == "plan_premium")
+
+    val isPlatformsAllowed: Boolean
+        get() = isActive && SubscriptionPlans.PLANS.firstOrNull { it.id == planId }?.platforms == true
 
     val isClipsAllowed: Boolean
         get() = isActive && planId == "plan_premium"

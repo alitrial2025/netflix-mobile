@@ -92,16 +92,19 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            com.example.ui.theme.MobileAppTheme {
+            NetflixTheme {
                 com.example.update.UpdateGateHost {
                 val viewModel: NetflixViewModel = viewModel()
                 viewModelInstance = viewModel
+                val appearanceSubscription by viewModel.userSubscription.collectAsStateWithLifecycle()
                 LaunchedEffect(intent) {
                     handleIntent(intent, viewModel)
                 }
-                androidx.compose.runtime.CompositionLocalProvider(
-                    com.example.playback.LocalMobilePipController provides pipController
-                ) { NetflixApp(viewModel) }
+                com.example.ui.theme.MobileAppTheme(platformsAllowed = appearanceSubscription.isPlatformsAllowed) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        com.example.playback.LocalMobilePipController provides pipController
+                    ) { NetflixApp(viewModel) }
+                }
                 }
             }
         }

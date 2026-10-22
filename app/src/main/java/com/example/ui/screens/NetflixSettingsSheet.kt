@@ -144,8 +144,10 @@ fun NetflixSettingsScreen(
                 "pair_tv_settings_btn") { navigate(onOpenTvPair) }
 
             SettingsSection("Appearance")
-            SettingsToggle("Platforms", "Use a service's design across the app when selected in Home Categories",
-                platformsEnabled, onTogglePlatforms)
+            SettingsToggle("Platforms", if (userSubscription.isPlatformsAllowed) "Use a service's design across the app when selected in Home Categories" else "Included with Premium",
+                platformsEnabled && userSubscription.isPlatformsAllowed, onTogglePlatforms, enabled = userSubscription.isPlatformsAllowed)
+            if (!userSubscription.isPlatformsAllowed) TextButton(onClick = { navigate(onOpenSubscription) },
+                modifier = Modifier.padding(horizontal = 16.dp).testTag("settings_platforms_upgrade")) { Text("Upgrade to Premium") }
             SettingsToggle("Use Glassy Theme", if (glassyThemeEnabled) "Frosted header and navigation" else "Normal glass header and navigation",
                 glassyThemeEnabled, onToggleGlassyTheme)
 

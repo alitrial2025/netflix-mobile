@@ -271,10 +271,12 @@ fun NetflixTopBar(
                                 categories.forEach { category ->
                                     val categorySelected = selectedGenre == category.label
                                     DropdownMenuItem(
-                                        text = { Text(category.label,
-                                            color = if (categorySelected) Color.White else Color(0xFFD1CDD2),
-                                            fontWeight = if (categorySelected) FontWeight.SemiBold else FontWeight.Normal,
-                                            fontSize = 14.sp) },
+                                        text = {
+                                            val provider = com.example.data.model.PlatformAppearance.fromCategory(category.label)
+                                            if (provider != null) PlatformBrandLogo(height = 22.dp, appearance = provider)
+                                            else Text(category.label, color = if (categorySelected) Color.White else Color(0xFFD1CDD2),
+                                                fontWeight = if (categorySelected) FontWeight.SemiBold else FontWeight.Normal, fontSize = 14.sp)
+                                        },
                                         onClick = {
                                             showCategoriesDropdown = false
                                             onCategorySelected(typeFilter ?: CategoryFilter.CATEGORIES, category.label)
@@ -306,7 +308,8 @@ private fun CategoryPill(
 ) {
     val design = com.example.ui.theme.LocalPlatformDesign.current
     val shape = if (design.originalLayout) endShape else RoundedCornerShape(design.controlRadius.coerceAtLeast(12.dp))
-    val filled = isSelected && design.appearance !in setOf(com.example.data.model.PlatformAppearance.PRIME,
+    val provider = com.example.data.model.PlatformAppearance.fromCategory(label)
+    val filled = isSelected && provider == null && design.appearance !in setOf(com.example.data.model.PlatformAppearance.PRIME,
         com.example.data.model.PlatformAppearance.DISNEY, com.example.data.model.PlatformAppearance.HOTSTAR)
     val chipText = if (filled && !design.originalLayout) design.onAccent else Color.White
     Box(
@@ -332,7 +335,8 @@ private fun CategoryPill(
                 if (label.isNotEmpty()) Spacer(Modifier.width(5.dp))
             }
             if (label.isNotEmpty()) {
-                Text(label, color = chipText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (provider != null) PlatformBrandLogo(height = 20.dp, appearance = provider)
+                else Text(label, color = chipText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
             if (trailingIcon != null) {
                 Spacer(Modifier.width(4.dp))
