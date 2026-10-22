@@ -258,6 +258,12 @@ fun NetflixApp(viewModel: NetflixViewModel) {
     val startupError by viewModel.startupError.collectAsStateWithLifecycle()
     val hasCompletedSplash by viewModel.hasCompletedSplash.collectAsStateWithLifecycle()
 
+    var showWatchTogether by remember { mutableStateOf(false) }
+    val viewingUid by viewModel.syncManager.authenticatedUserId.collectAsStateWithLifecycle()
+    com.example.viewing.ViewingSessionHost(viewModel.viewing, viewingUid, activeProfile.id, activeProfile.name,
+        ready = isWarmupFinished && hasCompletedSplash && isAccountAuthenticated && userSubscription.isActive,
+        onIncoming = viewModel::openViewingTarget)
+
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -530,6 +536,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                                 onNavigateToSearch = { viewModel.selectTab(NavigationTab.SEARCH) },
                                 onShowToast = { viewModel.showToast(it) },
                                 onOpenTvPair = { viewModel.openTvPairScreen(true) },
+                                onWatchTogether = { showWatchTogether = true },
+                                onOpenCollectionItem = viewModel::openCollectionItem,
                                 onOpenClips = { viewModel.selectTab(NavigationTab.CLIPS) },
                                 userSubscription = userSubscription,
                                 isAuthenticated = isAccountAuthenticated,
@@ -756,6 +764,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
                     viewModel.openDownloadsScreen(false)
                     viewModel.playMedia(media, episode, offlineOnly = true)
                 },
+                onRepairDownload = viewModel::repairDownload,
                 onDeleteDownload = { viewModel.removeDownload(it) },
                 onClearAllDownloads = { viewModel.clearAllDownloads() },
                 onToggleSmartDownloads = { viewModel.toggleSmartDownloads(it) },
@@ -934,16 +943,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             )
         }
 
-        // 2026 TV Cast Device Picker Dialog
-        if (showCastDialog) {
-            CastDialog(
-                devices = viewModel.availableCastDevices,
-                connectedDevice = connectedCastDevice,
-                onConnect = { viewModel.connectCastDevice(it) },
-                onDisconnect = { viewModel.disconnectCastDevice() },
-                onDismiss = { viewModel.openCastDialog(false) }
-            )
-        }
+        if (showWatchTogether) com.example.viewing.WatchTogetherDialog(viewModel.viewing) { showWatchTogether = false }
+        if (showCastDialog) com.example.viewing.ContinueOnTvDialog(viewModel.viewing) { viewModel.openCastDialog(false) }
 
         // Elegant full screen TMDB API loader
         if (isLoadingCatalog && hasCompletedSplash && !isPlayerVisible && selectedMedia == null &&
@@ -1033,6 +1034,8 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 
 @Composable
 private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
+    var showParty by remember { mutableStateOf(false) }
+    val party by viewModel.viewing.party.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val highQuality by viewModel.isHighQualityEnabled.collectAsStateWithLifecycle()
     val spatialAudio by viewModel.isSpatialAudioEnabled.collectAsStateWithLifecycle()
@@ -1064,6 +1067,11 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
             onSkipIntro = { viewModel.skipIntro() },
             onSetSpeed = { viewModel.setPlaybackSpeed(it) },
             onSetAudio = { viewModel.setAudioTrack(it) },
+            onSetSubtitleOffset = viewModel::setSubtitleOffset,
+            onWatchTogether = { showParty = true },
+            partyGuest = party?.isHost == false,
+            partyActive = party != null,
+            onViewingSample = viewModel::sampleViewing,
             onSetSubtitle = { viewModel.setSubtitleTrack(it) },
             onToggleLock = { viewModel.toggleLock() },
             onToggleControls = { viewModel.toggleControlsVisibility() },
@@ -1094,4 +1102,6 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
             onTrailerEnded = { viewModel.onTrailerPlaybackEnded() }
         )
     }
+    if (showParty) com.example.viewing.WatchTogetherDialog(viewModel.viewing) { showParty = false }
+
 }

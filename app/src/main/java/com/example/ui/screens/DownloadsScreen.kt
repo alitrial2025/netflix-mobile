@@ -59,7 +59,8 @@ fun DownloadsScreen(
     downloadsForYouEnabled: Boolean = false, profileAllocations: Map<String, Float> = emptyMap(),
     onToggleDownloadsForYou: (Boolean) -> Unit = {}, onProfileAllocation: (String, Float) -> Unit = { _, _ -> },
     onOpenProfiles: () -> Unit = {},
-    openSmartSettings: Boolean = false
+    openSmartSettings: Boolean = false,
+    onRepairDownload: ((MediaItem, Episode?) -> Unit)? = null
 ) {
     val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
     val prime = platformDesign.appearance == PlatformAppearance.PRIME
@@ -70,13 +71,14 @@ fun DownloadsScreen(
     var clearAll by remember { mutableStateOf(false) }
     var settings by rememberSaveable(openSmartSettings) { mutableStateOf(openSmartSettings) }
     var setup by rememberSaveable { mutableStateOf(false) }
+    var storageManager by rememberSaveable { mutableStateOf(false) }
     var showId by rememberSaveable { mutableStateOf<String?>(null) }
     val byId = remember(catalogMedia) { catalogMedia.associateBy { it.id } }
     val ready = remember(downloads) { downloads.filter { it.isComplete } }
     val readyKeys = remember(ready) { ready.map { it.downloadKey }.toSet() }
     val groups = remember(ready, prime) { ready.groupBy { Triple(it.mediaId, it.isForYou, if (prime) primeDownloadedSeason(it) else null) }.values.toList() }
     val activeKeys = remember(downloadingProgress, downloadTasks, readyKeys) {
-        (downloadingProgress.keys + downloadTasks.filterValues { it.status != DownloadTaskStatus.COMPLETED }.keys).filter { it !in readyKeys }.sorted()
+        (downloadingProgress.keys + downloadTasks.filterValues { it.status != DownloadTaskStatus.COMPLETED }.keys).sorted()
     }
     LaunchedEffect(readyKeys, prime, showId, showSeason) { selected = selected.intersect(readyKeys); if (readyKeys.isEmpty()) editing = false; if (ready.none { it.mediaId == showId && (!prime || showSeason == null || primeDownloadedSeason(it) == showSeason) }) { showId = null; showSeason = null } }
     val context = LocalContext.current
@@ -91,12 +93,26 @@ fun DownloadsScreen(
         if (download.episodeTitle != null) MediaType.TV_SHOW else MediaType.MOVIE, "", "", 0, "16+", 0, "Downloaded",
         genres = emptyList(), cast = emptyList(), director = "", isOriginal = false)
     fun play(download: DownloadEntity) {
+        if (downloadTasks[download.downloadKey]?.status in setOf(DownloadTaskStatus.QUEUED, DownloadTaskStatus.PREPARING, DownloadTaskStatus.DOWNLOADING, DownloadTaskStatus.PAUSED)) {
+            onShowToast("This download is being repaired. Finish or cancel its repair before watching offline.")
+            return
+        }
         // Playback authorizes the account's verified entitlement in the ViewModel.
         // A missing online check must not turn a saved download into a purchase prompt.
         val media = mediaFor(download)
         val id = downloadEpisodeId(download.mediaId, download.downloadKey)
         val episode = id?.let { media.episodes.firstOrNull { ep -> ep.id == it } ?: Episode(it, episodeCoordinates(it).second, download.episodeTitle.orEmpty(), 45, "") }
         onPlayMedia(media, episode)
+    }
+    if (storageManager) {
+        DownloadStorageScreen(ready, activeProfile.id, onBack = { storageManager = false }, onDelete = onDeleteDownload,
+            onRepair = onRepairDownload?.let { repair -> { download ->
+                val media = mediaFor(download)
+                val id = downloadEpisodeId(download.mediaId, download.downloadKey)
+                val episode = id?.let { value -> media.episodes.firstOrNull { it.id == value } ?: Episode(value, episodeCoordinates(value).second, download.episodeTitle.orEmpty(), 45, "") }
+                repair(media, episode)
+            } })
+        return
     }
     if (settings) {
         val allocations = profileAllocations + (activeProfile.id to (profileAllocations[activeProfile.id] ?: allocatedStorageGb))
@@ -125,6 +141,11 @@ fun DownloadsScreen(
             IconButton(onOpenProfiles) { ProfileAvatar(activeProfile, size = 26.dp) }
         }
         LazyColumn(Modifier.weight(1f).testTag("downloads_list"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item(key = "storage_manager") {
+                OutlinedButton(onClick = { storageManager = true }, modifier = Modifier.fillMaxWidth().testTag("downloads_storage_manager"), shape = RoundedCornerShape(platformDesign.controlRadius)) {
+                    Icon(Icons.Default.Storage, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Storage & download repair", color = Color.White)
+                }
+            }
             if (prime) item(key = "prime_summary") {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(primeDownloadsSummary(ready.filter { showId == null || (it.mediaId == showId && (showSeason == null || primeDownloadedSeason(it) == showSeason)) }, byId), color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f).testTag("prime_downloads_summary"))

@@ -106,6 +106,7 @@ data class PlayerState(
     val playbackSpeed: Float = 1.0f,
     val audioTrack: String = "English [Original]",
     val subtitleTrack: String = "Off",
+    val subtitleOffsetMs: Int = 0,
     val showControls: Boolean = true,
     val isLocked: Boolean = false,
     val showAudioSubtitleDialog: Boolean = false,
@@ -924,6 +925,80 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     // Continue Watching Options Selection
     private val _continueWatchingOptions = MutableStateFlow<Pair<MediaItem, WatchProgressEntity>?>(null)
     val continueWatchingOptions: StateFlow<Pair<MediaItem, WatchProgressEntity>?> = _continueWatchingOptions.asStateFlow()
+
+    val viewing by lazy { com.example.viewing.ViewingCoordinator(getApplication(), "mobile", viewModelScope) }
+    private var incomingViewingJob: Job? = null
+
+    /** Remote targets pass the same metadata, profile and playback admission as a local Play. */
+    fun openViewingTarget(incoming: com.example.viewing.IncomingViewing) {
+        incomingViewingJob?.cancel()
+        val uid = syncManager.getUserId(); val profile = _activeProfile.value.id
+        incomingViewingJob = viewModelScope.launch {
+            try {
+                val target = incoming.target
+                val media = trustedViewingMedia(target.kind, target.id)
+                val episode = if (target.kind == "tv") {
+                    val displaySeason = SeriesEpisodeOrder.displaySeason(target.id, target.season, target.episode)
+                    loadSeasonEpisodes(media, displaySeason).firstOrNull { episodeCoordinates(it.id) == (target.season to target.episode) }
+                        ?: throw java.io.IOException("This episode is unavailable")
+                } else null
+                if (uid != syncManager.getUserId() || profile != _activeProfile.value.id) return@launch
+                playMedia(media, episode, initialPositionSeconds = (incoming.positionMs / 1000).toInt(), fromParty = incoming.party)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { showToast("This title couldn't open. Check your connection and try again from Watch together.") }
+        }
+    }
+
+    fun openCollectionItem(item: com.example.collections.CollectionTitle) {
+        incomingViewingJob?.cancel()
+        val uid = syncManager.getUserId(); val profile = _activeProfile.value.id
+        incomingViewingJob = viewModelScope.launch {
+            try {
+                val media = trustedViewingMedia(item.kind, item.id)
+                if (uid == syncManager.getUserId() && profile == _activeProfile.value.id) openDetail(media)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { showToast("Couldn't load this title. Reconnect and try again.") }
+        }
+    }
+
+    private suspend fun trustedViewingMedia(kind: String, id: String): MediaItem {
+        val type = if (kind == "tv") MediaType.TV_SHOW else MediaType.MOVIE
+        require(kind in setOf("tv", "movie") && id.matches(Regex("[1-9][0-9]{0,9}")))
+        (_catalogMedia.value + watchlist.value + _searchResults.value).firstOrNull { it.id == id && it.type == type }?.let { return it }
+        // Never trust an invite's title/rating to open a restricted profile's player.
+        val result = kotlinx.coroutines.withTimeout(12_000L) {
+            if (type == MediaType.MOVIE) {
+                val d = TmdbClient.service.getMovieDetails(id.toInt(), TmdbClient.apiKey)
+                require(d.id.toString() == id)
+                MediaItem(id, d.title, type, d.overview.orEmpty(), d.tagline.orEmpty(), 0, "18+",
+                    d.releaseDate?.take(4)?.toIntOrNull() ?: 0, "${d.runtime ?: 0} min", isOriginal = false,
+                    genres = d.genres.map { it.name }, cast = d.credits?.cast.orEmpty().map { it.name }, director = "",
+                    posterUrl = d.posterPath?.let { "https://image.tmdb.org/t/p/w342$it" },
+                    backdropUrl = d.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" }, releaseDate = d.releaseDate)
+            } else {
+                val d = TmdbClient.service.getTvShowDetails(id.toInt(), TmdbClient.apiKey)
+                require(d.id.toString() == id)
+                MediaItem(id, d.name, type, d.overview.orEmpty(), d.tagline.orEmpty(), 0, "18+",
+                    d.firstAirDate?.take(4)?.toIntOrNull() ?: 0, "${d.numberOfSeasons ?: 1} Seasons", isOriginal = false,
+                    genres = d.genres.map { it.name }, cast = d.credits?.cast.orEmpty().map { it.name }, director = "",
+                    posterUrl = d.posterPath?.let { "https://image.tmdb.org/t/p/w342$it" },
+                    backdropUrl = d.backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                    totalSeasons = d.numberOfSeasons ?: 1, totalEpisodes = d.numberOfEpisodes ?: 0, releaseDate = d.firstAirDate)
+            }
+        }
+        return result
+    }
+
+    fun sampleViewing(positionMs: Long, durationMs: Long, playing: Boolean, buffering: Boolean): com.example.viewing.PartyAdjustment {
+        val state = _playerState.value
+        val media = state.media
+        if (media == null || state.sourceId == "Trailer" || state.isResolving || durationMs <= 0) return com.example.viewing.PartyAdjustment()
+        val coordinates = episodeCoordinates(state.episode?.id)
+        val target = com.example.viewing.ViewingTarget(if (media.type == MediaType.TV_SHOW) "tv" else "movie", media.id, media.title, coordinates.first, coordinates.second)
+        val adjustment = viewing.sample(com.example.viewing.LocalViewingPlayback(target, positionMs.coerceAtLeast(0), durationMs, playing, buffering))
+        if (viewing.isGuest && adjustment.playing != null) _playerState.update { it.copy(isPlaying = adjustment.playing) }
+        return adjustment
+    }
 
     // Player State
     private val _playerState = MutableStateFlow(PlayerState())
@@ -2049,7 +2124,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playMedia(media: MediaItem, episode: Episode? = null, offlineOnly: Boolean = false,
-                  initialPositionSeconds: Int? = null, initialDurationSeconds: Int? = null) {
+                  initialPositionSeconds: Int? = null, initialDurationSeconds: Int? = null, fromParty: Boolean = false) {
+        if (viewing.isGuest && !fromParty) { showToast("Leave the party to choose another title."); return }
         val pending = _playerState.value
         if (resolveJob?.isActive == true && pending.media?.id == media.id &&
             (episode == null || pending.episode?.id == episode.id)) return
@@ -2076,6 +2152,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
+        if (viewing.party.value?.isHost == true) viewing.clearPlayback()
         downloadManager.setForegroundPlayback(true)
         nextEpisodeJob?.cancel()
         val latestProgress = allWatchProgress.value.filter { it.mediaId == media.id }.maxByOrNull { it.lastWatchedTimestamp }
@@ -2085,6 +2162,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
         _playerState.value = PlayerState(
             media = media,
+            subtitleOffsetMs = subtitleTimingStore.get(syncManager.getUserId().orEmpty(), _activeProfile.value.id, subtitleTimingKey(media)),
             episode = targetEpisode,
             nextEpisode = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) },
             nextEpisodeChecked = targetEpisode?.let { nextLoadedEpisode(it, media.episodes) != null } == true,
@@ -2228,7 +2306,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
 
     fun updatePlayerProgress(currentSec: Int, totalDurationSec: Int) {
         val currentState = _playerState.value
-        val showSkip = currentState.sourceId != "Trailer" && currentState.media?.type == MediaType.TV_SHOW &&
+        val showSkip = currentState.sourceId != "Trailer" &&
             currentState.introWindow?.let { currentSec in it.startSec until it.endSec } == true
         val dur = if (totalDurationSec > 0) totalDurationSec else _playerState.value.durationSec
         if (currentState.media?.type == MediaType.TV_SHOW && !isMovieLocked(currentState.media) &&
@@ -2375,14 +2453,16 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun togglePlayPause() {
+        if (viewing.isGuest) { showToast("The party host controls playback."); return }
         val nextPlaying = !_playerState.value.isPlaying
         _playerState.update { it.copy(isPlaying = nextPlaying) }
     }
 
     fun seekTo(seconds: Int) {
+        if (viewing.isGuest) return
         val state = _playerState.value
         val clamped = seconds.coerceIn(0, state.durationSec)
-        val showSkip = state.sourceId != "Trailer" && state.media?.type == MediaType.TV_SHOW &&
+        val showSkip = state.sourceId != "Trailer" &&
             state.introWindow?.let { clamped in it.startSec until it.endSec } == true
         _playerState.update { it.copy(currentPositionSec = clamped, showSkipIntro = showSkip, hasEnded = false) }
     }
@@ -2397,6 +2477,15 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
         seekTo(state.currentPositionSec - 10)
     }
 
+    private val subtitleTimingStore by lazy { com.example.playback.SubtitleTimingStore(getApplication()) }
+    private fun subtitleTimingKey(media: MediaItem) = "${media.type}:${media.id}"
+    fun setSubtitleOffset(value: Int) {
+        val media = _playerState.value.media ?: return
+        val offset = com.example.playback.SubtitleTiming.clamp(value)
+        subtitleTimingStore.put(syncManager.getUserId().orEmpty(), _activeProfile.value.id, subtitleTimingKey(media), offset)
+        _playerState.update { it.copy(subtitleOffsetMs = offset) }
+    }
+
     fun skipIntro() {
         val intro = _playerState.value.introWindow ?: return
         seekTo(intro.endSec)
@@ -2409,6 +2498,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setPlaybackSpeed(speed: Float) {
+        if (viewing.party.value != null) { showToast("Party playback uses normal speed."); return }
         _playerState.update { it.copy(playbackSpeed = speed) }
         showToast("Speed set to ${speed}x")
     }
@@ -2493,12 +2583,14 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun replayCurrent() {
+        if (viewing.isGuest) return
         pendingSmartReplacement = null
         progressTracker.reset()
         _playerState.update { it.copy(currentPositionSec = 0, hasEnded = false, isPlaying = true, showControls = true) }
     }
 
     fun playNextEpisode() {
+        if (viewing.isGuest) return
         val state = _playerState.value
         if (state.isResolving) return
         val next = state.nextEpisode
@@ -2511,6 +2603,7 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun closePlayer() {
+        viewing.clearPlayback()
         nextEpisodeJob?.cancel()
         playbackRequestGeneration++
         resolveJob?.cancel()
@@ -2561,6 +2654,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     fun savePlayerProgress() = persistPlayerProgress(_playerState.value)
 
     override fun onCleared() {
+        viewing.close()
+        incomingViewingJob?.cancel()
         downloadManager.setForegroundPlayback(false)
         detailJob?.cancel()
         seasonJob?.cancel()
@@ -2695,6 +2790,17 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
             isWifiOnly = _isWifiOnlyEnabled.value,
             isHighQuality = _isHighQualityEnabled.value
         )
+    }
+
+    fun repairDownload(media: MediaItem, episode: Episode? = null) {
+        if (!syncManager.isAuthenticated() || !_userSubscription.value.isActive || _userSubscription.value.maxDownloads <= 0) {
+            requestDownloadMembership(); return
+        }
+        if (!titleAllowed(media) || isMovieLocked(media)) { showToast("This title is outside your current plan."); return }
+        val key = if (episode == null) media.id else "${media.id}_${episode.id}"
+        if (downloads.value.none { it.downloadKey == key && it.isComplete }) { showToast("Open Downloads and select a saved title to repair."); return }
+        downloadManager.startOrResumeDownload(_activeProfile.value.id, media, episode,
+            isWifiOnly = _isWifiOnlyEnabled.value, isHighQuality = _isHighQualityEnabled.value)
     }
 
     fun pauseDownload(key: String) {
@@ -3046,6 +3152,8 @@ class NetflixViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun playTrailer(media: MediaItem, title: String) {
+        if (viewing.isGuest) { showToast("Leave the party to watch a trailer."); return }
+        viewing.clearPlayback()
         if (!titleAllowed(media)) return
         if (!MobilePlaybackPolicy.permitsStreaming(mobileSettings.cellularDataMode,
                 playbackNetwork(getApplication()).wifiOrEthernet)) {

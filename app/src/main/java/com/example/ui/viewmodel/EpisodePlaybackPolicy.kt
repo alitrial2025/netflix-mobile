@@ -1,31 +1,23 @@
 package com.example.ui.viewmodel
 
+import com.example.data.PlaybackMarkers
+
 data class IntroWindow(val startSec: Int, val endSec: Int)
 
-/** Conservative subtitle markers: generic music and silence are not evidence of an intro. */
+/** Pills require actual metadata; dialogue gaps and a percentage of runtime are not boundaries. */
 internal object EpisodePlaybackPolicy {
-    private val timestamp = Regex("(\\d{1,2}:)?(\\d{2}):(\\d{2})[.,](\\d{3})")
+    fun verifiedIntro(markers: PlaybackMarkers, durationMs: Long): IntroWindow? {
+        val start = markers.introStart ?: return null
+        val end = markers.introEnd ?: return null
+        if (durationMs <= 0 || start < 0 || end <= start || end > durationMs) return null
+        // Player seeks are whole seconds: round forward, so a skip never stops inside the intro.
+        val startSec = (start / 1000 + if (start % 1000 == 0L) 0 else 1).toInt()
+        val endSec = (end / 1000 + if (end % 1000 == 0L) 0 else 1).toInt()
+        return IntroWindow(startSec, endSec).takeIf { endSec > startSec }
+    }
 
-    fun detectIntro(subtitles: String, durationSec: Int): IntroWindow? {
-        if (durationSec < 300) return null
-        val cues = subtitles.replace("\r\n", "\n").replace('\r', '\n')
-            .split(Regex("\\n\\s*\\n")).mapNotNull { block ->
-                val lines = block.lines()
-                val index = lines.indexOfFirst { it.contains("-->") }
-                if (index < 0) return@mapNotNull null
-                val times = timestamp.findAll(lines[index]).toList()
-                if (times.size != 2) return@mapNotNull null
-                fun seconds(match: MatchResult): Int {
-                    val hours = match.groupValues[1].trimEnd(':').toIntOrNull() ?: 0
-                    return hours * 3600 + match.groupValues[2].toInt() * 60 + match.groupValues[3].toInt()
-                }
-                Triple(seconds(times[0]), seconds(times[1]), lines.drop(index + 1).joinToString(" ").lowercase())
-            }.filter { it.second > it.first && it.first >= 0 }.sortedBy { it.first }
-        val index = cues.indexOfFirst { cue -> cue.first in 10..300 &&
-            listOf("opening theme", "theme song", "title theme", "main title theme").any { it in cue.third } }
-        if (index < 0) return null
-        val cue = cues[index]
-        val end = cues.getOrNull(index + 1)?.first?.takeIf { it > cue.second && it - cue.first <= 90 } ?: cue.second
-        return IntroWindow(cue.first, end).takeIf { end - cue.first in 10..90 && end < durationSec }
+    fun hasVerifiedCredits(markers: PlaybackMarkers, positionMs: Long, durationMs: Long): Boolean {
+        val credits = markers.outroStart ?: return false
+        return durationMs > 0 && credits in 0 until durationMs && positionMs >= credits && positionMs <= durationMs
     }
 }

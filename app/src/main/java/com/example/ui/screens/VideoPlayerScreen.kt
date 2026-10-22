@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.BookmarkAdd
@@ -70,6 +71,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -191,6 +193,11 @@ fun VideoPlayerScreen(
     onPlaybackFailed: () -> Unit = {},
     spatialAudioEnabled: Boolean = true,
     maxVideoHeight: Int = Int.MAX_VALUE,
+    onSetSubtitleOffset: (Int) -> Unit = {},
+    onWatchTogether: () -> Unit = {},
+    partyGuest: Boolean = false,
+    partyActive: Boolean = false,
+    onViewingSample: (Long, Long, Boolean, Boolean) -> com.example.viewing.PartyAdjustment = { _, _, _, _ -> com.example.viewing.PartyAdjustment() },
     streamingAllowed: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -204,6 +211,8 @@ fun VideoPlayerScreen(
     val compactState = pipController?.compact?.collectAsState()
     val inPip = compactState?.value == true
     val latestPlayerState by androidx.compose.runtime.rememberUpdatedState(playerState)
+    val latestViewingSample by rememberUpdatedState(onViewingSample)
+    val latestPartyGuest by rememberUpdatedState(partyGuest)
     val latestProgressCallback by rememberUpdatedState(onUpdateProgress)
     val latestTrailerEnded by rememberUpdatedState(onTrailerEnded)
     val latestTogglePlayPause by rememberUpdatedState(onTogglePlayPause)
@@ -267,6 +276,9 @@ fun VideoPlayerScreen(
     val latestExactSubtitleChoiceState by rememberUpdatedState(exactSubtitleChoiceState)
 
 
+    val subtitleClock = remember { java.util.concurrent.atomic.AtomicInteger(playerState.subtitleOffsetMs) }
+    SideEffect { subtitleClock.set(playerState.subtitleOffsetMs) }
+
     // Initialize ExoPlayer
     val exoPlayer = remember(context) {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
@@ -274,7 +286,7 @@ fun VideoPlayerScreen(
             .setTargetBufferBytes(16 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
-        ExoPlayer.Builder(context).setLoadControl(loadControl).build().apply {
+        ExoPlayer.Builder(context, com.example.playback.SubtitleTimingRenderersFactory(context) { subtitleClock.get() }).setLoadControl(loadControl).build().apply {
             repeatMode = Player.REPEAT_MODE_OFF
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage(com.example.data.model.playbackLanguageCode(playerState.audioLanguage))
@@ -283,6 +295,22 @@ fun VideoPlayerScreen(
                 .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, playerState.subtitleLanguage == "Off")
                 .build()
+        }
+    }
+
+    var previousSubtitleOffset by remember(media.type, media.id, playerState.episode?.id) {
+        mutableIntStateOf(playerState.subtitleOffsetMs)
+    }
+    LaunchedEffect(playerState.subtitleOffsetMs, media.type, media.id, playerState.episode?.id) {
+        val changed = previousSubtitleOffset != playerState.subtitleOffsetMs
+        previousSubtitleOffset = playerState.subtitleOffsetMs
+        if (changed && exoPlayer.playbackState == Player.STATE_READY &&
+            exoPlayer.currentMediaItem?.mediaId == "${media.id}:${playerState.episode?.id.orEmpty()}") {
+            // Re-read the current caption after moving its clock backwards or forwards.
+            // Keep the user's paused/playing state and the existing player instance.
+            val resume = exoPlayer.playWhenReady
+            exoPlayer.seekTo(exoPlayer.currentPosition.coerceAtLeast(0))
+            exoPlayer.playWhenReady = resume
         }
     }
 
@@ -319,35 +347,31 @@ fun VideoPlayerScreen(
         }
     }
 
-    LaunchedEffect(media.id, playerState.episode?.id, playerState.captions, playerState.sourceId) {
-        if (media.type != MediaType.TV_SHOW || playerState.sourceId == "Trailer") return@LaunchedEffect
-        val caption = playerState.captions.firstOrNull {
-            it.type !in setOf("thumbnails", "chapters") && it.language.contains("English", true) &&
-                it.url.startsWith("https://") && !it.url.contains(".m3u8", true)
-        } ?: return@LaunchedEffect
-        try {
-            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val source = com.example.data.ScopedPlaybackHttp.factory(playerState.resolveHeaders, caption.url).createDataSource()
-                try {
-                    source.open(androidx.media3.datasource.DataSpec(android.net.Uri.parse(caption.url)))
-                    val output = java.io.ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    while (true) {
-                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                        val count = source.read(buffer, 0, buffer.size)
-                        if (count < 0) break
-                        require(output.size() + count <= 256 * 1024)
-                        output.write(buffer, 0, count)
-                    }
-                    output.toString("UTF-8")
-                } finally { source.close() }
+    val markerRepository = remember { com.example.data.PlaybackMarkerRepository() }
+    var playbackMarkers by remember(media.type, media.id, playerState.episode?.id, playerState.resolvedUrl) {
+        mutableStateOf(com.example.data.PlaybackMarkers())
+    }
+    LaunchedEffect(media.type, media.id, playerState.episode?.id, playerState.resolvedUrl,
+        playerState.captions, playerState.sourceId) {
+        playbackMarkers = com.example.data.PlaybackMarkers()
+        latestSetIntroWindow(null)
+        val url = playerState.resolvedUrl ?: return@LaunchedEffect
+        // Saved files remain fully usable without requesting optional online metadata.
+        if (playerState.sourceId == "Trailer" || !url.startsWith("https://")) return@LaunchedEffect
+        val expectedId = "${media.id}:${playerState.episode?.id.orEmpty()}"
+        val duration = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+            while (exoPlayer.currentMediaItem?.mediaId != expectedId || exoPlayer.duration <= 0 || exoPlayer.duration == C.TIME_UNSET) {
+                kotlinx.coroutines.delay(250)
             }
-            latestSetIntroWindow(com.example.ui.viewmodel.EpisodePlaybackPolicy.detectIntro(text, latestPlayerState.durationSec))
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Optional caption analysis must never interrupt playback.
-        }
+            exoPlayer.duration
+        } ?: return@LaunchedEffect
+        val coordinates = com.example.ui.viewmodel.episodeCoordinates(playerState.episode?.id)
+        val stream = com.example.data.NetMirrorStream(url, playerState.resolveHeaders, playerState.captions,
+            playerState.sourceId.orEmpty(), Long.MAX_VALUE, media.title)
+        val markers = markerRepository.markers(media.id, isTv = media.type == MediaType.TV_SHOW,
+            season = coordinates.first, episode = coordinates.second, durationMs = duration, stream = stream)
+        playbackMarkers = markers
+        latestSetIntroWindow(com.example.ui.viewmodel.EpisodePlaybackPolicy.verifiedIntro(markers, duration))
     }
 
     DisposableEffect(exoPlayer) {
@@ -607,14 +631,20 @@ fun VideoPlayerScreen(
     }
 
     // Sync Playback Speed
-    LaunchedEffect(playerState.playbackSpeed) {
-        exoPlayer.setPlaybackSpeed(playerState.playbackSpeed)
+    LaunchedEffect(playerState.playbackSpeed, partyActive) {
+        exoPlayer.setPlaybackSpeed(if (partyActive) 1f else playerState.playbackSpeed)
     }
 
     // Continuously sync ExoPlayer progress to ViewModel
     LaunchedEffect(exoPlayer) {
         while (true) {
             if (exoPlayer.isPlaying && playbackActive) reportProgress()
+            if (playbackActive && exoPlayer.duration > 0 && exoPlayer.currentMediaItem?.mediaId == "${latestPlayerState.media?.id}:${latestPlayerState.episode?.id.orEmpty()}") {
+                val adjustment = latestViewingSample(exoPlayer.currentPosition, exoPlayer.duration, exoPlayer.playWhenReady && exoPlayer.playbackState != Player.STATE_ENDED,
+                    exoPlayer.playbackState == Player.STATE_BUFFERING)
+                adjustment.seekMs?.let { exoPlayer.seekTo(it) }
+                adjustment.playing?.let { exoPlayer.playWhenReady = it }
+            }
             kotlinx.coroutines.delay(500)
         }
     }
@@ -909,6 +939,14 @@ fun VideoPlayerScreen(
                             }
                         }
                     }
+                    androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Subtitle timing", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(String.format(java.util.Locale.US, "%+.2f s · positive displays later", playerState.subtitleOffsetMs / 1000.0), color = Color.LightGray, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(onClick = { onSetSubtitleOffset(playerState.subtitleOffsetMs - 250) }, modifier = Modifier.testTag("subtitle_earlier")) { Text("−0.25 s") }
+                        TextButton(onClick = { onSetSubtitleOffset(0) }, modifier = Modifier.testTag("subtitle_timing_reset")) { Text("Reset") }
+                        TextButton(onClick = { onSetSubtitleOffset(playerState.subtitleOffsetMs + 250) }, modifier = Modifier.testTag("subtitle_later")) { Text("+0.25 s") }
+                    }
                 }
             },
             containerColor = platformDesign.surface,
@@ -1011,6 +1049,7 @@ fun VideoPlayerScreen(
     }
 
     val handlePlayPauseToggle: () -> Unit = {
+        if (!partyGuest) {
         if (!streamingAllowed) {
             exoPlayer.pause()
         } else if (playerState.isPlaying) {
@@ -1022,26 +1061,35 @@ fun VideoPlayerScreen(
             exoPlayer.play()
         }
         if (streamingAllowed) onTogglePlayPause()
+        }
     }
     val handleSeek: (Int) -> Unit = { sec ->
+        if (!partyGuest) {
         exoPlayer.seekTo(sec * 1000L)
         onSeek(sec)
+        }
     }
     val handleSkipBackward10: () -> Unit = {
+        if (!partyGuest) {
         val target = (exoPlayer.currentPosition - 10000L).coerceAtLeast(0L)
         exoPlayer.seekTo(target)
         onSkipBackward10()
+        }
     }
     val handleSkipForward10: () -> Unit = {
+        if (!partyGuest) {
         val maxDur = if (exoPlayer.duration > 0) exoPlayer.duration else (playerState.durationSec * 1000L)
         val target = (exoPlayer.currentPosition + 10000L).coerceAtMost(maxDur)
         exoPlayer.seekTo(target)
         onSkipForward10()
+        }
     }
     val handleSkipIntro: () -> Unit = {
+        if (!partyGuest) {
         playerState.introWindow?.let {
             exoPlayer.seekTo(it.endSec * 1000L)
             onSkipIntro()
+        }
         }
     }
 
@@ -1271,6 +1319,11 @@ fun VideoPlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.align(Alignment.CenterEnd)
                         ) {
+                            if (playerState.sourceId != "Trailer") {
+                                IconButton(onClick = onWatchTogether, modifier = Modifier.testTag("player_watch_together")) {
+                                    Icon(Icons.Default.Groups, "Watch together", tint = Color.White, modifier = Modifier.size(24.dp))
+                                }
+                            }
                             if (onSaveMoment != null && playerState.sourceId != "Trailer") {
                                 IconButton(
                                     onClick = { reportProgress(); onSaveMoment() },
@@ -1549,17 +1602,18 @@ fun VideoPlayerScreen(
         }
 
         var watchCredits by remember(media.id, playerState.episode?.id) { mutableStateOf(false) }
-        val nearEnd = playerState.durationSec > 60 && playerState.currentPositionSec >= playerState.durationSec - 30
+        val nearEnd = com.example.ui.viewmodel.EpisodePlaybackPolicy.hasVerifiedCredits(playbackMarkers,
+            playerState.currentPositionSec * 1000L, playerState.durationSec * 1000L)
         LaunchedEffect(nearEnd) { if (!nearEnd) watchCredits = false }
         if (!inPip && playerState.hasEnded && playerState.sourceId != "Trailer" && !playerState.isLocked) {
             PostPlayOverlay(playerState, recommendations,
-                onReplay = { watchCredits = false; exoPlayer.seekTo(0); onSeek(0); onReplay() },
+                onReplay = { if (!partyGuest) { watchCredits = false; exoPlayer.seekTo(0); onSeek(0); onReplay() } },
                 onClose = onClose, onNext = { reportProgress(); onPlayNextEpisode() }, onRetryNext = onRetryNext,
                 onRecommendation = { reportProgress(); onRecommendationClick(it) }, onRating = { onSetRating?.invoke(it) })
         }
         if (playerState.nextEpisode != null && playerState.sourceId != "Trailer" && !playerState.isLocked &&
             !playerState.isResolving && !watchCredits && (nearEnd || playerState.hasEnded)) {
-            NextEpisodeCard(playerState, autoPlayNext, playbackActive && streamingAllowed,
+            NextEpisodeCard(playerState, autoPlayNext && !partyGuest, playbackActive && streamingAllowed,
                 compact = inPip,
                 onNext = { reportProgress(); onPlayNextEpisode() }, onWatchCredits = { watchCredits = true },
                 modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 24.dp, bottom = 48.dp))

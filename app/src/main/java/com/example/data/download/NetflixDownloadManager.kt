@@ -52,6 +52,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 import java.io.FileOutputStream
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
@@ -132,6 +133,28 @@ class NetflixDownloadManager(
 
     private val _pausedDownloadKeys = MutableStateFlow<Set<String>>(emptySet())
     val pausedDownloadKeys: StateFlow<Set<String>> = _pausedDownloadKeys.asStateFlow()
+
+    private val _downloadHealth = MutableStateFlow<Map<String, DownloadInspection>>(emptyMap())
+    val downloadHealth: StateFlow<Map<String, DownloadInspection>> = _downloadHealth.asStateFlow()
+
+    /** Reading and hashing saved files works offline and never requests a subscription refresh. */
+    suspend fun inspectDownload(profileId: String, key: String): DownloadInspection = withContext(Dispatchers.IO) {
+        val saved = repository.getDownloadsOnce(profileId).firstOrNull { it.downloadKey == key }
+            ?: return@withContext DownloadInspection(DownloadHealth.UNAVAILABLE)
+        if (activeJobs[key]?.isActive == true) return@withContext DownloadInspection(DownloadHealth.UNAVAILABLE)
+        _downloadHealth.update { it + (key to DownloadInspection(DownloadHealth.CHECKING)) }
+        val checkContext = currentCoroutineContext()
+        val result = try { transferLocks.getOrPut(key) { Mutex() }.withLock {
+            DownloadIntegrity.inspect(downloadsDir, key, saved.localFilePath) { checkContext.ensureActive() }
+        } }
+        catch (cancelled: CancellationException) {
+            _downloadHealth.update { it - key }
+            throw cancelled
+        }
+        catch (_: Exception) { DownloadInspection(DownloadHealth.UNAVAILABLE) }
+        _downloadHealth.update { it + (key to result) }
+        result
+    }
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents: SharedFlow<String> = _toastEvents.asSharedFlow()
@@ -426,10 +449,12 @@ class NetflixDownloadManager(
         isHighQuality: Boolean,
         maxVideoHeight: Int = Int.MAX_VALUE
     ) = withContext(Dispatchers.IO) {
+        val recoveryContext = currentCoroutineContext()
         val saved = requests[key]
         if (saved?.completedPath != null) {
             val completed = File(saved.completedPath)
-            if (completed.isFile && completed.length() == saved.completedBytes && saved.completedBytes > 0) {
+            if (completed.isFile && completed.length() == saved.completedBytes && saved.completedBytes > 0 &&
+                (saved.completedSha256 == null || DownloadIntegrity.checksum(completed, checkCancelled = { recoveryContext.ensureActive() }) == saved.completedSha256)) {
                 commitCompletedDownload(saved)
                 return@withContext
             }
@@ -458,14 +483,14 @@ class NetflixDownloadManager(
         isHighQuality: Boolean, resolvedStream: com.example.data.NetMirrorStream, maxVideoHeight: Int = Int.MAX_VALUE
     ) = withContext(Dispatchers.IO + DownloadSourceContext(resolvedStream.sourceId)) {
         val itemTitle = if (episodeTitle != null) "${media.title} ($episodeTitle)" else media.title
+        File(downloadsDir, "$key.integrity.next").delete()
         val targetUrl = resolvedStream.url
         val targetHeaders = resolvedStream.headers
         val extension = if (DownloadTransferPolicy.isHls(targetUrl) || targetUrl.substringBefore('?').endsWith(".ts")) "ts" else "mp4"
         var destinationFile = File(downloadsDir, "$key.$extension")
         val partFile = File(downloadsDir, "$key.mp4.part")
         val sourceFile = File(downloadsDir, "$key.source")
-        val sourceFingerprint = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(targetUrl.toByteArray()).joinToString("") { "%02x".format(it) }
+        val sourceFingerprint = DownloadIntegrity.sourceIdentity(targetUrl)
         if (!sourceFile.isFile || sourceFile.readText() != sourceFingerprint) {
             // HLS owns durable segment checkpoints. Direct resumes require a server validator
             // when the signed resource URL changes, otherwise restarting is safer than corruption.
@@ -507,11 +532,19 @@ class NetflixDownloadManager(
             currentCoroutineContext().ensureActive()
             val request = requests[key] ?: throw CancellationException("Download was canceled")
             check(request.accountId == accountIdProvider() && request.profileId == profileId) { "Download account changed" }
+            val finalizationContext = currentCoroutineContext()
             val completed = request.copy(completedPath = destinationFile.absolutePath,
-                completedBytes = partFile.length(), mediaBytes = mediaBytes, localCaptionsJson = serializeCaptions(localCaptions))
+                completedBytes = partFile.length(), mediaBytes = mediaBytes, localCaptionsJson = serializeCaptions(localCaptions),
+                completedSha256 = DownloadIntegrity.checksum(partFile, checkCancelled = { finalizationContext.ensureActive() }))
+            if (isOfflineBundle) {
+                DownloadIntegrity.write(downloadsDir, key, DownloadIntegrity.bundleReceipt(downloadsDir, key, partFile) { finalizationContext.ensureActive() }, pending = true)
+            } else if (!File(downloadsDir, "$key.integrity.next").isFile) {
+                val validator = File(downloadsDir, "$key.validator").takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }
+                DownloadIntegrity.write(downloadsDir, key, DownloadIntegrity.directReceipt(partFile, destinationFile.name, validator, sourceFingerprint) { finalizationContext.ensureActive() }, pending = true)
+            }
             requestStore.put(completed)
             requests[key] = completed
-            if (destinationFile.exists()) require(destinationFile.delete()) { "Could not replace completed download" }
+            // rename(2) replaces the previous completed asset atomically; keep it usable until then.
             require(partFile.renameTo(destinationFile)) { "Could not finalize download" }
             commitCompletedDownload(completed)
             sourceFile.delete()
@@ -526,6 +559,8 @@ class NetflixDownloadManager(
         currentCoroutineContext().ensureActive()
         check(request.accountId == accountIdProvider()) { "Download account changed" }
         val key = request.task.downloadKey
+        DownloadIntegrity.promote(downloadsDir, key)
+        _downloadHealth.update { it - key }
         repository.addDownload(request.profileId, request.media.id, request.media.title, request.task.episodeTitle,
             (((request.mediaBytes.takeIf { it > 0 } ?: request.completedBytes) + 1024 * 1024 - 1) / (1024 * 1024)).toInt(), request.episode?.id,
             request.completedPath, "", request.localCaptionsJson, request.isForYou)
@@ -609,6 +644,8 @@ class NetflixDownloadManager(
         media: MediaItem,
         episodeTitle: String?
     ): Boolean = withContext(Dispatchers.IO) {
+        if (repairDirectRanges(streamUrl, headers, partFile, key, media, episodeTitle)) return@withContext true
+        if (_pausedDownloadKeys.value.contains(key)) return@withContext false
         val existingBytes = if (partFile.exists()) partFile.length() else 0L
         val validatorFile = File(downloadsDir, "$key.validator")
         val validator = validatorFile.takeIf { it.isFile }?.readText()?.takeIf { it.isNotBlank() }
@@ -673,6 +710,78 @@ class NetflixDownloadManager(
         }
     }
 
+    /** Repair only damaged ranges when the server proves the saved resource is unchanged. */
+    private suspend fun repairDirectRanges(
+        url: String, headers: Map<String, String>, partFile: File, key: String,
+        media: MediaItem, episodeTitle: String?
+    ): Boolean {
+        val receipt = DownloadIntegrity.read(downloadsDir, key)?.takeIf {
+            it.kind == "direct" && it.identity == DownloadIntegrity.sourceIdentity(url)
+        } ?: run {
+            // A sparse repair staging file is not a valid progressive prefix for a different URL.
+            if (DownloadIntegrity.read(downloadsDir, key)?.kind == "direct") {
+                partFile.delete(); File(downloadsDir, "$key.validator").delete()
+            }
+            return false
+        }
+        val validator = receipt.validator?.takeIf(DownloadRangeRepairPolicy::strongValidator) ?: return false
+        val chunks = receipt.chunks
+        if (chunks.map { it.path }.distinct().size != 1) return false
+        val existing = DownloadIntegrity.safeFile(downloadsDir, chunks.first().path)
+        val total = chunks.sumOf { it.length }
+        suspend fun requestRange(start: Long, length: Long, copy: suspend (okhttp3.Response) -> Unit): Boolean {
+            val end = start + length - 1
+            return withResponse(downloadRequest(url, headers).newBuilder()
+                .header("Range", "bytes=$start-$end").header("If-Range", validator).build()) { response ->
+                if (response.code in setOf(401, 403, 408, 429) || response.code >= 500) throw DownloadHttpException(response.code)
+                val current = response.header("ETag")?.takeUnless { it.startsWith("W/") } ?: response.header("Last-Modified")
+                if (!DownloadRangeRepairPolicy.matches(response.code, response.header("Content-Range"),
+                        response.body?.contentLength() ?: -1, start, length, total, validator, current)) return@withResponse false
+                copy(response); true
+            }
+        }
+        // This one-byte conditional request prevents mixing a newly encoded edition with old bytes.
+        val unchanged = requestRange(0, 1) { response -> require(response.body?.byteStream()?.use { it.read() >= 0 && it.read() == -1 } == true) }
+        if (!unchanged) { partFile.delete(); File(downloadsDir, "$key.validator").delete(); return false }
+        if (partFile.parentFile!!.usableSpace < (total - partFile.length()).coerceAtLeast(0) + 8 * 1024 * 1024L)
+            throw DownloadStorageException()
+        RandomAccessFile(partFile, "rw").use { output ->
+            output.setLength(total)
+            for ((index, chunk) in chunks.withIndex()) {
+                currentCoroutineContext().ensureActive()
+                if (_pausedDownloadKeys.value.contains(key)) return false
+                val partValid = runCatching { DownloadIntegrity.checksum(partFile, chunk.offset, chunk.length) == chunk.sha256 }.getOrDefault(false)
+                if (!partValid) {
+                    if (DownloadIntegrity.intact(downloadsDir, chunk)) {
+                        RandomAccessFile(existing, "r").use { input ->
+                            input.seek(chunk.offset); output.seek(chunk.offset); var remaining = chunk.length; val buffer = ByteArray(64 * 1024)
+                            while (remaining > 0) { currentCoroutineContext().ensureActive(); val n = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt()); check(n > 0); output.write(buffer, 0, n); remaining -= n }
+                        }
+                    } else {
+                        val accepted = requestRange(chunk.offset, chunk.length) { response ->
+                            val body = response.body ?: throw IOException("Empty repair response")
+                            output.seek(chunk.offset); var remaining = chunk.length; val buffer = ByteArray(64 * 1024)
+                            body.byteStream().use { input ->
+                                while (remaining > 0) { currentCoroutineContext().ensureActive(); val n = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt()); if (n < 0) throw IOException("Repair response was interrupted"); output.write(buffer, 0, n); remaining -= n }
+                                if (input.read() != -1) throw IOException("Repair response exceeds its range")
+                            }
+                        }
+                        if (!accepted) { output.setLength(0); File(downloadsDir, "$key.validator").delete(); return false }
+                        if (DownloadIntegrity.checksum(partFile, chunk.offset, chunk.length) != chunk.sha256) throw IOException("Repair response did not match the saved video")
+                    }
+                }
+                val progress = DownloadTransferPolicy.progress((index + 1).toLong(), chunks.size.toLong())
+                updateTask(DownloadTaskInfo(key, media.id, media.title, episodeTitle = episodeTitle,
+                    progress = progress, downloadedBytes = chunk.offset + chunk.length, totalBytes = total,
+                    speedFormatted = "Repairing download", status = DownloadTaskStatus.DOWNLOADING))
+                _downloadingProgress.update { it + (key to progress) }
+            }
+            output.fd.sync()
+        }
+        File(downloadsDir, "$key.validator").writeText(validator)
+        return true
+    }
+
     internal suspend fun downloadHlsStream(
         streamUrl: String, headers: Map<String, String>, partFile: File, key: String,
         media: MediaItem, episodeTitle: String?, isHighQuality: Boolean, maxVideoHeight: Int = Int.MAX_VALUE,
@@ -710,7 +819,11 @@ class NetflixDownloadManager(
         val variantUrl = selected.url
         val playlist = if (variantUrl == streamUrl) manifest else fetchPlaylist(variantUrl)
         val segments = DownloadTransferPolicy.hlsSegments(playlist, variantUrl)
-        val store = HlsSegmentStore(File(partFile.parentFile, "$key.segments"), HlsSegmentStore.identity(playlist, segments, isHighQuality))
+        val identity = HlsSegmentStore.identity(playlist, segments, isHighQuality)
+        val store = HlsSegmentStore(File(partFile.parentFile, "$key.segments"), identity)
+        val repairContext = currentCoroutineContext()
+        DownloadIntegrity.seedHls(downloadsDir, key, identity, store, segments.size) { repairContext.ensureActive() }
+        val receiptChunks = mutableListOf<DownloadChunk>()
         // Build a fresh assembly from verified whole segments, never append partial TS bytes.
         FileOutputStream(partFile, false).use { output ->
             var totalBytes = 0L
@@ -767,6 +880,7 @@ class NetflixDownloadManager(
                         output.write(buffer, 0, count)
                     }
                 }
+                receiptChunks += DownloadChunk("$key.ts", totalBytes, completed.length(), DownloadIntegrity.checksum(completed))
                 totalBytes += completed.length()
                 val progress = DownloadTransferPolicy.progress((index + 1).toLong(), segments.size.toLong())
                 updateTask(DownloadTaskInfo(key, media.id, media.title, episodeTitle = episodeTitle,
@@ -776,7 +890,10 @@ class NetflixDownloadManager(
             output.fd.sync()
         }
         currentCoroutineContext().ensureActive()
-        partFile.length() > 0L
+        if (partFile.length() > 0L) {
+            DownloadIntegrity.write(downloadsDir, key, DownloadReceipt(kind = "hls", identity = identity, chunks = receiptChunks), pending = true)
+            true
+        } else false
     }
 
     /** Keep separate audio alongside video, without transcoding or expired remote URLs. */
@@ -901,13 +1018,13 @@ class NetflixDownloadManager(
         File(downloadsDir, "$key.segments").deleteRecursively()
         File(downloadsDir, "$key.captions").deleteRecursively()
         File(downloadsDir, "$key.offline").deleteRecursively()
-        for (suffix in listOf(".mp4", ".ts", ".m3u8", ".mp4.part", ".source", ".validator")) {
+        for (suffix in listOf(".mp4", ".ts", ".m3u8", ".mp4.part", ".source", ".validator", ".integrity.json", ".integrity.part", ".integrity.next")) {
             File(downloadsDir, key + suffix).let { if (it.exists()) it.delete() }
         }
     }
 
     private suspend fun deleteUnreferencedFiles(key: String) {
-        if (activeJobs[key]?.isActive != true && !repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
+        if (requests[key] == null && activeJobs[key]?.isActive != true && !repository.isDownloadReferenced(key)) deleteDownloadFiles(key)
     }
 
     suspend fun cancelAndJoinTransfers() {
@@ -935,9 +1052,20 @@ class NetflixDownloadManager(
 
     fun deleteCompletedDownload(profileId: String, downloadKey: String) {
         scope.launch {
+            val pending = requests[downloadKey]?.takeIf { it.profileId == profileId }
             val transfer = activeJobs[downloadKey]?.takeIf { downloadOwners[downloadKey] == profileId }
-            transfer?.cancel()
-            transfer?.join()
+            // Remove this profile's queued repair before cancellation, so an already-dispatched
+            // Worker cannot restore a title after the user explicitly deleted its download.
+            if (pending != null) removeSavedRequest(downloadKey, pending.token)
+            if (pending != null || transfer != null) {
+                workManager.cancelUniqueWork(downloadWorkName(downloadKey)).result.get()
+                transfer?.cancel()
+                transfer?.join()
+                _downloadingProgress.update { it - downloadKey }
+                _downloadTasks.update { it - downloadKey }
+                _pausedDownloadKeys.update { it - downloadKey }
+                downloadOwners.remove(downloadKey, profileId)
+            }
             repository.removeDownload(profileId, downloadKey)
             try {
                 deleteUnreferencedFiles(downloadKey)

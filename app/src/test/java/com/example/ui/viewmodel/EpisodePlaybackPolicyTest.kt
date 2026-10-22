@@ -1,26 +1,32 @@
 package com.example.ui.viewmodel
 
+import com.example.data.PlaybackMarkers
 import org.junit.Assert.*
 import org.junit.Test
 
 class EpisodePlaybackPolicyTest {
-    @Test fun explicitOpeningThemeUsesTheNextDialogueBoundary() {
-        val captions = "1\n00:00:45,000 --> 00:00:58,000\n[Opening theme]\n\n2\n00:01:20,000 --> 00:01:22,000\nHello."
-        assertEquals(IntroWindow(45, 80), EpisodePlaybackPolicy.detectIntro(captions, 1800))
+    @Test fun publishedIntroKeepsItsExactInterval() {
+        assertEquals(IntroWindow(45, 90), EpisodePlaybackPolicy.verifiedIntro(PlaybackMarkers(45_000, 90_000), 1_800_000))
     }
-    @Test fun ordinaryMusicDoesNotSkipDialogue() {
-        assertNull(EpisodePlaybackPolicy.detectIntro("00:00:45.000 --> 00:00:58.000\n[Music playing]", 1800))
+    @Test fun subsecondBoundariesRoundForwardSoSeekingCannotLandInsideTheIntro() {
+        assertEquals(IntroWindow(46, 91), EpisodePlaybackPolicy.verifiedIntro(PlaybackMarkers(45_100, 90_001), 1_800_000))
     }
-    @Test fun missingCaptionsDoNotInventAnIntro() {
-        assertNull(EpisodePlaybackPolicy.detectIntro("", 1800))
+    @Test fun missingOrReversedIntervalsNeverCreateAnIntro() {
+        for (marker in listOf(PlaybackMarkers(), PlaybackMarkers(30_000, null), PlaybackMarkers(-1, 30_000), PlaybackMarkers(30_000, 20_000)))
+            assertNull(EpisodePlaybackPolicy.verifiedIntro(marker, 1_800_000))
     }
-    @Test fun shortVideosNeverSkipPastTheirEnd() {
-        assertNull(EpisodePlaybackPolicy.detectIntro("00:00:45.000 --> 00:01:10.000\n[Opening theme]", 60))
+    @Test fun unknownDurationAndOutOfBoundsMetadataCannotCreateSkipTargets() {
+        assertNull(EpisodePlaybackPolicy.verifiedIntro(PlaybackMarkers(45_000, 90_000), 0))
+        assertNull(EpisodePlaybackPolicy.verifiedIntro(PlaybackMarkers(45_000, 90_000), 60_000))
     }
-    @Test fun ThemeLateInAnEpisodeIsNotAnOpening() {
-        assertNull(EpisodePlaybackPolicy.detectIntro("00:20:45.000 --> 00:21:10.000\n[Opening theme]", 1800))
+    @Test fun lastThirtySecondsWithoutVerifiedCreditsDoNotCreateAPill() {
+        assertFalse(EpisodePlaybackPolicy.hasVerifiedCredits(PlaybackMarkers(), 1_775_000, 1_800_000))
     }
-    @Test fun webVttCueSettingsAreSupported() {
-        assertEquals(IntroWindow(45, 70), EpisodePlaybackPolicy.detectIntro("WEBVTT\n\n00:45.000 --> 01:10.000 align:center\n[Title theme]", 1800))
+    @Test fun creditPillBeginsOnlyAtThePublishedBoundary() {
+        val markers = PlaybackMarkers(outroStart = 1_700_000)
+        assertFalse(EpisodePlaybackPolicy.hasVerifiedCredits(markers, 1_699_999, 1_800_000))
+        assertTrue(EpisodePlaybackPolicy.hasVerifiedCredits(markers, 1_700_000, 1_800_000))
+        assertFalse(EpisodePlaybackPolicy.hasVerifiedCredits(markers, 1_800_001, 1_800_000))
+        assertFalse(EpisodePlaybackPolicy.hasVerifiedCredits(markers, 0, 0))
     }
 }

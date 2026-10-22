@@ -24,8 +24,8 @@ android {
     applicationId = "com.netflixpro.apk"
     minSdk = 24
     targetSdk = 35
-    versionCode = 39
-    versionName = "1.38"
+    versionCode = 40
+    versionName = "1.39"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

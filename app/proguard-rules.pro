@@ -25,3 +25,7 @@
 -keep,allowoptimization,allowshrinking,allowobfuscation class retrofit2.Response
 -if interface * { @retrofit2.http.* public *** *(...); }
 -keep,allowoptimization,allowshrinking,allowobfuscation class <3>
+
+# Download integrity receipts use the same bounded Moshi reflection boundary.
+-keep class com.example.data.download.DownloadReceipt { *; }
+-keep class com.example.data.download.DownloadChunk { *; }

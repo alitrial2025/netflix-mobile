@@ -23,7 +23,8 @@ internal data class SavedDownloadRequest(
     val isForYou: Boolean = false,
     val mediaBytes: Long = 0,
     val automatic: Boolean = isForYou,
-    val schedulerVersion: Int = 0
+    val schedulerVersion: Int = 0,
+    val completedSha256: String? = null
 )
 
 /** Persist intent and display state, never expiring stream URLs, cookies or headers. */

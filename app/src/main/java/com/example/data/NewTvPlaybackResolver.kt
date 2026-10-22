@@ -80,7 +80,7 @@ internal object PlaybackMetadataTracks {
             if (!thumbnail && kind.isNotBlank() && kind !in setOf("subtitles", "captions", "vtt", "srt", "chapters")) return
             result += Caption(url.toString(), label.ifBlank { if (thumbnail) "Thumbnails" else "Unknown language" },
                 if (thumbnail) "thumbnails" else if (kind == "chapters") "chapters" else if (extension == "srt" || kind == "srt") "srt" else "vtt",
-                if (thumbnail) "" else languageCode.ifBlank { "und" })
+                if (thumbnail) "" else languageCode.ifBlank { "und" }, isVerified = kind == "chapters")
         }
         for (name in listOf("tracks", "captions", "subtitles")) {
             val rows = data.optJSONArray(name) ?: continue

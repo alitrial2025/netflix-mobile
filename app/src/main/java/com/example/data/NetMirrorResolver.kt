@@ -54,7 +54,8 @@ data class Caption(
     val url: String,
     val language: String,
     val type: String,
-    val languageCode: String = "und"
+    val languageCode: String = "und",
+    val isVerified: Boolean = false
 )
 
 data class WarmSession(

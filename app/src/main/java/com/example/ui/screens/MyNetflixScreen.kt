@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -124,9 +126,12 @@ fun MyNetflixScreen(
     onOpenSubscription: () -> Unit = {},
     savedMoments: List<SavedMoment> = emptyList(),
     onPlayMoment: (SavedMoment) -> Unit = {},
-    onRemoveMoment: (SavedMoment) -> Unit = {}
+    onRemoveMoment: (SavedMoment) -> Unit = {},
+    onOpenCollectionItem: (com.example.collections.CollectionTitle) -> Unit = {},
+    onWatchTogether: () -> Unit = {}
 ) {
     val platformDesign = com.example.ui.theme.LocalPlatformDesign.current
+    var showCollections by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
     var showAllMoments by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
     var showAllMyList by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
     var showAllLiked by rememberSaveable(activeProfile.id) { mutableStateOf(false) }
@@ -135,6 +140,12 @@ fun MyNetflixScreen(
     val actualWatchlist = remember(watchlist) { watchlist.distinctBy { it.type to it.id } }
     val actualLiked = remember(likedMedia) { likedMedia.distinctBy { it.type to it.id } }
 
+    if (showCollections) {
+        val owner = if (isAuthenticated) com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.takeUnless { it.isAnonymous }?.uid else null
+        com.example.collections.CollectionsDialog(owner, activeProfile.id,
+            actualWatchlist.map { com.example.collections.CollectionTitle(it.id, if (it.type == MediaType.TV_SHOW) "tv" else "movie", it.title, it.posterUrl.orEmpty()) },
+            onOpenTitle = onOpenCollectionItem, onDismiss = { showCollections = false })
+    }
     if (showAllMoments) {
         SavedMomentsDialog(savedMoments, onPlayMoment, onRemoveMoment, onShowToast) { showAllMoments = false }
     }
@@ -277,6 +288,12 @@ fun MyNetflixScreen(
         }
         if (remindedMedia.isNotEmpty()) LibraryPosterRail("Reminders you've set", remindedMedia, "reminders_row", onMediaClick)
 
+        LibraryUtilityRow("Collections", "Organise My List into your own collections", "my_netflix_collections", {
+            if (isAuthenticated) showCollections = true else { onShowToast("Sign in to save collections."); onOpenAuth() }
+        }) { Icon(Icons.Default.FolderOpen, null, tint = Color.White, modifier = Modifier.size(25.dp)) }
+        LibraryUtilityRow("Watch together", "Host or join a watch party on phone and TV", "my_netflix_watch_together", onWatchTogether) {
+            Icon(Icons.Default.Groups, null, tint = Color.White, modifier = Modifier.size(25.dp))
+        }
         LibraryUtilityRow("Downloads", if (downloads.isEmpty()) "Series and films you download appear here"
             else "${downloads.count { it.isComplete }} ready to watch${if (smartDownloadsEnabled) " · Smart Downloads on" else ""}",
             "my_netflix_downloads_card", onOpenDownloads) {
