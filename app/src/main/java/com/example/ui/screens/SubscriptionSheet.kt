@@ -768,6 +768,7 @@ private fun PlanCard(
             Text("${plan.maxDownloads} offline titles per profile • ${plan.catalogAccess}",
                 color = Color.LightGray, fontSize = 12.sp)
             val extras = buildList {
+                if (plan.watchParties) add("Watch parties")
                 if (plan.smartNextEpisode) add("Download Next Episode")
                 if (plan.downloadsForYou) add("Downloads for You")
                 if (plan.games) add("Games")

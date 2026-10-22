@@ -943,7 +943,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
             )
         }
 
-        if (showWatchTogether) com.example.viewing.WatchTogetherDialog(viewModel.viewing) { showWatchTogether = false }
+        if (showWatchTogether) com.example.viewing.WatchTogetherDialog(viewModel.viewing, eligible = userSubscription.isWatchPartyAllowed) { showWatchTogether = false }
         if (showCastDialog) com.example.viewing.ContinueOnTvDialog(viewModel.viewing) { viewModel.openCastDialog(false) }
 
         // Elegant full screen TMDB API loader
@@ -1036,6 +1036,7 @@ fun NetflixApp(viewModel: NetflixViewModel) {
 private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
     var showParty by remember { mutableStateOf(false) }
     val party by viewModel.viewing.party.collectAsStateWithLifecycle()
+    val commentsVisible by viewModel.viewing.commentsVisible.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val highQuality by viewModel.isHighQualityEnabled.collectAsStateWithLifecycle()
     val spatialAudio by viewModel.isSpatialAudioEnabled.collectAsStateWithLifecycle()
@@ -1071,6 +1072,9 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
             onWatchTogether = { showParty = true },
             partyGuest = party?.isHost == false,
             partyActive = party != null,
+            watchParty = party,
+            commentsVisible = commentsVisible && !showParty,
+            partyServerNowMs = viewModel.viewing.serverNowMs(),
             onViewingSample = viewModel::sampleViewing,
             onSetSubtitle = { viewModel.setSubtitleTrack(it) },
             onToggleLock = { viewModel.toggleLock() },
@@ -1102,6 +1106,6 @@ private fun PlayerOverlay(viewModel: NetflixViewModel, autoPlayNext: Boolean) {
             onTrailerEnded = { viewModel.onTrailerPlaybackEnded() }
         )
     }
-    if (showParty) com.example.viewing.WatchTogetherDialog(viewModel.viewing) { showParty = false }
+    if (showParty) com.example.viewing.WatchTogetherDialog(viewModel.viewing, eligible = subscription.isWatchPartyAllowed) { showParty = false }
 
 }

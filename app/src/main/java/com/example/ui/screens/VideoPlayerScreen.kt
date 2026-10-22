@@ -197,6 +197,9 @@ fun VideoPlayerScreen(
     onWatchTogether: () -> Unit = {},
     partyGuest: Boolean = false,
     partyActive: Boolean = false,
+    watchParty: com.example.viewing.WatchParty? = null,
+    commentsVisible: Boolean = true,
+    partyServerNowMs: Long = 0,
     onViewingSample: (Long, Long, Boolean, Boolean) -> com.example.viewing.PartyAdjustment = { _, _, _, _ -> com.example.viewing.PartyAdjustment() },
     streamingAllowed: Boolean = true,
     modifier: Modifier = Modifier
@@ -422,11 +425,11 @@ fun VideoPlayerScreen(
                                 try {
                                     java.util.Locale.forLanguageTag(lang).getDisplayLanguage(java.util.Locale.ENGLISH).ifBlank { lang }
                                 } catch (_: Exception) { lang }
-                            } else "English"
+                            } else "Audio ${audioList.size + 1}"
 
                             val label = when {
                                 rawLabel != null -> rawLabel
-                                displayLang.equals("English", ignoreCase = true) -> "English [Original]"
+                                displayLang.equals("English", ignoreCase = true) -> "English"
                                 else -> displayLang
                             }
                             val isSelected = group.isTrackSelected(i)
@@ -635,17 +638,31 @@ fun VideoPlayerScreen(
         exoPlayer.setPlaybackSpeed(if (partyActive) 1f else playerState.playbackSpeed)
     }
 
-    // Continuously sync ExoPlayer progress to ViewModel
+    val sampleParty by rememberUpdatedState<() -> Unit>({
+        if (playbackActive && exoPlayer.duration > 0 && exoPlayer.currentMediaItem?.mediaId == "${latestPlayerState.media?.id}:${latestPlayerState.episode?.id.orEmpty()}") {
+            val adjustment = latestViewingSample(exoPlayer.currentPosition, exoPlayer.duration,
+                exoPlayer.playWhenReady && exoPlayer.playbackState != Player.STATE_ENDED, exoPlayer.playbackState == Player.STATE_BUFFERING)
+            adjustment.seekMs?.let { exoPlayer.seekTo(it) }
+            adjustment.playing?.let { exoPlayer.playWhenReady = it }
+            adjustment.speed?.let { if (kotlin.math.abs(exoPlayer.playbackParameters.speed - it) > .001f) exoPlayer.setPlaybackSpeed(it) }
+        }
+    })
+    // Publish discrete controls immediately; polling only maintains progress and small drift corrections.
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_PLAYBACK_STATE_CHANGED)) sampleParty()
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
+    }
+    LaunchedEffect(watchParty?.revision, watchParty?.connected) { if (watchParty?.isHost == false) sampleParty() }
     LaunchedEffect(exoPlayer) {
         while (true) {
             if (exoPlayer.isPlaying && playbackActive) reportProgress()
-            if (playbackActive && exoPlayer.duration > 0 && exoPlayer.currentMediaItem?.mediaId == "${latestPlayerState.media?.id}:${latestPlayerState.episode?.id.orEmpty()}") {
-                val adjustment = latestViewingSample(exoPlayer.currentPosition, exoPlayer.duration, exoPlayer.playWhenReady && exoPlayer.playbackState != Player.STATE_ENDED,
-                    exoPlayer.playbackState == Player.STATE_BUFFERING)
-                adjustment.seekMs?.let { exoPlayer.seekTo(it) }
-                adjustment.playing?.let { exoPlayer.playWhenReady = it }
-            }
-            kotlinx.coroutines.delay(500)
+            sampleParty()
+            kotlinx.coroutines.delay(250)
         }
     }
 
@@ -755,208 +772,76 @@ fun VideoPlayerScreen(
         )
     }
 
-    // Audio & Subtitles Dialog
+    // Selections apply immediately; timing controls stay below the two independent track lists.
     if (!inPip && playerState.showAudioSubtitleDialog) {
-        val currentAudioTracks = availableAudioTracks
-        val currentSubTracks = if (availableSubtitleTracks.isNotEmpty()) availableSubtitleTracks else listOf(
-            PlayerTrackOption("off", "Off", "", true)
-        )
-
-        AlertDialog(
-            onDismissRequest = { onShowAudioSubtitles(false) },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Audio & Subtitles", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    IconButton(onClick = { onShowAudioSubtitles(false) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
-                    }
-                }
-            },
-            text = {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        Text(
-                            text = "AUDIO",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
+        PlayerAudioSubtitleSheet(availableAudioTracks,
+            availableSubtitleTracks.ifEmpty { listOf(PlayerTrackOption("off", "Off", "", true)) },
+            playerState.subtitleOffsetMs,
+            onAudio = { track ->
+                if (track.group != null) {
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setOverrideForType(
+                            TrackSelectionOverride(
+                                track.group.mediaTrackGroup,
+                                listOf(track.trackIndex)
+                            )
                         )
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            if (currentAudioTracks.isEmpty()) item { Text("Audio tracks will appear when available.", color = Color.Gray, fontSize = 12.sp) }
-                            items(currentAudioTracks, key = { it.id }) { track ->
-                                val isSelected = track.isSelected
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            if (track.group != null) {
-                                                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                    .buildUpon()
-                                                    .setOverrideForType(
-                                                        TrackSelectionOverride(
-                                                            track.group.mediaTrackGroup,
-                                                            listOf(track.trackIndex)
-                                                        )
-                                                    )
-                                                    .setPreferredAudioLanguage(track.language.ifEmpty { "en" })
-                                                    .build()
-                                            } else if (track.language.isNotEmpty()) {
-                                                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                    .buildUpon()
-                                                    .setPreferredAudioLanguage(track.language)
-                                                    .build()
-                                            }
-                                            availableAudioTracks = availableAudioTracks.map {
-                                                it.copy(isSelected = it.id == track.id)
-                                            }
-                                            onSetAudio(track.name)
-                                        }
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = null,
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = platformDesign.accent,
-                                            unselectedColor = Color.Gray
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = track.name,
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.8f),
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        Text(
-                            text = "SUBTITLES",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(currentSubTracks) { track ->
-                                val isSelected = if (track.id == "off" || track.name == "Off") {
-                                    playerState.subtitleTrack == "Off" || (!currentSubTracks.any { it.id != "off" && it.isSelected } && playerState.subtitleTrack != "Off")
-                                } else {
-                                    playerState.subtitleTrack == track.name || track.isSelected
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            subtitlePreference = track.name
-                                            exactSubtitleChoice = track.group?.let { com.example.data.SubtitleTrackSelection.Choice(it.mediaTrackGroup, track.trackIndex) }
-                                            if (track.id == "off" || track.name == "Off") {
-                                                exactSubtitleChoice = null
-                                                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                    .buildUpon()
-                                                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                                                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                                    .build()
-                                                availableSubtitleTracks = availableSubtitleTracks.map {
-                                                    it.copy(isSelected = it.id == "off" || it.name == "Off")
-                                                }
-                                                onSetSubtitle("Off")
-                                            } else {
-                                                if (track.group != null) {
-                                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                        .buildUpon()
-                                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                                        .setOverrideForType(
-                                                            TrackSelectionOverride(
-                                                                track.group.mediaTrackGroup,
-                                                                listOf(track.trackIndex)
-                                                            )
-                                                        )
-                                                        .setPreferredTextLanguage(track.language.ifEmpty { "und" })
-                                                        .build()
-                                                } else if (track.language.isNotEmpty()) {
-                                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                        .buildUpon()
-                                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                                                        .setPreferredTextLanguage(track.language)
-                                                        .build()
-                                                }
-                                                availableSubtitleTracks = availableSubtitleTracks.map {
-                                                    it.copy(isSelected = it.id == track.id)
-                                                }
-                                                onSetSubtitle(track.name)
-                                                com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference, exactSubtitleChoice)
-                                            }
-                                        }
-                                        .padding(vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = null,
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = platformDesign.accent,
-                                            unselectedColor = Color.Gray
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = track.name,
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.8f),
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                    Text("Subtitle timing", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text(String.format(java.util.Locale.US, "%+.2f s · positive displays later", playerState.subtitleOffsetMs / 1000.0), color = Color.LightGray, fontSize = 12.sp)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        TextButton(onClick = { onSetSubtitleOffset(playerState.subtitleOffsetMs - 250) }, modifier = Modifier.testTag("subtitle_earlier")) { Text("−0.25 s") }
-                        TextButton(onClick = { onSetSubtitleOffset(0) }, modifier = Modifier.testTag("subtitle_timing_reset")) { Text("Reset") }
-                        TextButton(onClick = { onSetSubtitleOffset(playerState.subtitleOffsetMs + 250) }, modifier = Modifier.testTag("subtitle_later")) { Text("+0.25 s") }
-                    }
+                        .setPreferredAudioLanguage(track.language.ifEmpty { "en" })
+                        .build()
+                } else if (track.language.isNotEmpty()) {
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setPreferredAudioLanguage(track.language)
+                        .build()
                 }
+                availableAudioTracks = availableAudioTracks.map {
+                    it.copy(isSelected = it.id == track.id)
+                }
+                onSetAudio(track.name)
             },
-            containerColor = platformDesign.surface,
-            shape = RoundedCornerShape(platformDesign.corner(12.dp)),
-            confirmButton = {
-                TextButton(onClick = { onShowAudioSubtitles(false) }) {
-                    Text("Apply", color = platformDesign.accent, fontWeight = FontWeight.Bold)
+            onSubtitle = { track ->
+                subtitlePreference = track.name
+                exactSubtitleChoice = track.group?.let { com.example.data.SubtitleTrackSelection.Choice(it.mediaTrackGroup, track.trackIndex) }
+                if (track.id == "off" || track.name == "Off") {
+                    exactSubtitleChoice = null
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .build()
+                    availableSubtitleTracks = availableSubtitleTracks.map {
+                        it.copy(isSelected = it.id == "off" || it.name == "Off")
+                    }
+            onSetSubtitle("Off")
+                } else {
+                    if (track.group != null) {
+                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .setOverrideForType(
+                                TrackSelectionOverride(
+                                    track.group.mediaTrackGroup,
+                                    listOf(track.trackIndex)
+                                )
+                            )
+                            .setPreferredTextLanguage(track.language.ifEmpty { "und" })
+                            .build()
+                    } else if (track.language.isNotEmpty()) {
+                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setPreferredTextLanguage(track.language)
+                            .build()
+                    }
+                    availableSubtitleTracks = availableSubtitleTracks.map {
+                        it.copy(isSelected = it.id == track.id)
+                    }
+            onSetSubtitle(track.name)
+                    com.example.data.SubtitleTrackSelection.apply(exoPlayer, subtitlePreference, exactSubtitleChoice)
                 }
-            }
-        )
+            }, onOffset = onSetSubtitleOffset, onDismiss = { onShowAudioSubtitles(false) })
     }
 
     // Episodes Bottom Sheet
@@ -1182,6 +1067,10 @@ fun VideoPlayerScreen(
                 }
             }
         }
+
+        com.example.viewing.PartyCommentPeek(watchParty,
+            commentsVisible && !inPip && !playerState.showControls && !playerState.showAudioSubtitleDialog && !playerState.showEpisodeDrawer && !showSpeedDialog && visiblePlaybackError == null,
+            partyServerNowMs, Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 16.dp))
 
         // Controls overlay (Only visible once resolved)
         AnimatedVisibility(

@@ -31,6 +31,8 @@ class SubscriptionPolicyTest {
             for (plan in plans) {
                 val active = UserSubscription(status = "ACTIVE", planId = plan.id, expiresAt = now + 1)
                 assertTrue(active.isActive)
+                assertEquals(plan.id != "plan_mobile", plan.watchParties)
+                assertEquals(plan.watchParties, active.isWatchPartyAllowed)
                 assertEquals(plan.id != "plan_mobile", active.isTvAllowed)
                 assertEquals(plan.maxVideoHeight, active.maxVideoHeight)
                 assertEquals(plan.maxDownloads, active.maxDownloads)
@@ -41,6 +43,7 @@ class SubscriptionPolicyTest {
                 assertEquals(plan.platforms, active.isPlatformsAllowed)
                 val expired = active.copy(expiresAt = now - com.example.data.RenewalPolicy.GRACE_MS)
                 assertFalse(expired.isActive)
+                assertFalse(expired.isWatchPartyAllowed)
                 assertEquals(0, expired.maxVideoHeight)
                 assertEquals(0, expired.maxDownloads)
                 assertFalse(expired.isSmartNextEpisodeAllowed)
