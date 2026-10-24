@@ -154,6 +154,7 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
     private val publicPlayback = PublicPlaybackResolver(client, catalog = PublicProviderCatalog(context),
         backgroundCatalogRefresh = clientOverride == null, runtimeConfig = publicConfig,
         newTv = NewTvPlaybackResolver(client, endpointCache = NewTvEndpointCache(context)))
+    private val captchaFallback = CaptchaFallbackResolver(context, client, runtimeConfig = publicConfig)
 
     // Domain Seed Pool & Fallback Mirrors discovered from reverse engineering
     private val DOMAIN_POOL = listOf(
@@ -1231,7 +1232,13 @@ class NetMirrorResolver(private val context: Context, clientOverride: OkHttpClie
             val key = "${type}_${tmdbId}_${season}_${episode}"
             streamCache[key]?.takeIf { (if (it.sourceId.contains("[NewTV]")) NewTvPlaybackGate.remainingMs() else PlaybackServiceGate.remainingMs()) == 0L && it.expiresAt - System.currentTimeMillis() > StreamSessionPolicy.EXPIRY_MARGIN_MS }?.let { return@withContext it }
             val info = getTmdbInfo(tmdbId, type, cardTitle, cardYear)
-            val source = publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
+            val source = try {
+                publicPlayback.resolve(info.title, info.year, type, season, episode, tmdbId)
+            } catch (primaryError: PlaybackRateLimitedException) { throw primaryError }
+            catch (primaryError: java.io.IOException) {
+                try { captchaFallback.resolve(info.title, info.year, type, season, episode, tmdbId) }
+                catch (_: java.io.IOException) { throw primaryError }
+            }
             val stream = NetMirrorStream(source.url, source.headers, source.captions, "$label [${source.ott.uppercase()}] [${source.route.label}]", source.expiresAt, info.title)
             if (streamCache.size >= 32) streamCache.keys.firstOrNull()?.let(streamCache::remove)
             streamCache[key] = stream
